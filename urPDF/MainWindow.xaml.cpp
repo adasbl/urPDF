@@ -4,6 +4,10 @@
 #include "MainWindow.g.cpp"
 #endif
 
+extern "C" {
+#include <mupdf/fitz.h>
+}
+
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
 
