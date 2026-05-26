@@ -10,6 +10,12 @@
     Title="urPDF">
 
     <Grid>
-
+        <ScrollViewer ZoomMode="Enabled" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+            <Image x:Name="PdfImageDisplay" Stretch="Uniform" Margin="20"/>
+        </ScrollViewer>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="30">
+            <Button Content="Open PDF" Click="OpenButton_Click" Margin="0,0,10,0"/>
+            <Button Content="Print"/>
+        </StackPanel>
     </Grid>
 </Window>
