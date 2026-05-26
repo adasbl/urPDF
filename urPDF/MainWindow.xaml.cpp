@@ -8,9 +8,10 @@ extern "C" {
 #include <mupdf/fitz.h>
 }
 
+#include <winrt/Windows.Storage.h>
 #include <winrt/Windows.Storage.Pickers.h>
-#include <winrt/Windows.Graphics.Imaging.h>
 #include <winrt/Windows.Storage.Streams.h>
+#include <winrt/Windows.Graphics.Imaging.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <microsoft.ui.xaml.window.h>
 #include <shobjidl_core.h>
@@ -34,12 +35,13 @@ namespace winrt::urPDF::implementation
         this->try_as<::IWindowNative>()->get_WindowHandle(&hwnd);
         filePicker.as<::IInitializeWithWindow>()->Initialize(hwnd);
 
+        // file loading
         auto file = co_await filePicker.PickSingleFileAsync();
         if (!file) co_return;
 
-        // muPDF render
         std::string path = winrt::to_string(file.Path());
 
+        // muPDF render
         fz_context* ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
         fz_register_document_handlers(ctx);
 
@@ -60,7 +62,7 @@ namespace winrt::urPDF::implementation
         int width = fz_pixmap_width(ctx, pix);
         int height = fz_pixmap_height(ctx, pix);
 
-        SoftwareBitmap bitmap(BitmapPixelFormat::Bgra8, width, height);
+        SoftwareBitmap bitmap(BitmapPixelFormat::Bgra8, width, height, BitmapAlphaMode::Premultiplied);
         {
             BitmapBuffer buffer = bitmap.LockBuffer(BitmapBufferAccessMode::Write);
             winrt::Windows::Foundation::IMemoryBufferReference reference = buffer.CreateReference();
