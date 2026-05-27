@@ -22,9 +22,20 @@ using namespace winrt::Windows::Graphics::Imaging;
 using namespace winrt::Microsoft::UI::Xaml::Media::Imaging;
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
+using namespace Microsoft::UI::Composition::SystemBackdrops;
+using namespace Microsoft::UI::Composition;
 
 namespace winrt::urPDF::implementation
 {
+    MainWindow::MainWindow()
+    {
+        InitializeComponent();
+
+        winrt::Microsoft::UI::Xaml::Media::MicaBackdrop backdrop;
+        backdrop.Kind(winrt::Microsoft::UI::Composition::SystemBackdrops::MicaKind::BaseAlt);
+        SystemBackdrop(backdrop);
+    }
+
     winrt::fire_and_forget MainWindow::OpenButton_Click(IInspectable const&, RoutedEventArgs const&)
     {
         FileOpenPicker filePicker;
@@ -51,7 +62,7 @@ namespace winrt::urPDF::implementation
         fz_rect rect = fz_bound_page(ctx, page);    // download page size
         fz_irect bbox = fz_round_rect(rect);
 
-        
+
         fz_pixmap* pix = fz_new_pixmap_with_bbox(ctx, fz_device_bgr(ctx), bbox, NULL, 1);   // pixmap in BGR format
         fz_clear_pixmap_with_value(ctx, pix, 255); // white background
 
@@ -68,7 +79,7 @@ namespace winrt::urPDF::implementation
             winrt::Windows::Foundation::IMemoryBufferReference reference = buffer.CreateReference();
 
             uint8_t* data = reference.data();
-            
+
             memcpy(data, fz_pixmap_samples(ctx, pix), width * height * 4);  // copy pixels from MuPDF to WinUI
         }
 
