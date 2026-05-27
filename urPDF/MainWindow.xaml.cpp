@@ -31,9 +31,13 @@ namespace winrt::urPDF::implementation
     {
         InitializeComponent();
 
+        ExtendsContentIntoTitleBar(true);
+
         winrt::Microsoft::UI::Xaml::Media::MicaBackdrop backdrop;
         backdrop.Kind(winrt::Microsoft::UI::Composition::SystemBackdrops::MicaKind::BaseAlt);
         SystemBackdrop(backdrop);
+
+        SetTitleBar(AppTitleBar());
     }
 
     winrt::fire_and_forget MainWindow::OpenButton_Click(IInspectable const&, RoutedEventArgs const&)
