@@ -27,7 +27,7 @@ using namespace Microsoft::UI::Composition;
 
 namespace winrt::urPDF::implementation
 {
-    MainWindow::MainWindow()
+    MainWindow::MainWindow() 
     {
         InitializeComponent();
 
@@ -38,6 +38,49 @@ namespace winrt::urPDF::implementation
         SystemBackdrop(backdrop);
 
         SetTitleBar(AppTitleBar());
+    }
+
+    // tabView
+    void MainWindow::TabView_Loaded(
+        winrt::Windows::Foundation::IInspectable const& sender,
+        winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+    {
+        auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
+        TabView_AddButtonClick(tabView, nullptr);
+    }
+
+    void MainWindow::TabView_AddButtonClick(
+        winrt::Microsoft::UI::Xaml::Controls::TabView const& sender,
+        winrt::Windows::Foundation::IInspectable const& args)
+    {
+        winrt::Microsoft::UI::Xaml::Controls::TabViewItem newTab;
+
+        newTab.Header(winrt::box_value(L"New document"));
+        winrt::Microsoft::UI::Xaml::Controls::SymbolIconSource tabIcon;
+        tabIcon.Symbol(winrt::Microsoft::UI::Xaml::Controls::Symbol::Document);
+        newTab.IconSource(tabIcon);
+
+        winrt::Microsoft::UI::Xaml::Controls::TextBlock newTabText;
+        newTabText.Text(L"Here the document will be displayed");
+        newTabText.HorizontalAlignment(winrt::Microsoft::UI::Xaml::HorizontalAlignment::Center);
+        newTabText.VerticalAlignment(winrt::Microsoft::UI::Xaml::VerticalAlignment::Center);
+
+        newTab.Content(newTabText);
+
+        sender.TabItems().Append(newTab);
+
+        sender.SelectedItem(newTab);
+    }
+
+    void MainWindow::TabView_TabCloseRequested(
+        winrt::Microsoft::UI::Xaml::Controls::TabView const& sender,
+        winrt::Microsoft::UI::Xaml::Controls::TabViewTabCloseRequestedEventArgs const& args)
+    {
+        uint32_t index;
+        if (sender.TabItems().IndexOf(args.Tab(), index))
+        {
+            sender.TabItems().RemoveAt(index);
+        }
     }
 
     winrt::fire_and_forget MainWindow::OpenButton_Click(IInspectable const&, RoutedEventArgs const&)

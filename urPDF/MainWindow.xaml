@@ -7,7 +7,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
     Title="urPDF">
-
+    
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="40"/>
@@ -15,7 +15,28 @@
         </Grid.RowDefinitions>
 
         <Border x:Name="AppTitleBar" Grid.Row="0" Background="Transparent">
-            <TextBlock Text="UrPDF" VerticalAlignment="Center" Margin="16,0,0,0" FontWeight="SemiBold"/>
+            <Border.ContextFlyout>
+                <MenuFlyout>
+                    <MenuFlyoutItem Text="About urPDF"/>
+                    <MenuFlyoutItem Text="Preferences"/>
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="Exit"/>
+                </MenuFlyout>
+            </Border.ContextFlyout>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="40"/>
+                    <RowDefinition Height="40"/>
+                </Grid.RowDefinitions>
+                
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                
+                <TextBlock Grid.Column="0" Text="UrPDF" VerticalAlignment="Center" Margin="16,0,0,0" FontWeight="SemiBold"/>
+                <TabView Grid.Column="1" HorizontalAlignment="Stretch" AddTabButtonClick="TabView_AddButtonClick" TabCloseRequested="TabView_TabCloseRequested" Loaded="TabView_Loaded"  />
+            </Grid>
         </Border>
         
         <Grid Grid.Row="1">
@@ -24,8 +45,14 @@
             </ScrollViewer>
 
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="30">
-                <Button Content="Open PDF" Click="OpenButton_Click" Margin="0,0,10,0"/>
-                <Button Content="Print" Margin="0,0,10,0"/>
+                <Button Click="OpenButton_Click" Margin="0,0,10,0">
+                    <FontIcon Glyph="&#xE8A5;"/>
+                </Button>
+                <Button Margin="0,0,10,0">
+                    <Button.Content>
+                        <FontIcon Glyph="&#xE749;"/>
+                    </Button.Content>
+                </Button>
                 <Button Content="Settings" Margin="0,0,10,0"/>
             </StackPanel>
         </Grid>
