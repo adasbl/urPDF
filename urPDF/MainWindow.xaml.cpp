@@ -83,6 +83,23 @@ namespace winrt::urPDF::implementation
         }
     }
 
+    void MainWindow::TabView_SelectionChanged(
+        winrt::Windows::Foundation::IInspectable const& sender,
+        winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& args) 
+    {
+        auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
+
+        auto currentTab = tabView.SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+
+        if (currentTab) 
+        {
+            auto savedSource = currentTab.Tag().try_as<winrt::Microsoft::UI::Xaml::Media::Imaging::SoftwareBitmapSource>();
+
+            PdfImageDisplay().Source(savedSource);
+        }
+    }
+       
+
     winrt::fire_and_forget MainWindow::OpenButton_Click(IInspectable const&, RoutedEventArgs const&)
     {
         FileOpenPicker filePicker;
@@ -134,6 +151,13 @@ namespace winrt::urPDF::implementation
         SoftwareBitmapSource source;
         co_await source.SetBitmapAsync(bitmap);
         PdfImageDisplay().Source(source);
+
+        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        if (currentTab)
+        {
+            currentTab.Tag(source);
+            currentTab.Header(winrt::box_value(file.Name()));
+        }
 
         // memory cleanup 
         fz_drop_device(ctx, dev);

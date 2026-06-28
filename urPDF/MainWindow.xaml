@@ -35,7 +35,11 @@
                 </Grid.ColumnDefinitions>
                 
                 <TextBlock Grid.Column="0" Text="UrPDF" VerticalAlignment="Center" Margin="16,0,0,0" FontWeight="SemiBold"/>
-                <TabView Grid.Column="1" HorizontalAlignment="Stretch" AddTabButtonClick="TabView_AddButtonClick" TabCloseRequested="TabView_TabCloseRequested" Loaded="TabView_Loaded"  />
+                <TabView x:Name="MainTabView"  Grid.Column="1" HorizontalAlignment="Stretch" 
+                         AddTabButtonClick = "TabView_AddButtonClick" 
+                         TabCloseRequested = "TabView_TabCloseRequested" 
+                         Loaded = "TabView_Loaded"  
+                         SelectionChanged = "TabView_SelectionChanged"/>
             </Grid>
         </Border>
         
