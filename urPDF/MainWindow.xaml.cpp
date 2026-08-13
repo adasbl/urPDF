@@ -20,6 +20,7 @@
     #include <winrt/Microsoft.UI.Dispatching.h>
     #include <string>
     #include <memory>
+    #include <coroutine>
 
     using namespace winrt::Windows::Storage::Pickers;
     using namespace winrt::Windows::Graphics::Imaging;
@@ -73,17 +74,28 @@
             TabView_AddButtonClick(tabView, nullptr);
         }
 
+        auto resume_foreground(winrt::Microsoft::UI::Dispatching::DispatcherQueue const& dispatcher)
+        {
+            struct awaitable
+            {
+                winrt::Microsoft::UI::Dispatching::DispatcherQueue m_dispatcher;
+                bool await_ready() const noexcept { return false; }
+                void await_suspend(std::coroutine_handle<> handle) const
+                {
+                    m_dispatcher.TryEnqueue([handle]() { handle(); });
+                }
+                void await_resume() const noexcept {}
+            };
+            return awaitable{ dispatcher };
+        }
+
         winrt::fire_and_forget MainWindow::OpenPdfFileAsync(IInspectable const&, RoutedEventArgs const&)
         {
             // TODO: add check if empty tab is opened
-            winrt::Microsoft::UI::Xaml::Controls::TabViewItem newTab;
-        
-
-            // OPEN FILE AND CHECK THE PATH
             FileOpenPicker filePicker;
             filePicker.FileTypeFilter().Append(L".pdf");
 
-            HWND hwnd;  // PICKER WINDOW
+            HWND hwnd;
             this->try_as<::IWindowNative>()->get_WindowHandle(&hwnd);
             filePicker.as<::IInitializeWithWindow>()->Initialize(hwnd);
 
@@ -91,8 +103,13 @@
             if (!file) co_return;
 
             std::string filePath = winrt::to_string(file.Path());
+            winrt::hstring fileName = file.Name();
+
             auto PdfInfo = std::make_shared<PdfTabInfo>(m_ctx, filePath);
-            PdfInfo->m_fileName = file.Name();
+            PdfInfo->m_fileName = fileName;
+                   
+            winrt::Microsoft::UI::Xaml::Controls::TabViewItem newTab;
+            newTab.Header(winrt::box_value(fileName));
 
             winrt::Microsoft::UI::Xaml::Controls::SymbolIconSource tabIcon;
             tabIcon.Symbol(winrt::Microsoft::UI::Xaml::Controls::Symbol::Document);
@@ -104,7 +121,7 @@
             m_openedTabs[newTab] = PdfInfo;
 
             co_await RenderPageAsync(1.0, PdfInfo);
-        }
+        }  
 
         winrt::Windows::Foundation::IAsyncAction MainWindow::RenderPageAsync(double zoomFactor, std::shared_ptr<PdfTabInfo> PdfTab)
         {
@@ -140,25 +157,24 @@
             fz_drop_pixmap(m_ctx, pix);
             fz_drop_page(m_ctx, page);
 
-            DispatcherQueue().TryEnqueue([this, bitmap, PdfTab]() -> winrt::fire_and_forget
-                {
-                    SoftwareBitmapSource bitmap_source;
-                    co_await bitmap_source.SetBitmapAsync(bitmap);
+            co_await resume_foreground(DispatcherQueue());
 
-                    winrt::Microsoft::UI::Xaml::Controls::Image img;
-                    img.Source(bitmap_source);
-                    img.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 10 });
+            SoftwareBitmapSource bitmap_source;
+            co_await bitmap_source.SetBitmapAsync(bitmap);
 
-                    PagesContainer().Children().Clear();
-                    PagesContainer().Children().Append(img);
+            winrt::Microsoft::UI::Xaml::Controls::Image img;
+            img.Source(bitmap_source);
+            img.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 10 });
 
-                    auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
-                    if (currentTab)
-                    {
-                        currentTab.Tag(bitmap_source);
-                        currentTab.Header(winrt::box_value(PdfTab->m_fileName));
-                    }
-                });
+            PagesContainer().Children().Clear();
+            PagesContainer().Children().Append(img);
+
+            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+            if (currentTab)
+            {
+                currentTab.Tag(bitmap_source);
+                currentTab.Header(winrt::box_value(PdfTab->m_fileName));
+            }
         }
 
         // TABVIEW MENAGEMENT
@@ -209,8 +225,17 @@
             if (currentTab)
             {
                 auto savedSource = currentTab.Tag().try_as<winrt::Microsoft::UI::Xaml::Media::Imaging::SoftwareBitmapSource>();
+                
+                PagesContainer().Children().Clear();
 
-                MainTabView().SelectedItem(savedSource);
+                if (savedSource)
+                {
+                    winrt::Microsoft::UI::Xaml::Controls::Image img;
+                    img.Source(savedSource);
+                    img.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 10 });
+
+                    PagesContainer().Children().Append(img);
+                }
             }
         }
 
