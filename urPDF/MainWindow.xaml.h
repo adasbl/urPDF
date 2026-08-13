@@ -40,6 +40,7 @@ namespace winrt::urPDF::implementation
         winrt::Windows::Foundation::IAsyncAction RenderPageAsync(double zoomFactor, std::shared_ptr<PdfTabInfo> PdfTabInfo);
         void PdfScrollViewer_ViewChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args);
         void ToggleSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        void ThemeSelection_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& e);
 
     private:
         fz_context* m_ctx{ nullptr };

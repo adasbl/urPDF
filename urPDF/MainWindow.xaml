@@ -120,8 +120,19 @@
                     </Button.Content>
                 </Button>
                 <ToggleSwitch
-                    OffContent="Light" OnContent="Dark" 
-                    Toggled="ToggleSwitch_Toggled"/>        
+                    OffContent="On" OnContent="Off" 
+                    Toggled="ToggleSwitch_Toggled"/>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                    <TextBlock Grid.Column="0" Text="Theme" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <ComboBox
+                        Width="160"
+                        SelectionChanged="ThemeSelection_SelectionChanged"
+                        SelectedIndex="0" >
+                        <ComboBoxItem Content="Default (System)" Tag="Default"/>
+                        <ComboBoxItem Content="Light" Tag="Light"/>
+                        <ComboBoxItem Content="Dark" Tag="Dark"/>
+                    </ComboBox>
+                </StackPanel>
             </StackPanel>
         </Grid>
         

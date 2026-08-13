@@ -297,5 +297,10 @@
                 // TODO
             }
         }
-        
+
+        void MainWindow::ThemeSelection_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& e)
+        {
+
+        }
     }
+    
