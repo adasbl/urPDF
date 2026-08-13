@@ -108,17 +108,31 @@
             auto PdfInfo = std::make_shared<PdfTabInfo>(m_ctx, filePath);
             PdfInfo->m_fileName = fileName;
                    
-            winrt::Microsoft::UI::Xaml::Controls::TabViewItem newTab;
-            newTab.Header(winrt::box_value(fileName));
+            winrt::Microsoft::UI::Xaml::Controls::TabViewItem targetTab;
+            
+            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+
+            bool isCurrentTabEmpty = currentTab && !m_openedTabs.contains(currentTab);
+
+            if (isCurrentTabEmpty) 
+            {
+                targetTab = currentTab;
+                targetTab.Content(nullptr);
+            }
+            else
+            {
+                targetTab = winrt::Microsoft::UI::Xaml::Controls::TabViewItem();
+
+                MainTabView().TabItems().Append(targetTab);
+                MainTabView().SelectedItem(targetTab);
+            }
+            targetTab.Header(winrt::box_value(fileName));
 
             winrt::Microsoft::UI::Xaml::Controls::SymbolIconSource tabIcon;
             tabIcon.Symbol(winrt::Microsoft::UI::Xaml::Controls::Symbol::Document);
-            newTab.IconSource(tabIcon);
+            targetTab.IconSource(tabIcon);
 
-            MainTabView().TabItems().Append(newTab);
-            MainTabView().SelectedItem(newTab);
-
-            m_openedTabs[newTab] = PdfInfo;
+            m_openedTabs[targetTab] = PdfInfo;
 
             co_await RenderPageAsync(1.0, PdfInfo);
         }  
