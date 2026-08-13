@@ -22,13 +22,15 @@
     #include <memory>
     #include <coroutine>
 
+    using namespace winrt;
     using namespace winrt::Windows::Storage::Pickers;
     using namespace winrt::Windows::Graphics::Imaging;
+    using namespace winrt::Windows::Storage;
     using namespace winrt::Microsoft::UI::Xaml::Media::Imaging;
-    using namespace winrt;
     using namespace Microsoft::UI::Xaml;
     using namespace Microsoft::UI::Composition::SystemBackdrops;
     using namespace Microsoft::UI::Composition;
+    
 
     namespace winrt::urPDF::implementation
     {
@@ -87,6 +89,24 @@
                 void await_resume() const noexcept {}
             };
             return awaitable{ dispatcher };
+        }
+
+        void SaveSettings()
+        {
+            auto localSettings = ApplicationData::Current().LocalSettings();
+
+            localSettings.Values().Insert(L"AppTheme", winrt::box_value(L"Dark"));
+            localSettings.Values().Insert(L"AutoSaveEnabled", winrt::box_value(true));
+        }
+
+        void LoadSettings()
+        {
+            auto localSettings = ApplicationData::Current().LocalSettings();
+
+            if (localSettings.Values().HasKey(L"AppTheme"))
+            {
+                winrt::hstring theme = winrt::unbox_value<winrt::hstring>(localSettings.Values().Lookup(L"AppTheme"));
+            }
         }
 
         winrt::fire_and_forget MainWindow::OpenPdfFileAsync(IInspectable const&, RoutedEventArgs const&)
@@ -193,9 +213,11 @@
 
         // TABVIEW MENAGEMENT
         void MainWindow::TabView_AddButtonClick(
-            winrt::Microsoft::UI::Xaml::Controls::TabView const& sender,
+            winrt::Windows::Foundation::IInspectable const& sender,
             winrt::Windows::Foundation::IInspectable const& args)
         {
+            auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
+
             winrt::Microsoft::UI::Xaml::Controls::TabViewItem newTab;
 
             newTab.Header(winrt::box_value(L"New document"));
@@ -210,21 +232,23 @@
 
             newTab.Content(newTabText);
 
-            sender.TabItems().Append(newTab);
+            tabView.TabItems().Append(newTab);
 
-            sender.SelectedItem(newTab);
+            tabView.SelectedItem(newTab);
         }
 
         void MainWindow::TabView_TabCloseRequested(
-            winrt::Microsoft::UI::Xaml::Controls::TabView const& sender,
+            winrt::Windows::Foundation::IInspectable const& sender,
             winrt::Microsoft::UI::Xaml::Controls::TabViewTabCloseRequestedEventArgs const& args)
         {
+            auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
+
             m_openedTabs.erase(args.Tab());
             
             uint32_t index;
-            if (sender.TabItems().IndexOf(args.Tab(), index))
+            if (tabView.TabItems().IndexOf(args.Tab(), index))
             {
-                sender.TabItems().RemoveAt(index);
+                tabView.TabItems().RemoveAt(index);
             }
         }
 
@@ -259,4 +283,19 @@
         {
             // TODO
         }
+
+        void MainWindow::ToggleSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args)
+        {
+            auto toggleSwitch = sender.as<winrt::Microsoft::UI::Xaml::Controls::ToggleSwitch>();
+
+            if (toggleSwitch.IsOn())
+            {
+                // TODO
+            }
+            else
+            {
+                // TODO
+            }
+        }
+        
     }

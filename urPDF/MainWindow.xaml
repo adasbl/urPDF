@@ -119,6 +119,9 @@
                         </StackPanel>
                     </Button.Content>
                 </Button>
+                <ToggleSwitch
+                    OffContent="Light" OnContent="Dark" 
+                    Toggled="ToggleSwitch_Toggled"/>        
             </StackPanel>
         </Grid>
         
