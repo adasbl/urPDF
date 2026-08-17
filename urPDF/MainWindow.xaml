@@ -7,10 +7,13 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
     Title="urPDF">
-    
-    <Grid>
+
+    <Window.SystemBackdrop>
+        <MicaBackdrop />
+    </Window.SystemBackdrop>
+
+    <Grid Background="Transparent">
         <Grid.RowDefinitions>
-            <RowDefinition Height="40"/>
             <RowDefinition Height="40"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
@@ -24,124 +27,135 @@
                     <MenuFlyoutItem Text="Exit"/>
                 </MenuFlyout>
             </Border.ContextFlyout>
+
             <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="40"/>
-                    <RowDefinition Height="40"/>
-                </Grid.RowDefinitions>
-                
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                
-                <TextBlock Grid.Column="0" Text="UrPDF" VerticalAlignment="Center" Margin="16,8,8,0" FontWeight="SemiBold"/>
-                <TabView x:Name="MainTabView"  Grid.Column="1" HorizontalAlignment="Stretch" 
-                         AddTabButtonClick = "TabView_AddButtonClick" 
-                         TabCloseRequested = "TabView_TabCloseRequested" 
-                         Loaded = "TabView_Loaded"  
-                         SelectionChanged = "TabView_SelectionChanged"/>
+
+                <TextBlock Grid.Column="0" Text="UrPDF" VerticalAlignment="Center" Margin="16,0,8,0" FontWeight="SemiBold"/>
+                <TabView x:Name="MainTabView" Grid.Column="1" HorizontalAlignment="Stretch" 
+                         AddTabButtonClick="TabView_AddButtonClick" 
+                         TabCloseRequested="TabView_TabCloseRequested" 
+                         Loaded="TabView_Loaded"  
+                         SelectionChanged="TabView_SelectionChanged"/>
             </Grid>
         </Border>
-        
-        <Grid Grid.Row="1">
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,4,0,0">
-                <Button Click="OpenPdfFileAsync" Margin="10,0,10,0">
-                    <Button.Content>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE8A5;"/>
-                            <TextBlock Text="Open file" VerticalAlignment="Center"/>
+
+        <Border Grid.Row="1"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1,1,1,0"
+                CornerRadius="8,8,0,0">
+
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0" Margin="10,8,10,8">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Spacing="4">
+                        <Button Click="OpenPdfFileAsync">
+                            <Button.Content>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE8A5;"/>
+                                    <TextBlock Text="Open file" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+                        <Button>
+                            <Button.Content>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE749;"/>
+                                    <TextBlock Text="Print" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+                        <Button>
+                            <Button.Content>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE713;"/>
+                                    <TextBlock Text="Settings"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+                        <Button>
+                            <Button.Content>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE8A3;"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+                        <Button>
+                            <Button.Content>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE71F;"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+                        <Button>
+                            <Button.Content>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE7AD;"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+                        <Button>
+                            <Button.Content>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE9A6;"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+                        <Button>
+                            <Button.Content>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE89A;"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+                        <Button>
+                            <Button.Content>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE760;"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+                        <Button>
+                            <Button.Content>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE761;"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+                        <ToggleSwitch
+                            OffContent="On" OnContent="Off" 
+                            Toggled="ToggleSwitch_Toggled"/>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8" Margin="8,0,0,0">
+                            <TextBlock Text="Theme" VerticalAlignment="Center"/>
+                            <ComboBox
+                                Width="160"
+                                SelectionChanged="ThemeSelection_SelectionChanged"
+                                SelectedIndex="0">
+                                <ComboBoxItem Content="Default (System)" Tag="Default"/>
+                                <ComboBoxItem Content="Light" Tag="Light"/>
+                                <ComboBoxItem Content="Dark" Tag="Dark"/>
+                            </ComboBox>
                         </StackPanel>
-                    </Button.Content>
-                </Button>
-                <Button Margin="0,0,10,0">
-                    <Button.Content>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE749;"/>
-                            <TextBlock Text="Print" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Button.Content>
-                </Button>
-                <Button Margin="0,0,10,0">
-                    <Button.Content>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE713;"/>
-                            <TextBlock Text="Settings"/>
-                        </StackPanel>
-                    </Button.Content>
-                </Button>
-                <Button Margin="0,0,10,0">
-                    <Button.Content>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE8A3;"/>
-                        </StackPanel>
-                    </Button.Content>
-                </Button>
-                <Button Margin="0,0,10,0">
-                    <Button.Content>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE71F;"/>
-                        </StackPanel>
-                    </Button.Content>
-                </Button>
-                <Button Margin="0,0,10,0">
-                    <Button.Content>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE7AD;"/>
-                        </StackPanel>
-                    </Button.Content>
-                </Button>
-                <Button Margin="0,0,10,0">
-                    <Button.Content>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE9A6;"/>
-                        </StackPanel>
-                    </Button.Content>
-                </Button>
-                <Button Margin="0,0,10,0">
-                    <Button.Content>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE89A;"/>
-                        </StackPanel>
-                    </Button.Content>
-                </Button>
-                <Button Margin="0,0,10,0">
-                    <Button.Content>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE760;"/>
-                        </StackPanel>
-                    </Button.Content>
-                </Button>
-                <Button Margin="0,0,10,0">
-                    <Button.Content>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE761;"/>
-                        </StackPanel>
-                    </Button.Content>
-                </Button>
-                <ToggleSwitch
-                    OffContent="On" OnContent="Off" 
-                    Toggled="ToggleSwitch_Toggled"/>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
-                    <TextBlock Grid.Column="0" Text="Theme" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <ComboBox
-                        Width="160"
-                        SelectionChanged="ThemeSelection_SelectionChanged"
-                        SelectedIndex="0" >
-                        <ComboBoxItem Content="Default (System)" Tag="Default"/>
-                        <ComboBoxItem Content="Light" Tag="Light"/>
-                        <ComboBoxItem Content="Dark" Tag="Dark"/>
-                    </ComboBox>
-                </StackPanel>
-            </StackPanel>
-        </Grid>
-        
-        <Grid Grid.Row="2">
-            <ScrollViewer x:Name="PdfScrollViewer" 
-              ZoomMode="Enabled" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
-              ViewChanged="PdfScrollViewer_ViewChanged">
-                <StackPanel x:Name="PagesContainer" HorizontalAlignment="Center" Spacing="15" Margin="20"/>
-            </ScrollViewer>
-        </Grid>
+                    </StackPanel>
+                </Grid>
+
+                <ScrollViewer Grid.Row="1"
+                              x:Name="PdfScrollViewer" 
+                              ZoomMode="Enabled" 
+                              HorizontalScrollBarVisibility="Auto" 
+                              VerticalScrollBarVisibility="Auto"
+                              ViewChanged="PdfScrollViewer_ViewChanged">
+                    <StackPanel x:Name="PagesContainer" HorizontalAlignment="Center" Spacing="15" Margin="20"/>
+                </ScrollViewer>
+            </Grid>
+        </Border>
     </Grid>
 </Window>

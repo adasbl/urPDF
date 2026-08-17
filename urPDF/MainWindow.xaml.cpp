@@ -43,9 +43,9 @@
 
             LoadSettings();
 
-            winrt::Microsoft::UI::Xaml::Media::MicaBackdrop backdrop;
-            backdrop.Kind(winrt::Microsoft::UI::Composition::SystemBackdrops::MicaKind::BaseAlt);
-            SystemBackdrop(backdrop);
+            // winrt::Microsoft::UI::Xaml::Media::MicaBackdrop backdrop;
+            // backdrop.Kind(winrt::Microsoft::UI::Composition::SystemBackdrops::MicaKind::BaseAlt);
+            // SystemBackdrop(backdrop);
 
             m_ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
             fz_register_document_handlers(m_ctx);
