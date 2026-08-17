@@ -43,12 +43,10 @@
 
             LoadSettings();
 
-            // winrt::Microsoft::UI::Xaml::Media::MicaBackdrop backdrop;
-            // backdrop.Kind(winrt::Microsoft::UI::Composition::SystemBackdrops::MicaKind::BaseAlt);
-            // SystemBackdrop(backdrop);
-
             m_ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
             fz_register_document_handlers(m_ctx);
+
+            m_isInitializing = false;
         }
 
         MainWindow::~MainWindow()
@@ -68,6 +66,37 @@
         PdfTabInfo::~PdfTabInfo()
         {
             fz_drop_document(m_ctx, m_doc);
+        }
+
+        void MainWindow::SaveBackdropSettings(winrt::hstring const& transparencyValue)
+        {
+            auto localSettings = ApplicationData::Current().LocalSettings();
+
+            localSettings.Values().Insert(L"Transparency", winrt::box_value(transparencyValue));
+        }
+
+        void MainWindow::ApplyBackdrop(winrt::hstring const& transparencyValue)
+        {
+            if (transparencyValue == L"Mica")
+            {
+                auto mica = winrt::Microsoft::UI::Xaml::Media::MicaBackdrop();
+                mica.Kind(winrt::Microsoft::UI::Composition::SystemBackdrops::MicaKind::Base);
+                this->SystemBackdrop(mica);
+            }
+            else if (transparencyValue == L"MicaAlt")
+            {
+                winrt::Microsoft::UI::Xaml::Media::MicaBackdrop backdrop;
+                backdrop.Kind(winrt::Microsoft::UI::Composition::SystemBackdrops::MicaKind::BaseAlt);
+                SystemBackdrop(backdrop);
+            }
+            else if (transparencyValue == L"None")
+            {
+                this->SystemBackdrop(nullptr);
+            }
+            else
+            {
+                this->SystemBackdrop(nullptr);
+            }
         }
 
         void MainWindow::TabView_Loaded(
@@ -97,8 +126,7 @@
         {
             auto localSettings = ApplicationData::Current().LocalSettings();
 
-            localSettings.Values().Insert(L"AppTheme", winrt::box_value(L"Dark"));
-            localSettings.Values().Insert(L"AutoSaveEnabled", winrt::box_value(true));
+            localSettings.Values().Insert(L"AppTheme", winrt::box_value(themeName));
         }
 
         void MainWindow::LoadSettings()
@@ -113,6 +141,16 @@
             else
             {
                 ApplyTheme(L"Default");
+            }
+
+            if (localSettings.Values().HasKey(L"Transparency"))
+            {
+                winrt::hstring transparency = winrt::unbox_value<winrt::hstring>(localSettings.Values().Lookup(L"Transparency"));
+                ApplyBackdrop(transparency);
+            }
+            else 
+            {
+                ApplyBackdrop(L"None");
             }
         }
 
@@ -328,6 +366,8 @@
 
         void MainWindow::ThemeSelection_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& e)
         {
+            if (m_isInitializing == true) { return; }
+
             auto comboBox = sender.as<winrt::Microsoft::UI::Xaml::Controls::ComboBox>();
             if (auto selectedItem = comboBox.SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::ComboBoxItem>())
             {
@@ -337,4 +377,19 @@
                 SaveSettings(themeTag);
             }
         }
+
+        void MainWindow::TransparencySelection_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& e)
+        {
+            if (m_isInitializing == true) { return; }
+
+            auto comboBox = sender.as<winrt::Microsoft::UI::Xaml::Controls::ComboBox>();
+            if (auto selectedItem = comboBox.SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::ComboBoxItem>())
+            {
+                winrt::hstring transparencyTag = winrt::unbox_value<winrt::hstring>(selectedItem.Tag());
+
+                ApplyBackdrop(transparencyTag);
+                SaveBackdropSettings(transparencyTag);
+            }
+        }
     }
+    

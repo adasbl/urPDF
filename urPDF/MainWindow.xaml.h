@@ -32,9 +32,12 @@ namespace winrt::urPDF::implementation
         MainWindow();
         ~MainWindow();
 
+        
+        void ApplyBackdrop(winrt::hstring const& transparency);
+        void SaveBackdropSettings(winrt::hstring const& themeName); // TODO: marge save functions
+        void ApplyTheme(winrt::hstring const& themeName);
         void SaveSettings(winrt::hstring const& themeName);
         void LoadSettings();
-        void ApplyTheme(winrt::hstring const& themeName);
 
         winrt::fire_and_forget OpenPdfFileAsync(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void TabView_AddButtonClick(winrt::Windows::Foundation::IInspectable const& sender, winrt::Windows::Foundation::IInspectable const& args);
@@ -45,10 +48,12 @@ namespace winrt::urPDF::implementation
         void PdfScrollViewer_ViewChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args);
         void ToggleSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void ThemeSelection_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& e);
+        void TransparencySelection_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& e);
 
     private:
         fz_context* m_ctx{ nullptr };
         std::map<winrt::Microsoft::UI::Xaml::Controls::TabViewItem, std::shared_ptr<PdfTabInfo>> m_openedTabs;
+        bool m_isInitializing{ true };
     };
 }
 

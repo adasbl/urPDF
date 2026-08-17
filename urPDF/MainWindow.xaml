@@ -9,7 +9,7 @@
     Title="urPDF">
 
     <Window.SystemBackdrop>
-        <MicaBackdrop />
+        <MicaBackdrop Kind="BaseAlt"/>
     </Window.SystemBackdrop>
 
     <Grid Background="Transparent">
@@ -39,14 +39,23 @@
                          AddTabButtonClick="TabView_AddButtonClick" 
                          TabCloseRequested="TabView_TabCloseRequested" 
                          Loaded="TabView_Loaded"  
-                         SelectionChanged="TabView_SelectionChanged"/>
+                         SelectionChanged="TabView_SelectionChanged">
+                    <TabView.Resources>
+                        <StaticResource x:Key="TabViewItemHeaderBackgroundSelected" 
+                        ResourceKey="LayerFillColorDefaultBrush" />
+                        <StaticResource x:Key="TabViewItemHeaderBackgroundPointerOverSelected" 
+                        ResourceKey="LayerFillColorDefaultBrush" />
+                        <StaticResource x:Key="TabViewItemHeaderBackgroundPressedSelected" 
+                        ResourceKey="LayerFillColorDefaultBrush" />
+                    </TabView.Resources>
+                </TabView>
             </Grid>
         </Border>
 
         <Border Grid.Row="1"
                 Background="{ThemeResource LayerFillColorDefaultBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="1,1,1,0"
+                BorderThickness="1,0,1,0"
                 CornerRadius="8,8,0,0">
 
             <Grid>
@@ -142,6 +151,17 @@
                                 <ComboBoxItem Content="Default (System)" Tag="Default"/>
                                 <ComboBoxItem Content="Light" Tag="Light"/>
                                 <ComboBoxItem Content="Dark" Tag="Dark"/>
+                            </ComboBox>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8" Margin="8,0,0,0">
+                            <TextBlock Text="Transparency Effect" VerticalAlignment="Center"/>
+                            <ComboBox
+                                Width="160"
+                                SelectionChanged="TransparencySelection_SelectionChanged"
+                                SelectedIndex="0">
+                                <ComboBoxItem Content="None" Tag="None"/>
+                                <ComboBoxItem Content="Mica" Tag="Mica"/>
+                                <ComboBoxItem Content="Mica Alt" Tag="MicaAlt"/>
                             </ComboBox>
                         </StackPanel>
                     </StackPanel>
