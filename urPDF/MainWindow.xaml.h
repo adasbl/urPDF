@@ -32,6 +32,10 @@ namespace winrt::urPDF::implementation
         MainWindow();
         ~MainWindow();
 
+        void SaveSettings(winrt::hstring const& themeName);
+        void LoadSettings();
+        void ApplyTheme(winrt::hstring const& themeName);
+
         winrt::fire_and_forget OpenPdfFileAsync(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void TabView_AddButtonClick(winrt::Windows::Foundation::IInspectable const& sender, winrt::Windows::Foundation::IInspectable const& args);
         void TabView_TabCloseRequested(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::TabViewTabCloseRequestedEventArgs const& args);

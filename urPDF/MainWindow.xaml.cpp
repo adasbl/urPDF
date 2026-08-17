@@ -34,12 +34,14 @@
 
     namespace winrt::urPDF::implementation
     {
-        MainWindow::MainWindow() 
+        MainWindow::MainWindow()
         {
             InitializeComponent();
 
             ExtendsContentIntoTitleBar(true);
             SetTitleBar(AppTitleBar());
+
+            LoadSettings();
 
             winrt::Microsoft::UI::Xaml::Media::MicaBackdrop backdrop;
             backdrop.Kind(winrt::Microsoft::UI::Composition::SystemBackdrops::MicaKind::BaseAlt);
@@ -91,7 +93,7 @@
             return awaitable{ dispatcher };
         }
 
-        void SaveSettings()
+        void MainWindow::SaveSettings(winrt::hstring const& themeName)
         {
             auto localSettings = ApplicationData::Current().LocalSettings();
 
@@ -99,13 +101,41 @@
             localSettings.Values().Insert(L"AutoSaveEnabled", winrt::box_value(true));
         }
 
-        void LoadSettings()
+        void MainWindow::LoadSettings()
         {
-            auto localSettings = ApplicationData::Current().LocalSettings();
+            auto localSettings = winrt::Windows::Storage::ApplicationData::Current().LocalSettings();
 
             if (localSettings.Values().HasKey(L"AppTheme"))
             {
                 winrt::hstring theme = winrt::unbox_value<winrt::hstring>(localSettings.Values().Lookup(L"AppTheme"));
+                ApplyTheme(theme);
+            }
+            else
+            {
+                ApplyTheme(L"Default");
+            }
+        }
+
+        void MainWindow::ApplyTheme(winrt::hstring const& themeName)
+        {
+            ElementTheme theme = ElementTheme::Default;
+
+            if (themeName == L"Light")
+            {
+                theme = ElementTheme::Light;
+            }
+            else if (themeName == L"Dark")
+            {
+                theme = ElementTheme::Dark;
+            }
+            else
+            {
+                theme = ElementTheme::Default;
+            }
+
+            if (auto rootElement = Content().try_as<FrameworkElement>())
+            {
+                rootElement.RequestedTheme(theme);
             }
         }
 
@@ -127,14 +157,14 @@
 
             auto PdfInfo = std::make_shared<PdfTabInfo>(m_ctx, filePath);
             PdfInfo->m_fileName = fileName;
-                   
+
             winrt::Microsoft::UI::Xaml::Controls::TabViewItem targetTab;
-            
+
             auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
 
             bool isCurrentTabEmpty = currentTab && !m_openedTabs.contains(currentTab);
 
-            if (isCurrentTabEmpty) 
+            if (isCurrentTabEmpty)
             {
                 targetTab = currentTab;
                 targetTab.Content(nullptr);
@@ -155,7 +185,7 @@
             m_openedTabs[targetTab] = PdfInfo;
 
             co_await RenderPageAsync(1.0, PdfInfo);
-        }  
+        }
 
         winrt::Windows::Foundation::IAsyncAction MainWindow::RenderPageAsync(double zoomFactor, std::shared_ptr<PdfTabInfo> PdfTab)
         {
@@ -244,7 +274,7 @@
             auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
 
             m_openedTabs.erase(args.Tab());
-            
+
             uint32_t index;
             if (tabView.TabItems().IndexOf(args.Tab(), index))
             {
@@ -263,7 +293,7 @@
             if (currentTab)
             {
                 auto savedSource = currentTab.Tag().try_as<winrt::Microsoft::UI::Xaml::Media::Imaging::SoftwareBitmapSource>();
-                
+
                 PagesContainer().Children().Clear();
 
                 if (savedSource)
@@ -277,9 +307,7 @@
             }
         }
 
-        void MainWindow::PdfScrollViewer_ViewChanged(
-            winrt::Windows::Foundation::IInspectable const& sender,
-            winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args)
+        void MainWindow::PdfScrollViewer_ViewChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args)
         {
             // TODO
         }
@@ -300,7 +328,13 @@
 
         void MainWindow::ThemeSelection_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& e)
         {
+            auto comboBox = sender.as<winrt::Microsoft::UI::Xaml::Controls::ComboBox>();
+            if (auto selectedItem = comboBox.SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::ComboBoxItem>())
+            {
+                winrt::hstring themeTag = winrt::unbox_value<winrt::hstring>(selectedItem.Tag());
 
+                ApplyTheme(themeTag);
+                SaveSettings(themeTag);
+            }
         }
     }
-    
