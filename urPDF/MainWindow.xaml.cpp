@@ -1,5 +1,7 @@
     #include "pch.h"
+    #include <winrt/Windows.UI.Xaml.Interop.h>
     #include "MainWindow.xaml.h"
+    #include "SettingsPage.h"
     #if __has_include("MainWindow.g.cpp")
     #include "MainWindow.g.cpp"
     #endif
@@ -22,6 +24,7 @@
     #include <memory>
     #include <coroutine>
 
+    
     using namespace winrt;
     using namespace winrt::Windows::Storage::Pickers;
     using namespace winrt::Windows::Graphics::Imaging;
@@ -148,7 +151,7 @@
                 winrt::hstring transparency = winrt::unbox_value<winrt::hstring>(localSettings.Values().Lookup(L"Transparency"));
                 ApplyBackdrop(transparency);
             }
-            else 
+            else
             {
                 ApplyBackdrop(L"None");
             }
@@ -391,5 +394,11 @@
                 SaveBackdropSettings(transparencyTag);
             }
         }
+
+        void MainWindow::SettingsButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+        {
+            RootFrame().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
+
+            RootFrame().Navigate(winrt::xaml_typename<winrt::urPDF::SettingsPage>());
+        }
     }
-    
