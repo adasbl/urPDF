@@ -5,5 +5,8 @@ namespace urPDF
     {
         SettingsPage();
         Int32 MyProperty;
+
+        event Windows.Foundation.EventHandler<String> ThemeChanged;
+        event Windows.Foundation.EventHandler<String> BackdropChanged;
     }
 }

@@ -48,8 +48,6 @@
 
             m_ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
             fz_register_document_handlers(m_ctx);
-
-            m_isInitializing = false;
         }
 
         MainWindow::~MainWindow()
@@ -69,37 +67,6 @@
         PdfTabInfo::~PdfTabInfo()
         {
             fz_drop_document(m_ctx, m_doc);
-        }
-
-        void MainWindow::SaveBackdropSettings(winrt::hstring const& transparencyValue)
-        {
-            auto localSettings = ApplicationData::Current().LocalSettings();
-
-            localSettings.Values().Insert(L"Transparency", winrt::box_value(transparencyValue));
-        }
-
-        void MainWindow::ApplyBackdrop(winrt::hstring const& transparencyValue)
-        {
-            if (transparencyValue == L"Mica")
-            {
-                auto mica = winrt::Microsoft::UI::Xaml::Media::MicaBackdrop();
-                mica.Kind(winrt::Microsoft::UI::Composition::SystemBackdrops::MicaKind::Base);
-                this->SystemBackdrop(mica);
-            }
-            else if (transparencyValue == L"MicaAlt")
-            {
-                winrt::Microsoft::UI::Xaml::Media::MicaBackdrop backdrop;
-                backdrop.Kind(winrt::Microsoft::UI::Composition::SystemBackdrops::MicaKind::BaseAlt);
-                SystemBackdrop(backdrop);
-            }
-            else if (transparencyValue == L"None")
-            {
-                this->SystemBackdrop(nullptr);
-            }
-            else
-            {
-                this->SystemBackdrop(nullptr);
-            }
         }
 
         void MainWindow::TabView_Loaded(
@@ -125,13 +92,6 @@
             return awaitable{ dispatcher };
         }
 
-        void MainWindow::SaveSettings(winrt::hstring const& themeName)
-        {
-            auto localSettings = ApplicationData::Current().LocalSettings();
-
-            localSettings.Values().Insert(L"AppTheme", winrt::box_value(themeName));
-        }
-
         void MainWindow::LoadSettings()
         {
             auto localSettings = winrt::Windows::Storage::ApplicationData::Current().LocalSettings();
@@ -154,6 +114,30 @@
             else
             {
                 ApplyBackdrop(L"None");
+            }
+        }
+
+        void MainWindow::ApplyBackdrop(winrt::hstring const& transparencyValue)
+        {
+            if (transparencyValue == L"Mica")
+            {
+                auto mica = winrt::Microsoft::UI::Xaml::Media::MicaBackdrop();
+                mica.Kind(winrt::Microsoft::UI::Composition::SystemBackdrops::MicaKind::Base);
+                this->SystemBackdrop(mica);
+            }
+            else if (transparencyValue == L"MicaAlt")
+            {
+                winrt::Microsoft::UI::Xaml::Media::MicaBackdrop backdrop;
+                backdrop.Kind(winrt::Microsoft::UI::Composition::SystemBackdrops::MicaKind::BaseAlt);
+                SystemBackdrop(backdrop);
+            }
+            else if (transparencyValue == L"None")
+            {
+                this->SystemBackdrop(nullptr);
+            }
+            else
+            {
+                this->SystemBackdrop(nullptr);
             }
         }
 
@@ -183,6 +167,7 @@
         winrt::fire_and_forget MainWindow::OpenPdfFileAsync(IInspectable const&, RoutedEventArgs const&)
         {
             // TODO: add check if empty tab is opened
+            // TODO: check if file is already opened (+ option to turn off in settings)
             FileOpenPicker filePicker;
             filePicker.FileTypeFilter().Append(L".pdf");
 
@@ -353,52 +338,22 @@
             // TODO
         }
 
-        void MainWindow::ToggleSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args)
-        {
-            auto toggleSwitch = sender.as<winrt::Microsoft::UI::Xaml::Controls::ToggleSwitch>();
-
-            if (toggleSwitch.IsOn())
-            {
-                // TODO
-            }
-            else
-            {
-                // TODO
-            }
-        }
-
-        void MainWindow::ThemeSelection_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& e)
-        {
-            if (m_isInitializing == true) { return; }
-
-            auto comboBox = sender.as<winrt::Microsoft::UI::Xaml::Controls::ComboBox>();
-            if (auto selectedItem = comboBox.SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::ComboBoxItem>())
-            {
-                winrt::hstring themeTag = winrt::unbox_value<winrt::hstring>(selectedItem.Tag());
-
-                ApplyTheme(themeTag);
-                SaveSettings(themeTag);
-            }
-        }
-
-        void MainWindow::TransparencySelection_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& e)
-        {
-            if (m_isInitializing == true) { return; }
-
-            auto comboBox = sender.as<winrt::Microsoft::UI::Xaml::Controls::ComboBox>();
-            if (auto selectedItem = comboBox.SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::ComboBoxItem>())
-            {
-                winrt::hstring transparencyTag = winrt::unbox_value<winrt::hstring>(selectedItem.Tag());
-
-                ApplyBackdrop(transparencyTag);
-                SaveBackdropSettings(transparencyTag);
-            }
-        }
-
         void MainWindow::SettingsButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
         {
             RootFrame().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
-
             RootFrame().Navigate(winrt::xaml_typename<winrt::urPDF::SettingsPage>());
+
+            if (auto settingsPage = RootFrame().Content().try_as<winrt::urPDF::SettingsPage>())
+            {
+                settingsPage.ThemeChanged([this](auto const&, winrt::hstring const& themeName)
+                    {
+                        this->ApplyTheme(themeName);
+                    });
+
+                settingsPage.BackdropChanged([this](auto const&, winrt::hstring const& transparencyValue)
+                    {
+                        this->ApplyBackdrop(transparencyValue);
+                    });
+            }
         }
     }
