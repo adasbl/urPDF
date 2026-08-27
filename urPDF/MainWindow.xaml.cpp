@@ -37,6 +37,7 @@
 
     namespace winrt::urPDF::implementation
     {
+        // CLASSES
         MainWindow::MainWindow()
         {
             InitializeComponent();
@@ -77,6 +78,17 @@
             TabView_AddButtonClick(tabView, nullptr);
         }
 
+        winrt::event_token MainWindow::PropertyChanged(winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler)
+        {
+            return m_propertyChanged.add(handler);
+        }
+
+        void MainWindow::PropertyChanged(winrt::event_token const& token) noexcept
+        {
+            m_propertyChanged.remove(token);
+        }
+
+        // MULTITHREADING
         auto resume_foreground(winrt::Microsoft::UI::Dispatching::DispatcherQueue const& dispatcher)
         {
             struct awaitable
@@ -90,6 +102,35 @@
                 void await_resume() const noexcept {}
             };
             return awaitable{ dispatcher };
+        }
+
+        // UI UPDATE
+        int32_t MainWindow::DisplayPageNumber()
+        {
+            return m_pageNumber;
+        }
+
+        void MainWindow::DisplayPageNumber(int32_t value)
+        {
+            if (m_pageNumber != value)
+            {
+                m_pageNumber = value;
+                m_propertyChanged(*this, winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventArgs{ L"DisplayPageNumber" });
+            }
+        }
+
+        int32_t MainWindow::DisplayPageCount()
+        {
+            return m_pageCounter;
+        }
+
+        void MainWindow::DisplayPageCount(int32_t value)
+        {
+            if (m_pageCounter != value)
+            {
+                m_pageCounter = value;
+                m_propertyChanged(*this, winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventArgs{ L"DisplayPageCount" });
+            }
         }
 
         // SETTINGS
@@ -292,6 +333,8 @@
             {
                 currentTab.Tag(bitmap_source);
                 currentTab.Header(winrt::box_value(PdfTab->m_fileName));
+                DisplayPageCount(PdfTab->m_pagecount);
+                DisplayPageNumber(PdfTab->m_currentPageIndex);
             }
         }
 
@@ -359,10 +402,12 @@
             if (currentTab)
             {
                 currentTab.Header(winrt::box_value(PdfTab->m_fileName));
+                DisplayPageCount(PdfTab->m_pagecount);
+                DisplayPageNumber(PdfTab->m_currentPageIndex);
             }
         }
 
-        // TABVIEW MENAGEMENT
+        // UI ELEMENTS
         void MainWindow::TabView_AddButtonClick(
             winrt::Windows::Foundation::IInspectable const& sender,
             winrt::Windows::Foundation::IInspectable const& args)
@@ -418,6 +463,8 @@
                 {
                     auto pdfInfo = m_openedTabs[currentTab];
 
+                    DisplayPageNumber(pdfInfo->m_currentPageIndex);
+                    DisplayPageCount(pdfInfo->m_pagecount);
                     for (auto const& savedSource : pdfInfo->m_renderedPages) 
                     {
                         winrt::Microsoft::UI::Xaml::Controls::Image img;
@@ -427,6 +474,11 @@
                         PagesContainer().Children().Append(img);
                     }
                 }
+            }
+            else
+            {
+                DisplayPageNumber(0);
+                DisplayPageCount(0);
             }
         }
 
@@ -455,6 +507,32 @@
 
         void MainWindow::PdfScrollViewer_ViewChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args)
         {
-            
+            auto scrollViewer = sender.as<winrt::Microsoft::UI::Xaml::Controls::ScrollViewer>();
+
+            double scrollOffset = scrollViewer.VerticalOffset();
+            double totalHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
+
+            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+
+            if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
+            {
+                auto pdfInfo = m_openedTabs[currentTab];
+                int totalPages = pdfInfo->m_pagecount;
+
+                if (totalPages > 0 && totalHeight > 0)
+                {
+                    double scrollPercentage = scrollOffset / scrollViewer.ScrollableHeight();
+
+                    if (scrollViewer.ScrollableHeight() == 0) scrollPercentage = 0.0;
+                    if (scrollPercentage > 1.0) scrollPercentage = 1.0;
+                    if (scrollPercentage < 0.0) scrollPercentage = 0.0;
+
+                    int32_t currentPage = static_cast<int32_t>(std::round(scrollPercentage * (totalPages - 1))) + 1;
+
+                    pdfInfo->m_currentPageIndex = currentPage;
+
+                    DisplayPageNumber(currentPage);
+                }
+            }
         }
     }

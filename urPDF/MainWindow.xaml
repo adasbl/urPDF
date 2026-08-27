@@ -125,6 +125,22 @@
                                 </StackPanel>
                             </Button.Content>
                         </Button>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="Page: " VerticalAlignment="Center"/>
+                            <NumberBox Value="{x:Bind DisplayPageNumber, Mode=OneWay}"
+                                Minimum="0"
+                                Maximum="100"
+                                SpinButtonPlacementMode="Hidden"
+                                SmallChange="1"
+                                Width="48"
+                                MinWidth="0"
+                                HorizontalContentAlignment="Center"
+                                VerticalAlignment="Center"/>
+                            <TextBlock VerticalAlignment="Center" Width="48" IsTextSelectionEnabled="False">
+                                <Run Text="of "/>
+                                <Run Text="{x:Bind DisplayPageCount, Mode=OneWay}"/>
+                            </TextBlock>
+                        </StackPanel>
                         <Button>
                             <Button.Content>
                                 <StackPanel Orientation="Horizontal" Spacing="8">

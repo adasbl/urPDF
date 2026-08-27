@@ -1,8 +1,11 @@
 namespace urPDF
 {
     [default_interface]
-    runtimeclass MainWindow : Microsoft.UI.Xaml.Window
+    runtimeclass MainWindow : Microsoft.UI.Xaml.Window, Microsoft.UI.Xaml.Data.INotifyPropertyChanged
     {
         MainWindow();
+
+        Int32 DisplayPageNumber;
+        Int32 DisplayPageCount;
     }
 }
