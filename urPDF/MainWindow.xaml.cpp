@@ -430,8 +430,31 @@
             }
         }
 
+        winrt::fire_and_forget MainWindow::RotateButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+        {
+            auto button = sender.as<winrt::Microsoft::UI::Xaml::Controls::Button>();
+            button.IsEnabled(false);
+
+            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+
+            if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
+            {
+                auto pdfInfo = m_openedTabs[currentTab];
+
+                pdfInfo->m_currentRotation += 90;
+                if (pdfInfo->m_currentRotation >= 360)
+                {
+                    pdfInfo->m_currentRotation = 0;
+                }
+
+                PagesContainer().Children().Clear();
+                co_await RenderMultiPageAsync(pdfInfo);
+            }
+            button.IsEnabled(true);
+        }
+
         void MainWindow::PdfScrollViewer_ViewChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args)
         {
-            // TODO
+            
         }
     }
