@@ -131,6 +131,7 @@
                                 Minimum="0"
                                 Maximum="100"
                                 SpinButtonPlacementMode="Hidden"
+                                ValueChanged="PageNumberBox_ValueChanged"
                                 SmallChange="1"
                                 Width="48"
                                 MinWidth="0"

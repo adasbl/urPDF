@@ -535,4 +535,29 @@
                 }
             }
         }
+
+        void MainWindow::PageNumberBox_ValueChanged(winrt::Microsoft::UI::Xaml::Controls::NumberBox const& sender, winrt::Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const& args)
+        {
+            if (std::isnan(args.NewValue())) return;
+
+            int32_t newPage = static_cast<int32_t>(std::round(args.NewValue()));
+
+            if (newPage == m_pageNumber) return;
+
+            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+
+            if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
+            {
+                auto pdfInfo = m_openedTabs[currentTab];
+                int totalPages = pdfInfo->m_pagecount;
+
+                if (totalPages > 1 && newPage >= 1 && newPage <= totalPages)
+                {
+                    double scrollPercentage = static_cast<double>(newPage - 1) / (totalPages - 1);
+                    double targetOffset = scrollPercentage * PdfScrollViewer().ScrollableHeight();
+
+                    PdfScrollViewer().ChangeView(nullptr, targetOffset, nullptr);
+                }
+            }
+        }
     }
