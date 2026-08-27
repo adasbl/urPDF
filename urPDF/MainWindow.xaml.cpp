@@ -231,7 +231,7 @@
 
             m_openedTabs[targetTab] = PdfInfo;
 
-            co_await RenderSinglePageAsync(PdfInfo); // TODO: change to new render function
+            co_await RenderMultiPageAsync(PdfInfo);
         }
 
         // PAGE RENDERING
@@ -295,7 +295,78 @@
             }
         }
 
-        // TODO: add RenderMultiPageAsync
+        winrt::Windows::Foundation::IAsyncAction MainWindow::RenderMultiPageAsync(std::shared_ptr<PdfTabInfo> PdfTab)
+        {
+            co_await winrt::resume_background();
+
+            int pagecount = fz_count_pages(m_ctx, PdfTab->m_doc);
+            PdfTab->m_pagecount = pagecount;
+
+            fz_matrix transform = fz_scale(PdfTab->m_currentPageZoom, PdfTab->m_currentPageZoom);
+            transform = fz_concat(transform, fz_rotate(PdfTab->m_currentRotation));
+
+            SoftwareBitmapSource bitmap_source { nullptr };
+
+            for (int i = 0; i < pagecount; i++)
+            {
+                fz_page* page = fz_load_page(m_ctx, PdfTab->m_doc, i);
+
+                fz_rect rect = fz_bound_page(m_ctx, page);
+                rect = fz_transform_rect(rect, transform);
+                fz_irect bbox = fz_round_rect(rect);
+
+                fz_pixmap* pix = fz_new_pixmap_with_bbox(m_ctx, fz_device_bgr(m_ctx), bbox, NULL, 1);
+                fz_clear_pixmap_with_value(m_ctx, pix, 255);
+
+                fz_device* dev = fz_new_draw_device(m_ctx, fz_identity, pix);
+                fz_run_page(m_ctx, page, dev, fz_identity, NULL);
+
+                int width = fz_pixmap_width(m_ctx, pix);
+                int height = fz_pixmap_height(m_ctx, pix);
+
+                SoftwareBitmap bitmap(BitmapPixelFormat::Bgra8, width, height, BitmapAlphaMode::Premultiplied);
+                {
+                    BitmapBuffer buffer = bitmap.LockBuffer(BitmapBufferAccessMode::Write);
+                    winrt::Windows::Foundation::IMemoryBufferReference reference = buffer.CreateReference();
+
+                    uint8_t* data = reference.data();
+
+                    memcpy(data, fz_pixmap_samples(m_ctx, pix), width * height * 4);
+                }
+
+                fz_drop_device(m_ctx, dev);
+                fz_drop_pixmap(m_ctx, pix);
+                fz_drop_page(m_ctx, page);
+                
+                co_await resume_foreground(DispatcherQueue());
+
+                SoftwareBitmapSource current_bitmap_source;
+                co_await current_bitmap_source.SetBitmapAsync(bitmap);
+
+                winrt::Microsoft::UI::Xaml::Controls::Image img;
+                img.Source(current_bitmap_source);
+                img.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 10 });
+
+                PagesContainer().Children().Append(img);
+
+                bitmap_source = current_bitmap_source;
+
+                if (i < pagecount - 1)
+                {
+                    co_await winrt::resume_background();
+                }
+            }
+            co_await resume_foreground(DispatcherQueue());
+
+            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+            if (currentTab)
+            {
+                if (bitmap_source) {
+                    currentTab.Tag(bitmap_source);
+                }
+                currentTab.Header(winrt::box_value(PdfTab->m_fileName));
+            }
+        }
 
         // TABVIEW MENAGEMENT
         void MainWindow::TabView_AddButtonClick(
