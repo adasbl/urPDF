@@ -255,7 +255,7 @@
             fz_clear_pixmap_with_value(m_ctx, pix, 255);
 
             fz_device* dev = fz_new_draw_device(m_ctx, fz_identity, pix);
-            fz_run_page(m_ctx, page, dev, fz_identity, NULL);
+            fz_run_page(m_ctx, page, dev, transform, NULL);
             // fz_close_device(m_ctx, dev);
 
             int width = fz_pixmap_width(m_ctx, pix);
@@ -317,8 +317,8 @@
                 fz_clear_pixmap_with_value(m_ctx, pix, 255);
 
                 fz_device* dev = fz_new_draw_device(m_ctx, fz_identity, pix);
-                fz_run_page(m_ctx, page, dev, fz_identity, NULL);
-
+                fz_run_page(m_ctx, page, dev, transform, NULL);
+                    
                 int width = fz_pixmap_width(m_ctx, pix);
                 int height = fz_pixmap_height(m_ctx, pix);
 
