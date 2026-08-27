@@ -92,6 +92,26 @@
             return awaitable{ dispatcher };
         }
 
+        // SETTINGS
+        void MainWindow::SettingsButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+        {
+            RootFrame().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
+            RootFrame().Navigate(winrt::xaml_typename<winrt::urPDF::SettingsPage>());
+
+            if (auto settingsPage = RootFrame().Content().try_as<winrt::urPDF::SettingsPage>())
+            {
+                settingsPage.ThemeChanged([this](auto const&, winrt::hstring const& themeName)
+                    {
+                        this->ApplyTheme(themeName);
+                    });
+
+                settingsPage.BackdropChanged([this](auto const&, winrt::hstring const& transparencyValue)
+                    {
+                        this->ApplyBackdrop(transparencyValue);
+                    });
+            }
+        }
+
         void MainWindow::LoadSettings()
         {
             auto localSettings = winrt::Windows::Storage::ApplicationData::Current().LocalSettings();
@@ -164,6 +184,7 @@
             }
         }
 
+        // FILE OPENING
         winrt::fire_and_forget MainWindow::OpenPdfFileAsync(IInspectable const&, RoutedEventArgs const&)
         {
             // TODO: add check if empty tab is opened
@@ -210,26 +231,33 @@
 
             m_openedTabs[targetTab] = PdfInfo;
 
-            co_await RenderPageAsync(1.0, PdfInfo);
+            co_await RenderSinglePageAsync(PdfInfo); // TODO: change to new render function
         }
 
-        winrt::Windows::Foundation::IAsyncAction MainWindow::RenderPageAsync(double zoomFactor, std::shared_ptr<PdfTabInfo> PdfTab)
+        // PAGE RENDERING
+        winrt::Windows::Foundation::IAsyncAction MainWindow::RenderSinglePageAsync(std::shared_ptr<PdfTabInfo> PdfTab)
         {
             co_await winrt::resume_background();
 
+            int pagecount = fz_count_pages(m_ctx, PdfTab->m_doc);
+            PdfTab->m_pagecount = pagecount;
+
             fz_page* page = fz_load_page(m_ctx, PdfTab->m_doc, 0);
 
+            fz_matrix transform = fz_scale(PdfTab->m_currentPageZoom, PdfTab->m_currentPageZoom);
+            transform = fz_concat(transform, fz_rotate(PdfTab->m_currentRotation));
+
             fz_rect rect = fz_bound_page(m_ctx, page);
+            rect = fz_transform_rect(rect, transform);
             fz_irect bbox = fz_round_rect(rect);
 
-
-            fz_pixmap* pix = fz_new_pixmap_with_bbox(m_ctx, fz_device_bgr(m_ctx), bbox, NULL, 1);   // pixmap in BGR format
-            fz_clear_pixmap_with_value(m_ctx, pix, 255); // white background
+            fz_pixmap* pix = fz_new_pixmap_with_bbox(m_ctx, fz_device_bgr(m_ctx), bbox, NULL, 1);
+            fz_clear_pixmap_with_value(m_ctx, pix, 255);
 
             fz_device* dev = fz_new_draw_device(m_ctx, fz_identity, pix);
             fz_run_page(m_ctx, page, dev, fz_identity, NULL);
+            // fz_close_device(m_ctx, dev);
 
-            // WinUI format conversion
             int width = fz_pixmap_width(m_ctx, pix);
             int height = fz_pixmap_height(m_ctx, pix);
 
@@ -240,7 +268,7 @@
 
                 uint8_t* data = reference.data();
 
-                memcpy(data, fz_pixmap_samples(m_ctx, pix), width * height * 4);  // copy pixels from MuPDF to WinUI
+                memcpy(data, fz_pixmap_samples(m_ctx, pix), width * height * 4);
             }
 
             fz_drop_device(m_ctx, dev);
@@ -266,6 +294,8 @@
                 currentTab.Header(winrt::box_value(PdfTab->m_fileName));
             }
         }
+
+        // TODO: add RenderMultiPageAsync
 
         // TABVIEW MENAGEMENT
         void MainWindow::TabView_AddButtonClick(
@@ -338,22 +368,5 @@
             // TODO
         }
 
-        void MainWindow::SettingsButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
-        {
-            RootFrame().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
-            RootFrame().Navigate(winrt::xaml_typename<winrt::urPDF::SettingsPage>());
-
-            if (auto settingsPage = RootFrame().Content().try_as<winrt::urPDF::SettingsPage>())
-            {
-                settingsPage.ThemeChanged([this](auto const&, winrt::hstring const& themeName)
-                    {
-                        this->ApplyTheme(themeName);
-                    });
-
-                settingsPage.BackdropChanged([this](auto const&, winrt::hstring const& transparencyValue)
-                    {
-                        this->ApplyBackdrop(transparencyValue);
-                    });
-            }
-        }
+        
     }
