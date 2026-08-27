@@ -282,7 +282,7 @@
 
             winrt::Microsoft::UI::Xaml::Controls::Image img;
             img.Source(bitmap_source);
-            img.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 10 });
+            img.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 5 });
 
             PagesContainer().Children().Clear();
             PagesContainer().Children().Append(img);
@@ -304,8 +304,6 @@
 
             fz_matrix transform = fz_scale(PdfTab->m_currentPageZoom, PdfTab->m_currentPageZoom);
             transform = fz_concat(transform, fz_rotate(PdfTab->m_currentRotation));
-
-            SoftwareBitmapSource bitmap_source { nullptr };
 
             for (int i = 0; i < pagecount; i++)
             {
@@ -342,14 +340,13 @@
 
                 SoftwareBitmapSource current_bitmap_source;
                 co_await current_bitmap_source.SetBitmapAsync(bitmap);
+                PdfTab->m_renderedPages.push_back(current_bitmap_source);
 
                 winrt::Microsoft::UI::Xaml::Controls::Image img;
                 img.Source(current_bitmap_source);
-                img.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 10 });
+                img.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 5 });
 
                 PagesContainer().Children().Append(img);
-
-                bitmap_source = current_bitmap_source;
 
                 if (i < pagecount - 1)
                 {
@@ -361,9 +358,6 @@
             auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
             if (currentTab)
             {
-                if (bitmap_source) {
-                    currentTab.Tag(bitmap_source);
-                }
                 currentTab.Header(winrt::box_value(PdfTab->m_fileName));
             }
         }
@@ -414,22 +408,24 @@
             winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& args)
         {
             auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
-
             auto currentTab = tabView.SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
 
             if (currentTab)
             {
-                auto savedSource = currentTab.Tag().try_as<winrt::Microsoft::UI::Xaml::Media::Imaging::SoftwareBitmapSource>();
-
                 PagesContainer().Children().Clear();
 
-                if (savedSource)
+                if (m_openedTabs.find(currentTab) != m_openedTabs.end())
                 {
-                    winrt::Microsoft::UI::Xaml::Controls::Image img;
-                    img.Source(savedSource);
-                    img.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 10 });
+                    auto pdfInfo = m_openedTabs[currentTab];
 
-                    PagesContainer().Children().Append(img);
+                    for (auto const& savedSource : pdfInfo->m_renderedPages) 
+                    {
+                        winrt::Microsoft::UI::Xaml::Controls::Image img;
+                        img.Source(savedSource);
+                        img.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 5 });
+
+                        PagesContainer().Children().Append(img);
+                    }
                 }
             }
         }
@@ -438,6 +434,4 @@
         {
             // TODO
         }
-
-        
     }

@@ -2,11 +2,14 @@
 
 #include "MainWindow.g.h"
 #include "pch.h"
-#include <map>
 
 extern "C" {
 #include <mupdf/fitz.h>
 }
+
+#include <map>
+#include <vector>
+#include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 
 namespace winrt::urPDF::implementation
 {
@@ -16,12 +19,13 @@ namespace winrt::urPDF::implementation
         PdfTabInfo(fz_context* m_ctx, const std::string& filePath);
         ~PdfTabInfo();
 
+        winrt::hstring m_openedFilePath;
+        winrt::hstring m_fileName = L"unknown";
+        std::vector<winrt::Microsoft::UI::Xaml::Media::Imaging::SoftwareBitmapSource> m_renderedPages;
         int m_currentPageIndex = { 0 };
         double m_currentPageZoom = { 1.0 };
         int m_currentRotation = { 0 };
-        winrt::hstring m_openedFilePath;
-        winrt::hstring m_fileName = L"unknown";
-
+        
         fz_context* m_ctx{ nullptr };
         fz_document* m_doc{ nullptr };
         int m_pagecount;
