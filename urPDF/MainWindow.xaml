@@ -91,6 +91,7 @@
                             </Button.Content>
                         </Button>
                     </StackPanel>
+                    
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="4">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <TextBlock Text="Page: " VerticalAlignment="Center"/>
@@ -109,14 +110,14 @@
                                 <Run Text="{x:Bind DisplayPageCount, Mode=OneWay}"/>
                             </TextBlock>
                         </StackPanel>
-                        <Button>
+                        <Button Click="PreviousPageButton_Click">
                             <Button.Content>
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <FontIcon Glyph="&#xE760;"/>
                                 </StackPanel>
                             </Button.Content>
                         </Button>
-                        <Button>
+                        <Button Click="NextPageButton_Click">
                             <Button.Content>
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <FontIcon Glyph="&#xE761;"/>
@@ -124,6 +125,7 @@
                             </Button.Content>
                         </Button>
                     </StackPanel>
+                    
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="4">
                         <Button>
                             <Button.Content>

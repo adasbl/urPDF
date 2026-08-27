@@ -560,4 +560,56 @@
                 }
             }
         }
+
+        void MainWindow::NextPageButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+        {
+            auto button = sender.as<winrt::Microsoft::UI::Xaml::Controls::Button>();
+            button.IsEnabled(false);
+
+            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+
+            if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
+            {
+                auto pdfInfo = m_openedTabs[currentTab];
+                int currentPage = pdfInfo->m_currentPageIndex;
+                int totalPages = pdfInfo->m_pagecount;
+
+                if (totalPages > 1 && currentPage + 1 <= totalPages)
+                {
+                    int32_t newPage = currentPage + 1;
+
+                    double scrollPercentage = static_cast<double>(newPage - 1) / (totalPages - 1);
+                    double targetOffset = scrollPercentage * PdfScrollViewer().ScrollableHeight();
+
+                    PdfScrollViewer().ChangeView(nullptr, targetOffset, nullptr);
+                }
+            }
+            button.IsEnabled(true);
+        }
+
+        void MainWindow::PreviousPageButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+        {
+            auto button = sender.as<winrt::Microsoft::UI::Xaml::Controls::Button>();
+            button.IsEnabled(false);
+
+            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+
+            if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
+            {
+                auto pdfInfo = m_openedTabs[currentTab];
+                int currentPage = pdfInfo->m_currentPageIndex;
+                int totalPages = pdfInfo->m_pagecount;
+
+                if (totalPages > 1 && currentPage + -1 >= 1)
+                {
+                    int32_t newPage = currentPage - 1;
+
+                    double scrollPercentage = static_cast<double>(newPage - 1) / (totalPages - 1);
+                    double targetOffset = scrollPercentage * PdfScrollViewer().ScrollableHeight();
+
+                    PdfScrollViewer().ChangeView(nullptr, targetOffset, nullptr);
+                }
+            }
+            button.IsEnabled(true);
+        }
     }
