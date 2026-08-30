@@ -135,10 +135,13 @@
         }
 
         // SETTINGS
-        void MainWindow::SettingsButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+        winrt::fire_and_forget MainWindow::SettingsButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
         {
-            RootFrame().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
-            RootFrame().Navigate(winrt::xaml_typename<winrt::urPDF::SettingsPage>());
+            winrt::Microsoft::UI::Xaml::Controls::ContentDialog dialog;
+            dialog.XamlRoot(this->Content().XamlRoot());
+            dialog.CloseButtonText(L"Close");
+
+            winrt::urPDF::SettingsPage settingsPage;
 
             if (auto settingsPage = RootFrame().Content().try_as<winrt::urPDF::SettingsPage>())
             {
@@ -152,6 +155,9 @@
                         this->ApplyBackdrop(transparencyValue);
                     });
             }
+
+            dialog.Content(settingsPage);
+            co_await dialog.ShowAsync();
         }
 
         void MainWindow::LoadSettings()
