@@ -90,6 +90,14 @@
                                 </StackPanel>
                             </Button.Content>
                         </Button>
+                        <Button Click="AboutButton_Click" >
+                            <Button.Content>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE946;"/>
+                                    <TextBlock Text="About"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
                     </StackPanel>
                     
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="4">

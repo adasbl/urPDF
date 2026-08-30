@@ -2,6 +2,7 @@
     #include <winrt/Windows.UI.Xaml.Interop.h>
     #include "MainWindow.xaml.h"
     #include "SettingsPage.h"
+    #include "AboutPage.h"
     #if __has_include("MainWindow.g.cpp")
     #include "MainWindow.g.cpp"
     #endif
@@ -223,6 +224,13 @@
             {
                 rootElement.RequestedTheme(theme);
             }
+        }
+
+        // ABOUT
+        void winrt::urPDF::implementation::MainWindow::AboutButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+        {
+            RootFrame().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
+            RootFrame().Navigate(winrt::xaml_typename<winrt::urPDF::AboutPage>());
         }
 
         // FILE OPENING
