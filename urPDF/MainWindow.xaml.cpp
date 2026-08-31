@@ -143,18 +143,24 @@
 
             winrt::urPDF::SettingsPage settingsPage;
 
-            if (auto settingsPage = RootFrame().Content().try_as<winrt::urPDF::SettingsPage>())
+            settingsPage.ThemeChanged([this, dialog](auto const&, winrt::hstring const& themeName)
             {
-                settingsPage.ThemeChanged([this](auto const&, winrt::hstring const& themeName)
-                    {
-                        this->ApplyTheme(themeName);
-                    });
+                ApplyTheme(themeName);
 
-                settingsPage.BackdropChanged([this](auto const&, winrt::hstring const& transparencyValue)
-                    {
-                        this->ApplyBackdrop(transparencyValue);
-                    });
-            }
+                auto theme = winrt::Microsoft::UI::Xaml::ElementTheme::Default;
+
+                if (themeName == L"Light")
+                    theme = winrt::Microsoft::UI::Xaml::ElementTheme::Light;
+                else if (themeName == L"Dark")
+                    theme = winrt::Microsoft::UI::Xaml::ElementTheme::Dark;
+
+                dialog.RequestedTheme(theme);
+            });
+
+            settingsPage.BackdropChanged([this, dialog](auto const&, winrt::hstring const& transparencyValue)
+            {
+                    ApplyBackdrop(transparencyValue);
+            });
 
             dialog.Content(settingsPage);
             co_await dialog.ShowAsync();
