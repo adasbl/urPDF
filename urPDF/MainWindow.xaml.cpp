@@ -24,6 +24,9 @@
     #include <string>
     #include <memory>
     #include <coroutine>
+    #include <winrt/Windows.Graphics.Printing.h>
+    #include <winrt/Microsoft.UI.Xaml.Printing.h>
+    #include <printmanagerinterop.h>
 
     
     using namespace winrt;
@@ -631,5 +634,111 @@
                 }
             }
             button.IsEnabled(true);
+        }
+
+
+        winrt::fire_and_forget MainWindow::PrintButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+        {
+            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+            if (!currentTab || m_openedTabs.find(currentTab) == m_openedTabs.end())
+            {
+                co_return;
+            }
+            auto pdfInfo = m_openedTabs[currentTab];
+
+            HWND hwnd;
+            this->try_as<::IWindowNative>()->get_WindowHandle(&hwnd);
+
+            auto printInterop = winrt::get_activation_factory<winrt::Windows::Graphics::Printing::PrintManager, IPrintManagerInterop>();
+            winrt::Windows::Graphics::Printing::PrintManager printManager{ nullptr };
+            winrt::check_hresult(printInterop->GetForWindow(hwnd, winrt::guid_of<decltype(printManager)>(), winrt::put_abi(printManager)));
+
+            m_printDocument = winrt::Microsoft::UI::Xaml::Printing::PrintDocument();
+            auto printDocumentSource = m_printDocument.DocumentSource();
+
+            auto printSize = std::make_shared<winrt::Windows::Foundation::Size>(0.0f, 0.0f);
+
+            m_printDocument.Paginate([pdfInfo, printSize](auto const& sender, winrt::Microsoft::UI::Xaml::Printing::PaginateEventArgs const& args)
+                {
+                    auto senderDoc = sender.as<winrt::Microsoft::UI::Xaml::Printing::PrintDocument>();
+
+                    auto pageDesc = args.PrintTaskOptions().GetPageDescription(1);
+                    printSize->Width = pageDesc.ImageableRect.Width;
+                    printSize->Height = pageDesc.ImageableRect.Height;
+
+                    senderDoc.SetPreviewPageCount(pdfInfo->m_pagecount, winrt::Microsoft::UI::Xaml::Printing::PreviewPageCountType::Final);
+                });
+
+            m_printDocument.GetPreviewPage([pdfInfo, printSize](auto const& sender, winrt::Microsoft::UI::Xaml::Printing::GetPreviewPageEventArgs const& args)
+                {
+                    auto senderDoc = sender.as<winrt::Microsoft::UI::Xaml::Printing::PrintDocument>();
+                    if (args.PageNumber() > 0 && args.PageNumber() <= pdfInfo->m_pagecount)
+                    {
+                        winrt::Microsoft::UI::Xaml::Controls::Grid pageContainer;
+                        pageContainer.Width(printSize->Width);
+                        pageContainer.Height(printSize->Height);
+
+                        winrt::Microsoft::UI::Xaml::Controls::Image pageImage;
+                        pageImage.Source(pdfInfo->m_renderedPages[args.PageNumber() - 1]);
+                        pageImage.Stretch(winrt::Microsoft::UI::Xaml::Media::Stretch::Uniform);
+                        pageImage.HorizontalAlignment(winrt::Microsoft::UI::Xaml::HorizontalAlignment::Center);
+                        pageImage.VerticalAlignment(winrt::Microsoft::UI::Xaml::VerticalAlignment::Center);
+
+                        pageContainer.Children().Append(pageImage);
+
+                        senderDoc.SetPreviewPage(args.PageNumber(), pageContainer);
+                    }
+                });
+
+            m_printDocument.AddPages([pdfInfo, printSize](auto const& sender, winrt::Microsoft::UI::Xaml::Printing::AddPagesEventArgs const& args)
+                {
+                    auto senderDoc = sender.as<winrt::Microsoft::UI::Xaml::Printing::PrintDocument>();
+                    for (int i = 0; i < pdfInfo->m_pagecount; ++i)
+                    {
+                        winrt::Microsoft::UI::Xaml::Controls::Grid pageContainer;
+                        pageContainer.Width(printSize->Width);
+                        pageContainer.Height(printSize->Height);
+
+                        winrt::Microsoft::UI::Xaml::Controls::Image pageImage;
+                        pageImage.Source(pdfInfo->m_renderedPages[i]);
+                        pageImage.Stretch(winrt::Microsoft::UI::Xaml::Media::Stretch::Uniform);
+                        pageImage.HorizontalAlignment(winrt::Microsoft::UI::Xaml::HorizontalAlignment::Center);
+                        pageImage.VerticalAlignment(winrt::Microsoft::UI::Xaml::VerticalAlignment::Center);
+
+                        pageContainer.Children().Append(pageImage);
+
+                        senderDoc.AddPage(pageContainer);
+                    }
+                    senderDoc.AddPagesComplete();
+                });
+
+            if (m_printTaskRequestedToken)
+            {
+                printManager.PrintTaskRequested(m_printTaskRequestedToken);
+            }
+
+            m_printTaskRequestedToken = printManager.PrintTaskRequested([printDocumentSource, fileName = pdfInfo->m_fileName](
+                winrt::Windows::Graphics::Printing::PrintManager const&,
+                winrt::Windows::Graphics::Printing::PrintTaskRequestedEventArgs const& args)
+                {
+                    auto deferral = args.Request().GetDeferral();
+                    args.Request().CreatePrintTask(fileName, [printDocumentSource](winrt::Windows::Graphics::Printing::PrintTaskSourceRequestedArgs const& sourceArgs)
+                        {
+                            sourceArgs.SetSource(printDocumentSource);
+                        });
+                    deferral.Complete();
+                });
+
+            try
+            {
+                winrt::Windows::Foundation::IAsyncOperation<bool> showPrintUIOp{ nullptr };
+                winrt::check_hresult(printInterop->ShowPrintUIForWindowAsync(hwnd, winrt::guid_of<decltype(showPrintUIOp)>(), winrt::put_abi(showPrintUIOp)));
+
+                co_await showPrintUIOp;
+            }
+            catch (winrt::hresult_error const& ex)
+            {
+                // TODO: printing fails
+            }
         }
     }

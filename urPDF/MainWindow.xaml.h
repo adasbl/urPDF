@@ -10,6 +10,7 @@ extern "C" {
 #include <map>
 #include <vector>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
+#include <winrt/Microsoft.UI.Xaml.Printing.h>
 
 namespace winrt::urPDF::implementation
 {
@@ -60,6 +61,7 @@ namespace winrt::urPDF::implementation
         void NextPageButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
         void PreviousPageButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
         void AboutButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
+        winrt::fire_and_forget PrintButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
 
         winrt::event_token PropertyChanged(winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler);
         void PropertyChanged(winrt::event_token const& token) noexcept;
@@ -70,6 +72,9 @@ namespace winrt::urPDF::implementation
         int32_t m_pageNumber{ 0 };
         int32_t m_pageCounter{ 0 };
         winrt::event<winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler> m_propertyChanged;
+
+        winrt::Microsoft::UI::Xaml::Printing::PrintDocument m_printDocument{ nullptr };
+        winrt::event_token m_printTaskRequestedToken{};
     };
 }
 
