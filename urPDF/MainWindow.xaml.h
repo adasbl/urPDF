@@ -22,7 +22,7 @@ namespace winrt::urPDF::implementation
 
         winrt::hstring m_openedFilePath;
         winrt::hstring m_fileName = L"unknown";
-        std::vector<winrt::Microsoft::UI::Xaml::Media::Imaging::SoftwareBitmapSource> m_renderedPages;
+        std::vector<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> m_renderedPages;
         int32_t m_currentPageIndex = { 1 };
         double m_currentPageZoom = { 1.0 };
         int m_currentRotation = { 0 };

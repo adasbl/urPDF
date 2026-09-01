@@ -341,11 +341,11 @@
 
             co_await resume_foreground(DispatcherQueue());
 
-            SoftwareBitmapSource bitmap_source;
-            co_await bitmap_source.SetBitmapAsync(bitmap);
+            winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap current_writeable_bitmap(width, height);
+            bitmap.CopyToBuffer(current_writeable_bitmap.PixelBuffer());
 
             winrt::Microsoft::UI::Xaml::Controls::Image img;
-            img.Source(bitmap_source);
+            img.Source(current_writeable_bitmap);
             img.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 5 });
 
             PagesContainer().Children().Clear();
@@ -354,7 +354,7 @@
             auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
             if (currentTab)
             {
-                currentTab.Tag(bitmap_source);
+                currentTab.Tag(current_writeable_bitmap);
                 currentTab.Header(winrt::box_value(PdfTab->m_fileName));
                 DisplayPageCount(PdfTab->m_pagecount);
                 DisplayPageNumber(PdfTab->m_currentPageIndex);
@@ -404,12 +404,12 @@
                 
                 co_await resume_foreground(DispatcherQueue());
 
-                SoftwareBitmapSource current_bitmap_source;
-                co_await current_bitmap_source.SetBitmapAsync(bitmap);
-                PdfTab->m_renderedPages.push_back(current_bitmap_source);
+                winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap current_writeable_bitmap(width, height);
+                bitmap.CopyToBuffer(current_writeable_bitmap.PixelBuffer());
+                PdfTab->m_renderedPages.push_back(current_writeable_bitmap);
 
                 winrt::Microsoft::UI::Xaml::Controls::Image img;
-                img.Source(current_bitmap_source);
+                img.Source(current_writeable_bitmap);
                 img.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 5 });
 
                 PagesContainer().Children().Append(img);
