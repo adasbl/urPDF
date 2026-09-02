@@ -47,14 +47,19 @@
                             <ComboBoxItem Content="Mica Alt" Tag="MicaAlt"/>
                         </ComboBox>
                     </StackPanel>
-                    <ToggleSwitch
-                            OffContent="On" OnContent="Off" 
-                            Toggled="ToggleSwitch_Toggled"/>
+                    
                 </StackPanel>
 
                 <StackPanel Spacing="12">
                     <TextBlock Text="Default behavior" Style="{StaticResource SubtitleTextBlockStyle}"/>
+
+                    <ToggleSwitch
+                        OffContent="On" OnContent="Off" 
+                        Toggled="ToggleSwitch_Toggled"/>
+                    
                 </StackPanel>
+
+                
 
                 <StackPanel Spacing="12">
                     <TextBlock Text="Updates" Style="{StaticResource SubtitleTextBlockStyle}"/>

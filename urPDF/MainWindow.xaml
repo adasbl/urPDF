@@ -229,15 +229,15 @@
                 BorderThickness="1">
                 <Grid>
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
-                    <Button Grid.Row="0"
+                    <Frame x:Name="SettingsFrame"
+                         Grid.Row="0"/>
+                    <Button Grid.Row="1"
                         Content="Close"
                         HorizontalAlignment="Right"
                         Click="CloseSettings_Click"/>
-                    <Frame x:Name="SettingsFrame"
-                         Grid.Row="1"/>
                 </Grid>
             </Border>
         </Grid>
