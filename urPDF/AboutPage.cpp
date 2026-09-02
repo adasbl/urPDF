@@ -27,9 +27,4 @@ namespace winrt::urPDF::implementation
             frame.Content(nullptr);
         }
     }
-
-    void AboutPage::ClickHandler(IInspectable const&, RoutedEventArgs const&)
-    {
-        Button().Content(box_value(L"Clicked"));
-    }
 }
