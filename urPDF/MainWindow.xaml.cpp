@@ -144,6 +144,11 @@
             dialog.XamlRoot(this->Content().XamlRoot());
             dialog.CloseButtonText(L"Close");
 
+            if (auto root = Content().try_as<FrameworkElement>())
+            {
+                dialog.RequestedTheme(root.RequestedTheme());
+            }
+
             winrt::urPDF::SettingsPage settingsPage;
 
             settingsPage.ThemeChanged([this, dialog](auto const&, winrt::hstring const& themeName)
