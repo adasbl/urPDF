@@ -35,11 +35,7 @@ namespace winrt::urPDF::implementation
 
     void SettingsPage::BackButton_Click(winrt::Windows::Foundation::IInspectable const& /* sender */, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /* e */)
     {
-        if (auto frame = this->Frame())
-        {
-            frame.Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
-            frame.Content(nullptr);
-        }
+        m_backRequestedEvent(*this, nullptr);
     }
 
     void SettingsPage::ToggleSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args)
@@ -113,6 +109,16 @@ namespace winrt::urPDF::implementation
     void SettingsPage::BackdropChanged(winrt::event_token const& token) noexcept
     {
         m_backdropChangedEvent.remove(token);
+    }
+
+    winrt::event_token SettingsPage::BackRequested(winrt::Windows::Foundation::EventHandler<winrt::Windows::Foundation::IInspectable> const& handler)
+    {
+        return m_backRequestedEvent.add(handler);
+    }
+
+    void SettingsPage::BackRequested(winrt::event_token const& token) noexcept
+    {
+        m_backRequestedEvent.remove(token);
     }
 
     void SettingsPage::LoadSavedSettings()

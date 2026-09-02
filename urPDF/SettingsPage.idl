@@ -8,5 +8,6 @@ namespace urPDF
 
         event Windows.Foundation.EventHandler<String> ThemeChanged;
         event Windows.Foundation.EventHandler<String> BackdropChanged;
+        event Windows.Foundation.EventHandler<Object> BackRequested;
     }
 }

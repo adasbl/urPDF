@@ -144,6 +144,13 @@
         {
             winrt::urPDF::SettingsPage settingsPage;
 
+            settingsPage.BackRequested([this](auto const&, auto const&)
+            {
+                SettingsFrame().Content(nullptr);
+                SettingsOverlay().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+                MainWindowUI().IsHitTestVisible(true);
+            });
+
             settingsPage.ThemeChanged([this](auto const&, winrt::hstring const& themeName)
             {
                 ApplyTheme(themeName);
