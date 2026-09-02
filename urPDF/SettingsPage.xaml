@@ -16,7 +16,7 @@
         </Grid.RowDefinitions>
 
         <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="16" Margin="0,0,0,24">
-            <Button x:Name="BackButton" Click="BackButton_Click" Style="{StaticResource NavigationBackButtonNormalStyle}"/>
+            <Button x:Name="BackButton" Click="BackButton_Click" Visibility="Collapsed" Style="{StaticResource NavigationBackButtonNormalStyle}"/>
             <TextBlock Text="Settings" Style="{StaticResource TitleTextBlockStyle}" VerticalAlignment="Center"/>
         </StackPanel>
 
@@ -28,9 +28,9 @@
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8" Margin="8,0,0,0">
                         <TextBlock Text="Theme" VerticalAlignment="Center"/>
                         <ComboBox
+                            x:Name="ThemeComboBox"
                             Width="160"
-                            SelectionChanged="ThemeSelection_SelectionChanged"
-                            SelectedIndex="0">  
+                            SelectionChanged="ThemeSelection_SelectionChanged">  
                             <ComboBoxItem Content="Default (System)" Tag="Default"/>
                             <ComboBoxItem Content="Light" Tag="Light"/>
                             <ComboBoxItem Content="Dark" Tag="Dark"/>
@@ -39,9 +39,9 @@
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8" Margin="8,0,0,0">
                         <TextBlock Text="Transparency Effect" VerticalAlignment="Center"/>
                         <ComboBox
+                            x:Name="TransparencyComboBox"
                             Width="160"
-                            SelectionChanged="TransparencySelection_SelectionChanged"
-                            SelectedIndex="0">
+                            SelectionChanged="TransparencySelection_SelectionChanged">
                             <ComboBoxItem Content="None" Tag="None"/>
                             <ComboBoxItem Content="Mica" Tag="Mica"/>
                             <ComboBoxItem Content="Mica Alt" Tag="MicaAlt"/>

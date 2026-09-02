@@ -138,40 +138,34 @@
         }
 
         // SETTINGS
-        winrt::fire_and_forget MainWindow::SettingsButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+        void MainWindow::SettingsButton_Click(
+            winrt::Windows::Foundation::IInspectable const&,
+            winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
         {
-            winrt::Microsoft::UI::Xaml::Controls::ContentDialog dialog;
-            dialog.XamlRoot(this->Content().XamlRoot());
-            dialog.CloseButtonText(L"Close");
-
-            if (auto root = Content().try_as<FrameworkElement>())
-            {
-                dialog.RequestedTheme(root.RequestedTheme());
-            }
-
             winrt::urPDF::SettingsPage settingsPage;
 
-            settingsPage.ThemeChanged([this, dialog](auto const&, winrt::hstring const& themeName)
+            settingsPage.ThemeChanged([this](auto const&, winrt::hstring const& themeName)
             {
                 ApplyTheme(themeName);
-
-                auto theme = winrt::Microsoft::UI::Xaml::ElementTheme::Default;
-
-                if (themeName == L"Light")
-                    theme = winrt::Microsoft::UI::Xaml::ElementTheme::Light;
-                else if (themeName == L"Dark")
-                    theme = winrt::Microsoft::UI::Xaml::ElementTheme::Dark;
-
-                dialog.RequestedTheme(theme);
             });
 
-            settingsPage.BackdropChanged([this, dialog](auto const&, winrt::hstring const& transparencyValue)
+            settingsPage.BackdropChanged([this](auto const&, winrt::hstring const& transparencyValue)
             {
-                    ApplyBackdrop(transparencyValue);
+                ApplyBackdrop(transparencyValue);
             });
 
-            dialog.Content(settingsPage);
-            co_await dialog.ShowAsync();
+            SettingsFrame().Content(settingsPage);
+            SettingsOverlay().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
+            MainWindowUI().IsHitTestVisible(false);
+        }
+
+        void MainWindow::CloseSettings_Click(
+            winrt::Windows::Foundation::IInspectable const&,
+            winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
+        {
+            SettingsFrame().Content(nullptr);
+            SettingsOverlay().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+            MainWindowUI().IsHitTestVisible(true);
         }
 
         void MainWindow::LoadSettings()

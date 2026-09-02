@@ -24,7 +24,8 @@ namespace winrt::urPDF::implementation
     SettingsPage::SettingsPage()
     {
         InitializeComponent();
-        this->m_isInitializing = false;
+        LoadSavedSettings();
+        m_isInitializing = false;
     }
 
     void SettingsPage::ClickHandler(IInspectable const&, RoutedEventArgs const&)
@@ -108,8 +109,37 @@ namespace winrt::urPDF::implementation
     {
         return m_backdropChangedEvent.add(handler);
     }
+
     void SettingsPage::BackdropChanged(winrt::event_token const& token) noexcept
     {
         m_backdropChangedEvent.remove(token);
+    }
+
+    void SettingsPage::LoadSavedSettings()
+    {
+        auto settings = winrt::Windows::Storage::ApplicationData::Current().LocalSettings();
+
+        winrt::hstring savedTheme = L"Default";
+        if (settings.Values().HasKey(L"AppTheme"))
+        {
+            savedTheme = winrt::unbox_value<winrt::hstring>(settings.Values().Lookup(L"AppTheme"));
+        }
+
+        int index = 0;
+        if (savedTheme == L"Light") { index = 1; }
+        else if (savedTheme == L"Dark") { index = 2; }
+
+        ThemeComboBox().SelectedIndex(index);
+
+        winrt::hstring savedTransparency = L"None";
+        if (settings.Values().HasKey(L"Transparency"))
+        {
+            savedTransparency = winrt::unbox_value<winrt::hstring>(settings.Values().Lookup(L"Transparency"));
+        }
+        index = 0;
+        if (savedTransparency == L"Mica") { index = 1; }
+        else if (savedTransparency == L"MicaAlt") { index = 2; }
+
+        TransparencyComboBox().SelectedIndex(index);
     }
 }

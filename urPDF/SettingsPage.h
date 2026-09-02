@@ -19,6 +19,7 @@ namespace winrt::urPDF::implementation
         void SaveBackdropSettings(winrt::hstring const& transparencyValue);
         void SaveSettings(winrt::hstring const& themeName);
         void ToggleSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        void LoadSavedSettings();
 
         winrt::event_token ThemeChanged(winrt::Windows::Foundation::EventHandler<winrt::hstring> const& handler);
         void ThemeChanged(winrt::event_token const& token) noexcept;

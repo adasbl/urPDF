@@ -212,5 +212,35 @@
         </Grid>
 
         <Frame x:Name="RootFrame" Grid.Row="0" Grid.RowSpan="2" Visibility="Collapsed" Canvas.ZIndex="100"/>
+
+        <Grid x:Name="SettingsOverlay"
+            Grid.RowSpan="2"
+            Visibility="Collapsed"
+            Background="#80000000"
+            Canvas.ZIndex="200">
+            <Border Width="800"
+                Height="600"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Padding="24"
+                CornerRadius="12"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Button Grid.Row="0"
+                        Content="Close"
+                        HorizontalAlignment="Right"
+                        Click="CloseSettings_Click"/>
+                    <Frame x:Name="SettingsFrame"
+                         Grid.Row="1"/>
+                </Grid>
+            </Border>
+        </Grid>
+
     </Grid>
 </Window>
