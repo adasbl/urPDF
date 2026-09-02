@@ -244,6 +244,8 @@
         // ABOUT
         void winrt::urPDF::implementation::MainWindow::AboutButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
         {
+            MainWindowUI().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+
             RootFrame().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
             RootFrame().Navigate(winrt::xaml_typename<winrt::urPDF::AboutPage>());
         }
