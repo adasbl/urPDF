@@ -189,11 +189,11 @@
                     </Grid>
 
                     <ScrollViewer Grid.Row="1"
-                                      x:Name="PdfScrollViewer" 
-                                      ZoomMode="Enabled" 
-                                      HorizontalScrollBarVisibility="Auto" 
-                                      VerticalScrollBarVisibility="Auto"
-                                      ViewChanged="PdfScrollViewer_ViewChanged">
+                        x:Name="PdfScrollViewer" 
+                        ZoomMode="Enabled" 
+                        HorizontalScrollBarVisibility="Auto" 
+                        VerticalScrollBarVisibility="Auto"
+                        ViewChanged="PdfScrollViewer_ViewChanged">
                         <StackPanel x:Name="PagesContainer" HorizontalAlignment="Center" Spacing="15" Margin="20"/>
                     </ScrollViewer>
 
