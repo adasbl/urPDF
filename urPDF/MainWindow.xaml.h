@@ -9,6 +9,7 @@ extern "C" {
 
 #include <map>
 #include <vector>
+#include <winrt/Windows.Storage.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <winrt/Microsoft.UI.Xaml.Printing.h>
 
@@ -48,6 +49,7 @@ namespace winrt::urPDF::implementation
         void LoadSettings();
 
         winrt::fire_and_forget OpenPdfFileAsync(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        winrt::fire_and_forget OpenPdfFileAsync(winrt::Windows::Storage::StorageFile const& file);
         void TabView_AddButtonClick(winrt::Windows::Foundation::IInspectable const& sender, winrt::Windows::Foundation::IInspectable const& args);
         void TabView_TabCloseRequested(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::TabViewTabCloseRequestedEventArgs const& args);
         void TabView_Loaded(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
@@ -72,6 +74,7 @@ namespace winrt::urPDF::implementation
         std::map<winrt::Microsoft::UI::Xaml::Controls::TabViewItem, std::shared_ptr<PdfTabInfo>> m_openedTabs;
         int32_t m_pageNumber{ 0 };
         int32_t m_pageCounter{ 0 };
+        winrt::Windows::Storage::StorageFile m_pendingFile{ nullptr };
         winrt::event<winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler> m_propertyChanged;
 
         winrt::Microsoft::UI::Xaml::Printing::PrintDocument m_printDocument{ nullptr };

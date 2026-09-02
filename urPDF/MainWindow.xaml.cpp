@@ -26,6 +26,7 @@
     #include <coroutine>
     #include <winrt/Windows.Graphics.Printing.h>
     #include <winrt/Microsoft.UI.Xaml.Printing.h>
+    #include <winrt/Microsoft.Windows.AppLifecycle.h>
     #include <printmanagerinterop.h>
 
     
@@ -53,6 +54,16 @@
 
             m_ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
             fz_register_document_handlers(m_ctx);
+
+            auto activationArgs = winrt::Microsoft::Windows::AppLifecycle::AppInstance::GetCurrent().GetActivatedEventArgs();
+            if (activationArgs.Kind() == winrt::Microsoft::Windows::AppLifecycle::ExtendedActivationKind::File)
+            {
+                auto fileArgs = activationArgs.Data().try_as<winrt::Windows::ApplicationModel::Activation::IFileActivatedEventArgs>();
+                if (fileArgs && fileArgs.Files().Size() > 0)
+                {
+                    m_pendingFile = fileArgs.Files().GetAt(0).try_as<winrt::Windows::Storage::StorageFile>();
+                }
+            }
         }
 
         MainWindow::~MainWindow()
@@ -80,6 +91,13 @@
         {
             auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
             TabView_AddButtonClick(tabView, nullptr);
+
+            if (m_pendingFile)
+            {
+                auto file = m_pendingFile;
+                m_pendingFile = nullptr;
+                OpenPdfFileAsync(file);
+            }
         }
 
         winrt::event_token MainWindow::PropertyChanged(winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler)
@@ -271,6 +289,11 @@
             auto file = co_await filePicker.PickSingleFileAsync();
             if (!file) co_return;
 
+            OpenPdfFileAsync(file);
+        }
+
+        winrt::fire_and_forget MainWindow::OpenPdfFileAsync(winrt::Windows::Storage::StorageFile const& file)
+        {
             std::string filePath = winrt::to_string(file.Path());
             winrt::hstring fileName = file.Name();
 
