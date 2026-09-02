@@ -1,0 +1,1 @@
+This application operates entirely offline. It does not collect, store, transmit, or share any personal data, telemetry, or user documents. All processing happens locally on your device.
