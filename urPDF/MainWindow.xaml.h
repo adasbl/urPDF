@@ -88,6 +88,10 @@ namespace winrt::urPDF::implementation
 
         winrt::Microsoft::UI::Xaml::Printing::PrintDocument m_printDocument{ nullptr };
         winrt::event_token m_printTaskRequestedToken{};
+        bool m_isRendering{ false };
+
+        bool TryAcquireRenderingLock();
+        void ReleaseRenderingLock();
     };
 }
 

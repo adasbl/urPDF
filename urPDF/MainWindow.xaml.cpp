@@ -70,8 +70,6 @@
 
             LoadSettings();
 
-            // MuPDF needs application-provided locks when contexts are used
-            // from more than one thread. Render operations use cloned contexts.
             m_mupdfLocks.user = m_mupdfMutexes.data();
             m_mupdfLocks.lock = LockMuPdf;
             m_mupdfLocks.unlock = UnlockMuPdf;
@@ -317,6 +315,11 @@
 
         winrt::fire_and_forget MainWindow::OpenPdfFileAsync(winrt::Windows::Storage::StorageFile const& file)
         {
+            if (!TryAcquireRenderingLock())
+            {
+                co_return;
+            }
+
             std::string filePath = winrt::to_string(file.Path());
             winrt::hstring fileName = file.Name();
 
@@ -352,6 +355,7 @@
             m_openedTabs[targetTab] = PdfInfo;
 
             co_await RenderMultiPageAsync(PdfInfo);
+            ReleaseRenderingLock();
         }
 
         void MainWindow::EmptyTab_DragOver(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::DragEventArgs const& args)
@@ -550,6 +554,28 @@
             }
         }
 
+        bool MainWindow::TryAcquireRenderingLock()
+        {
+            if (m_isRendering)
+            {
+                return false;
+            }
+
+            m_isRendering = true;
+            ZoomInButton().IsEnabled(false);
+            ZoomOutButton().IsEnabled(false);
+            RotateButton().IsEnabled(false);
+            return true;
+        }
+
+        void MainWindow::ReleaseRenderingLock()
+        {
+            m_isRendering = false;
+            ZoomInButton().IsEnabled(true);
+            ZoomOutButton().IsEnabled(true);
+            RotateButton().IsEnabled(true);
+        }
+
         // UI ELEMENTS
         void MainWindow::TabView_AddButtonClick(winrt::Windows::Foundation::IInspectable const& sender, winrt::Windows::Foundation::IInspectable const& args)
         {
@@ -621,12 +647,14 @@
 
         winrt::fire_and_forget MainWindow::RotateButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
         {
-            auto button = sender.as<winrt::Microsoft::UI::Xaml::Controls::Button>();
-            button.IsEnabled(false);
-
             auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
             if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
             {
+                if (!TryAcquireRenderingLock())
+                {
+                    co_return;
+                }
+
                 auto pdfInfo = m_openedTabs[currentTab];
 
                 pdfInfo->m_currentRotation += 90;
@@ -637,15 +665,12 @@
 
                 PagesContainer().Children().Clear();
                 co_await RenderMultiPageAsync(pdfInfo);
+                ReleaseRenderingLock();
             }
-
-            button.IsEnabled(true);
         }
 
         winrt::fire_and_forget MainWindow::ZoomInButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
         {
-            auto button = sender.as<winrt::Microsoft::UI::Xaml::Controls::Button>();
-
             auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
             if (!currentTab || m_openedTabs.find(currentTab) == m_openedTabs.end())
             {
@@ -661,19 +686,21 @@
                 co_return;
             }
 
+            if (!TryAcquireRenderingLock())
+            {
+                co_return;
+            }
+
             pdfInfo->m_currentPageZoom = (std::min)(maxZoom, pdfInfo->m_currentPageZoom + zoomStep);
-            button.IsEnabled(false);
             PagesContainer().Children().Clear();
 
             co_await RenderMultiPageAsync(pdfInfo);
 
-            button.IsEnabled(true);
+            ReleaseRenderingLock();
         }
 
         winrt::fire_and_forget MainWindow::ZoomOutButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
         {
-            auto button = sender.as<winrt::Microsoft::UI::Xaml::Controls::Button>();
-
             auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
             if (!currentTab || m_openedTabs.find(currentTab) == m_openedTabs.end())
             {
@@ -689,13 +716,17 @@
                 co_return;
             }
 
+            if (!TryAcquireRenderingLock())
+            {
+                co_return;
+            }
+
             pdfInfo->m_currentPageZoom = (std::max)(minZoom, pdfInfo->m_currentPageZoom - zoomStep);
-            button.IsEnabled(false);
             PagesContainer().Children().Clear();
 
             co_await RenderMultiPageAsync(pdfInfo);
 
-            button.IsEnabled(true);
+            ReleaseRenderingLock();
         }
 
         void MainWindow::PdfScrollViewer_ViewChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args)
