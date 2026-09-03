@@ -28,6 +28,7 @@
     #include <winrt/Microsoft.UI.Xaml.Printing.h>
     #include <winrt/Microsoft.Windows.AppLifecycle.h>
     #include <printmanagerinterop.h>
+    #include <winrt/Microsoft.UI.Windowing.h>
 
     
     using namespace winrt;
@@ -46,6 +47,8 @@
         MainWindow::MainWindow()
         {
             InitializeComponent();
+
+            AppWindow().SetIcon(L"Assets\\logo.ico");
 
             ExtendsContentIntoTitleBar(true);
             SetTitleBar(AppTitleBar());

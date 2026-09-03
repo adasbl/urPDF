@@ -133,6 +133,7 @@
     <ClInclude Include="MainWindow.xaml.h">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClInclude>
+    <ClInclude Include="resource.h" />
     <ClInclude Include="SettingsPage.h">
       <DependentUpon>SettingsPage.xaml</DependentUpon>
       <SubType>Code</SubType>
@@ -189,6 +190,7 @@
     <Image Include="Assets\LargeTile.scale-200.png" />
     <Image Include="Assets\LargeTile.scale-400.png" />
     <Image Include="Assets\LockScreenLogo.scale-200.png" />
+    <Image Include="Assets\logo.ico" />
     <Image Include="Assets\SmallTile.scale-100.png" />
     <Image Include="Assets\SmallTile.scale-125.png" />
     <Image Include="Assets\SmallTile.scale-150.png" />
@@ -250,6 +252,9 @@
   -->
   <ItemGroup>
     <None Include="packages.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="urPDF.rc" />
   </ItemGroup>
   <PropertyGroup Condition="'$(DisableHasPackageAndPublishMenuAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
     <HasPackageAndPublishMenu>true</HasPackageAndPublishMenu>
