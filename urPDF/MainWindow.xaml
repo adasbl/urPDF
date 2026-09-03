@@ -212,7 +212,9 @@
 
                         <Border x:Name="EmptyTabDropZone"
                             AllowDrop="True"
-                            
+                            DragOver="EmptyTab_DragOver"
+                            DragLeave="EmptyTab_DragLeave"
+                            Drop="EmptyTab_Drop"
                             HorizontalAlignment="Stretch"
                             VerticalAlignment="Stretch"
                             Margin="24"

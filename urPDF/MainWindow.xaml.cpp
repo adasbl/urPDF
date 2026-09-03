@@ -337,6 +337,51 @@
             co_await RenderMultiPageAsync(PdfInfo);
         }
 
+        void MainWindow::EmptyTab_DragOver(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::DragEventArgs const& args)
+        {
+            if (args.DataView().Contains(winrt::Windows::ApplicationModel::DataTransfer::StandardDataFormats::StorageItems()))
+            {
+                args.AcceptedOperation(winrt::Windows::ApplicationModel::DataTransfer::DataPackageOperation::Copy);
+                EmptyTabDropHint().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
+            }
+            else
+            {
+                args.AcceptedOperation(winrt::Windows::ApplicationModel::DataTransfer::DataPackageOperation::None);
+            }
+        }
+
+        void MainWindow::EmptyTab_DragLeave(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::DragEventArgs const&)
+        {
+            EmptyTabDropHint().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+        }
+
+        winrt::fire_and_forget MainWindow::EmptyTab_Drop(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::DragEventArgs const& args)
+        {
+            auto deferral = args.GetDeferral();
+            auto storageItems = co_await args.DataView().GetStorageItemsAsync();
+
+            EmptyTabDropHint().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+
+            for (auto const& item : storageItems)
+            {
+                auto file = item.try_as<winrt::Windows::Storage::StorageFile>();
+                if (file)
+                {
+                    auto fileType = file.FileType();
+                    std::wstring normalizedFileType(fileType.c_str());
+                    std::transform(normalizedFileType.begin(), normalizedFileType.end(), normalizedFileType.begin(), [](wchar_t character) { return static_cast<wchar_t>(std::towlower(character)); });
+
+                    if (normalizedFileType == L".pdf")
+                    {
+                        deferral.Complete();
+                        OpenPdfFileAsync(file);
+                        co_return;
+                    }
+                }
+            }
+
+            deferral.Complete();
+        }
         // PAGE RENDERING
         winrt::Windows::Foundation::IAsyncAction MainWindow::RenderSinglePageAsync(std::shared_ptr<PdfTabInfo> PdfTab)
         {
