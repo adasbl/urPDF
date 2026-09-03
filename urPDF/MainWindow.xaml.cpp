@@ -382,6 +382,7 @@
 
             deferral.Complete();
         }
+
         // PAGE RENDERING
         winrt::Windows::Foundation::IAsyncAction MainWindow::RenderSinglePageAsync(std::shared_ptr<PdfTabInfo> PdfTab)
         {
@@ -447,6 +448,8 @@
 
         winrt::Windows::Foundation::IAsyncAction MainWindow::RenderMultiPageAsync(std::shared_ptr<PdfTabInfo> PdfTab)
         {
+            PdfTab->m_renderedPages.clear();
+
             co_await winrt::resume_background();
 
             int pagecount = fz_count_pages(m_ctx, PdfTab->m_doc);
@@ -589,7 +592,6 @@
             button.IsEnabled(false);
 
             auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
-
             if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
             {
                 auto pdfInfo = m_openedTabs[currentTab];
@@ -603,6 +605,63 @@
                 PagesContainer().Children().Clear();
                 co_await RenderMultiPageAsync(pdfInfo);
             }
+
+            button.IsEnabled(true);
+        }
+
+        winrt::fire_and_forget MainWindow::ZoomInButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+        {
+            auto button = sender.as<winrt::Microsoft::UI::Xaml::Controls::Button>();
+
+            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+            if (!currentTab || m_openedTabs.find(currentTab) == m_openedTabs.end())
+            {
+                co_return;
+            }
+
+            auto pdfInfo = m_openedTabs[currentTab];
+            constexpr double maxZoom = 3.0;
+            constexpr double zoomStep = 0.1;
+
+            if (pdfInfo->m_currentPageZoom >= maxZoom)
+            {
+                co_return;
+            }
+
+            pdfInfo->m_currentPageZoom = (std::min)(maxZoom, pdfInfo->m_currentPageZoom + zoomStep);
+            button.IsEnabled(false);
+            PagesContainer().Children().Clear();
+
+            co_await RenderMultiPageAsync(pdfInfo);
+
+            button.IsEnabled(true);
+        }
+
+        winrt::fire_and_forget MainWindow::ZoomOutButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+        {
+            auto button = sender.as<winrt::Microsoft::UI::Xaml::Controls::Button>();
+
+            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+            if (!currentTab || m_openedTabs.find(currentTab) == m_openedTabs.end())
+            {
+                co_return;
+            }
+
+            auto pdfInfo = m_openedTabs[currentTab];
+            constexpr double minZoom = 0.5;
+            constexpr double zoomStep = 0.1;
+
+            if (pdfInfo->m_currentPageZoom <= minZoom)
+            {
+                co_return;
+            }
+
+            pdfInfo->m_currentPageZoom = (std::max)(minZoom, pdfInfo->m_currentPageZoom - zoomStep);
+            button.IsEnabled(false);
+            PagesContainer().Children().Clear();
+
+            co_await RenderMultiPageAsync(pdfInfo);
+
             button.IsEnabled(true);
         }
 

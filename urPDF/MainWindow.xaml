@@ -148,8 +148,8 @@
                         </StackPanel>
 
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="4">
-                                
-                            <Button>
+
+                            <Button Click="ZoomInButton_Click">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE8A3;"/>
@@ -157,7 +157,7 @@
                                 </Button.Content>
                             </Button>
 
-                            <Button>
+                            <Button Click="ZoomOutButton_Click">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE71F;"/>
