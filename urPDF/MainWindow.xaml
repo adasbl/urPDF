@@ -201,7 +201,9 @@
                     <Grid Grid.Row="1">
                         <ScrollViewer
                             x:Name="PdfScrollViewer"
-                            ZoomMode="Disabled"
+                            ZoomMode="Enabled"
+                            MinZoomFactor="0.5"
+                            MaxZoomFactor="3.0"
                             HorizontalScrollBarVisibility="Auto"
                             VerticalScrollBarVisibility="Auto"
                             ViewChanged="PdfScrollViewer_ViewChanged">
