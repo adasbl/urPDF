@@ -54,6 +54,13 @@
         {
             static_cast<std::mutex*>(user)[lock].unlock();
         }
+
+        constexpr double PdfRenderScale(double zoom) noexcept
+        {
+            constexpr double baseDpi = 96.0;
+            constexpr double pdfPointsPerInch = 72.0;
+            return (baseDpi / pdfPointsPerInch) * zoom;
+        }
     }
 
     namespace winrt::urPDF::implementation
@@ -420,7 +427,8 @@
 
             fz_page* page = fz_load_page(renderCtx, PdfTab->m_doc, 0);
 
-            fz_matrix transform = fz_scale(PdfTab->m_currentPageZoom, PdfTab->m_currentPageZoom);
+            double renderScale = PdfRenderScale(PdfTab->m_currentPageZoom);
+            fz_matrix transform = fz_scale(renderScale, renderScale);
             transform = fz_concat(transform, fz_rotate(PdfTab->m_currentRotation));
 
             fz_rect rect = fz_bound_page(renderCtx, page);
@@ -459,6 +467,7 @@
 
             winrt::Microsoft::UI::Xaml::Controls::Image img;
             img.Source(current_writeable_bitmap);
+            img.Stretch(winrt::Microsoft::UI::Xaml::Media::Stretch::None);
             img.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 5 });
 
             PagesContainer().Children().Clear();
@@ -489,7 +498,8 @@
             int pagecount = fz_count_pages(renderCtx, PdfTab->m_doc);
             PdfTab->m_pagecount = pagecount;
 
-            fz_matrix transform = fz_scale(PdfTab->m_currentPageZoom, PdfTab->m_currentPageZoom);
+            double renderScale = PdfRenderScale(PdfTab->m_currentPageZoom);
+            fz_matrix transform = fz_scale(renderScale, renderScale);
             transform = fz_concat(transform, fz_rotate(PdfTab->m_currentRotation));
 
             for (int i = 0; i < pagecount; i++)
@@ -532,6 +542,7 @@
 
                 winrt::Microsoft::UI::Xaml::Controls::Image img;
                 img.Source(current_writeable_bitmap);
+                img.Stretch(winrt::Microsoft::UI::Xaml::Media::Stretch::None);
                 img.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 5 });
 
                 PagesContainer().Children().Append(img);
@@ -679,7 +690,7 @@
 
             auto pdfInfo = m_openedTabs[currentTab];
             constexpr double maxZoom = 3.0;
-            constexpr double zoomStep = 0.1;
+            constexpr double zoomFactor = 1.1;
 
             if (pdfInfo->m_currentPageZoom >= maxZoom)
             {
@@ -691,7 +702,7 @@
                 co_return;
             }
 
-            pdfInfo->m_currentPageZoom = (std::min)(maxZoom, pdfInfo->m_currentPageZoom + zoomStep);
+            pdfInfo->m_currentPageZoom = (std::min)(maxZoom, pdfInfo->m_currentPageZoom * zoomFactor);
             PagesContainer().Children().Clear();
 
             co_await RenderMultiPageAsync(pdfInfo);
@@ -709,7 +720,7 @@
 
             auto pdfInfo = m_openedTabs[currentTab];
             constexpr double minZoom = 0.5;
-            constexpr double zoomStep = 0.1;
+            constexpr double zoomFactor = 1.1;
 
             if (pdfInfo->m_currentPageZoom <= minZoom)
             {
@@ -721,7 +732,7 @@
                 co_return;
             }
 
-            pdfInfo->m_currentPageZoom = (std::max)(minZoom, pdfInfo->m_currentPageZoom - zoomStep);
+            pdfInfo->m_currentPageZoom = (std::max)(minZoom, pdfInfo->m_currentPageZoom / zoomFactor);
             PagesContainer().Children().Clear();
 
             co_await RenderMultiPageAsync(pdfInfo);
