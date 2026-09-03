@@ -43,6 +43,18 @@
     using namespace Microsoft::UI::Composition::SystemBackdrops;
     using namespace Microsoft::UI::Composition;
     
+    namespace
+    {
+        void LockMuPdf(void* user, int lock)
+        {
+            static_cast<std::mutex*>(user)[lock].lock();
+        }
+
+        void UnlockMuPdf(void* user, int lock)
+        {
+            static_cast<std::mutex*>(user)[lock].unlock();
+        }
+    }
 
     namespace winrt::urPDF::implementation
     {
@@ -58,7 +70,12 @@
 
             LoadSettings();
 
-            m_ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+            // MuPDF needs application-provided locks when contexts are used
+            // from more than one thread. Render operations use cloned contexts.
+            m_mupdfLocks.user = m_mupdfMutexes.data();
+            m_mupdfLocks.lock = LockMuPdf;
+            m_mupdfLocks.unlock = UnlockMuPdf;
+            m_ctx = fz_new_context(nullptr, &m_mupdfLocks, FZ_STORE_UNLIMITED);
             fz_register_document_handlers(m_ctx);
 
             auto activationArgs = winrt::Microsoft::Windows::AppLifecycle::AppInstance::GetCurrent().GetActivatedEventArgs();
@@ -386,29 +403,35 @@
         // PAGE RENDERING
         winrt::Windows::Foundation::IAsyncAction MainWindow::RenderSinglePageAsync(std::shared_ptr<PdfTabInfo> PdfTab)
         {
+            fz_context* renderCtx = fz_clone_context(m_ctx);
+            if (!renderCtx)
+            {
+                co_return;
+            }
+
             co_await winrt::resume_background();
 
-            int pagecount = fz_count_pages(m_ctx, PdfTab->m_doc);
+            int pagecount = fz_count_pages(renderCtx, PdfTab->m_doc);
             PdfTab->m_pagecount = pagecount;
 
-            fz_page* page = fz_load_page(m_ctx, PdfTab->m_doc, 0);
+            fz_page* page = fz_load_page(renderCtx, PdfTab->m_doc, 0);
 
             fz_matrix transform = fz_scale(PdfTab->m_currentPageZoom, PdfTab->m_currentPageZoom);
             transform = fz_concat(transform, fz_rotate(PdfTab->m_currentRotation));
 
-            fz_rect rect = fz_bound_page(m_ctx, page);
+            fz_rect rect = fz_bound_page(renderCtx, page);
             rect = fz_transform_rect(rect, transform);
             fz_irect bbox = fz_round_rect(rect);
 
-            fz_pixmap* pix = fz_new_pixmap_with_bbox(m_ctx, fz_device_bgr(m_ctx), bbox, NULL, 1);
-            fz_clear_pixmap_with_value(m_ctx, pix, 255);
+            fz_pixmap* pix = fz_new_pixmap_with_bbox(renderCtx, fz_device_bgr(renderCtx), bbox, NULL, 1);
+            fz_clear_pixmap_with_value(renderCtx, pix, 255);
 
-            fz_device* dev = fz_new_draw_device(m_ctx, fz_identity, pix);
-            fz_run_page(m_ctx, page, dev, transform, NULL);
-            // fz_close_device(m_ctx, dev);
+            fz_device* dev = fz_new_draw_device(renderCtx, fz_identity, pix);
+            fz_run_page(renderCtx, page, dev, transform, NULL);
+            fz_close_device(renderCtx, dev);
 
-            int width = fz_pixmap_width(m_ctx, pix);
-            int height = fz_pixmap_height(m_ctx, pix);
+            int width = fz_pixmap_width(renderCtx, pix);
+            int height = fz_pixmap_height(renderCtx, pix);
 
             SoftwareBitmap bitmap(BitmapPixelFormat::Bgra8, width, height, BitmapAlphaMode::Premultiplied);
             {
@@ -417,12 +440,13 @@
 
                 uint8_t* data = reference.data();
 
-                memcpy(data, fz_pixmap_samples(m_ctx, pix), width * height * 4);
+                memcpy(data, fz_pixmap_samples(renderCtx, pix), width * height * 4);
             }
 
-            fz_drop_device(m_ctx, dev);
-            fz_drop_pixmap(m_ctx, pix);
-            fz_drop_page(m_ctx, page);
+            fz_drop_device(renderCtx, dev);
+            fz_drop_pixmap(renderCtx, pix);
+            fz_drop_page(renderCtx, page);
+            fz_drop_context(renderCtx);
 
             co_await resume_foreground(DispatcherQueue());
 
@@ -450,9 +474,15 @@
         {
             PdfTab->m_renderedPages.clear();
 
+            fz_context* renderCtx = fz_clone_context(m_ctx);
+            if (!renderCtx)
+            {
+                co_return;
+            }
+
             co_await winrt::resume_background();
 
-            int pagecount = fz_count_pages(m_ctx, PdfTab->m_doc);
+            int pagecount = fz_count_pages(renderCtx, PdfTab->m_doc);
             PdfTab->m_pagecount = pagecount;
 
             fz_matrix transform = fz_scale(PdfTab->m_currentPageZoom, PdfTab->m_currentPageZoom);
@@ -460,20 +490,21 @@
 
             for (int i = 0; i < pagecount; i++)
             {
-                fz_page* page = fz_load_page(m_ctx, PdfTab->m_doc, i);
+                fz_page* page = fz_load_page(renderCtx, PdfTab->m_doc, i);
 
-                fz_rect rect = fz_bound_page(m_ctx, page);
+                fz_rect rect = fz_bound_page(renderCtx, page);
                 rect = fz_transform_rect(rect, transform);
                 fz_irect bbox = fz_round_rect(rect);
 
-                fz_pixmap* pix = fz_new_pixmap_with_bbox(m_ctx, fz_device_bgr(m_ctx), bbox, NULL, 1);
-                fz_clear_pixmap_with_value(m_ctx, pix, 255);
+                fz_pixmap* pix = fz_new_pixmap_with_bbox(renderCtx, fz_device_bgr(renderCtx), bbox, NULL, 1);
+                fz_clear_pixmap_with_value(renderCtx, pix, 255);
 
-                fz_device* dev = fz_new_draw_device(m_ctx, fz_identity, pix);
-                fz_run_page(m_ctx, page, dev, transform, NULL);
+                fz_device* dev = fz_new_draw_device(renderCtx, fz_identity, pix);
+                fz_run_page(renderCtx, page, dev, transform, NULL);
+                fz_close_device(renderCtx, dev);
                     
-                int width = fz_pixmap_width(m_ctx, pix);
-                int height = fz_pixmap_height(m_ctx, pix);
+                int width = fz_pixmap_width(renderCtx, pix);
+                int height = fz_pixmap_height(renderCtx, pix);
 
                 SoftwareBitmap bitmap(BitmapPixelFormat::Bgra8, width, height, BitmapAlphaMode::Premultiplied);
                 {
@@ -482,12 +513,12 @@
 
                     uint8_t* data = reference.data();
 
-                    memcpy(data, fz_pixmap_samples(m_ctx, pix), width * height * 4);
+                    memcpy(data, fz_pixmap_samples(renderCtx, pix), width * height * 4);
                 }
 
-                fz_drop_device(m_ctx, dev);
-                fz_drop_pixmap(m_ctx, pix);
-                fz_drop_page(m_ctx, page);
+                fz_drop_device(renderCtx, dev);
+                fz_drop_pixmap(renderCtx, pix);
+                fz_drop_page(renderCtx, page);
                 
                 co_await resume_foreground(DispatcherQueue());
 
@@ -506,6 +537,8 @@
                     co_await winrt::resume_background();
                 }
             }
+            fz_drop_context(renderCtx);
+
             co_await resume_foreground(DispatcherQueue());
 
             auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();

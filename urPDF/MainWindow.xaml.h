@@ -8,6 +8,8 @@ extern "C" {
 }
 
 #include <map>
+#include <array>
+#include <mutex>
 #include <vector>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
@@ -75,6 +77,8 @@ namespace winrt::urPDF::implementation
         void PropertyChanged(winrt::event_token const& token) noexcept;
 
     private:
+        std::array<std::mutex, FZ_LOCK_MAX> m_mupdfMutexes;
+        fz_locks_context m_mupdfLocks{};
         fz_context* m_ctx{ nullptr };
         std::map<winrt::Microsoft::UI::Xaml::Controls::TabViewItem, std::shared_ptr<PdfTabInfo>> m_openedTabs;
         int32_t m_pageNumber{ 0 };
