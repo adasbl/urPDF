@@ -198,14 +198,26 @@
                         </StackPanel>
                     </Grid>
 
-                    <ScrollViewer Grid.Row="1"
-                        x:Name="PdfScrollViewer" 
-                        ZoomMode="Enabled" 
-                        HorizontalScrollBarVisibility="Auto" 
-                        VerticalScrollBarVisibility="Auto"
-                        ViewChanged="PdfScrollViewer_ViewChanged">
-                        <StackPanel x:Name="PagesContainer" HorizontalAlignment="Center" Spacing="0" Margin="20"/>
-                    </ScrollViewer>
+                    <Grid Grid.Row="1">
+                        <ScrollViewer
+                            x:Name="PdfScrollViewer"
+                            ZoomMode="Enabled"
+                            HorizontalScrollBarVisibility="Auto"
+                            VerticalScrollBarVisibility="Auto"
+                            ViewChanged="PdfScrollViewer_ViewChanged">
+                            
+                            <StackPanel x:Name="PagesContainer" HorizontalAlignment="Center" Spacing="0" Margin="20"/>
+                            
+                        </ScrollViewer>
+
+                        <TextBlock x:Name="EmptyTabPlaceholder"
+                            Text="Here the document will be displayed"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            IsHitTestVisible="False"
+                            Visibility="Collapsed">
+                        </TextBlock>
+                    </Grid>
 
                 </Grid>
             </Border>

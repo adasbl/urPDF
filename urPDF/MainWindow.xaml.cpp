@@ -321,6 +321,8 @@
                 MainTabView().TabItems().Append(targetTab);
                 MainTabView().SelectedItem(targetTab);
             }
+            PagesContainer().Children().Clear();
+            EmptyTabPlaceholder().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
             targetTab.Header(winrt::box_value(fileName));
 
             winrt::Microsoft::UI::Xaml::Controls::SymbolIconSource tabIcon;
@@ -465,9 +467,7 @@
         }
 
         // UI ELEMENTS
-        void MainWindow::TabView_AddButtonClick(
-            winrt::Windows::Foundation::IInspectable const& sender,
-            winrt::Windows::Foundation::IInspectable const& args)
+        void MainWindow::TabView_AddButtonClick(winrt::Windows::Foundation::IInspectable const& sender, winrt::Windows::Foundation::IInspectable const& args)
         {
             auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
 
@@ -478,21 +478,12 @@
             tabIcon.Symbol(winrt::Microsoft::UI::Xaml::Controls::Symbol::Document);
             newTab.IconSource(tabIcon);
 
-            winrt::Microsoft::UI::Xaml::Controls::TextBlock newTabText;
-            newTabText.Text(L"Here the document will be displayed");
-            newTabText.HorizontalAlignment(winrt::Microsoft::UI::Xaml::HorizontalAlignment::Center);
-            newTabText.VerticalAlignment(winrt::Microsoft::UI::Xaml::VerticalAlignment::Center);
-
-            newTab.Content(newTabText);
-
             tabView.TabItems().Append(newTab);
 
             tabView.SelectedItem(newTab);
         }
 
-        void MainWindow::TabView_TabCloseRequested(
-            winrt::Windows::Foundation::IInspectable const& sender,
-            winrt::Microsoft::UI::Xaml::Controls::TabViewTabCloseRequestedEventArgs const& args)
+        void MainWindow::TabView_TabCloseRequested(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::TabViewTabCloseRequestedEventArgs const& args)
         {
             auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
 
@@ -505,9 +496,7 @@
             }
         }
 
-        void MainWindow::TabView_SelectionChanged(
-            winrt::Windows::Foundation::IInspectable const& sender,
-            winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& args)
+        void MainWindow::TabView_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& args)
         {
             auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
             auto currentTab = tabView.SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
@@ -518,6 +507,8 @@
 
                 if (m_openedTabs.find(currentTab) != m_openedTabs.end())
                 {
+                    EmptyTabPlaceholder().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+
                     auto pdfInfo = m_openedTabs[currentTab];
 
                     DisplayPageNumber(pdfInfo->m_currentPageIndex);
@@ -531,9 +522,14 @@
                         PagesContainer().Children().Append(img);
                     }
                 }
+                else
+                {
+                    EmptyTabPlaceholder().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
+                }
             }
             else
             {
+                EmptyTabPlaceholder().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
                 DisplayPageNumber(0);
                 DisplayPageCount(0);
             }
