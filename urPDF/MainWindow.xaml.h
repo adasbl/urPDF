@@ -90,6 +90,7 @@ namespace winrt::urPDF::implementation
         winrt::event_token m_printTaskRequestedToken{};
         bool m_isRendering{ false };
         bool m_isNormalizingZoom{ false };
+        bool m_zoomWasEnabled{ false };
 
         bool TryAcquireRenderingLock();
         void ReleaseRenderingLock();

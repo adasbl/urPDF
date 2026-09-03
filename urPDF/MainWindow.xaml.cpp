@@ -607,6 +607,8 @@
             }
 
             m_isRendering = true;
+            m_zoomWasEnabled = PdfScrollViewer().ZoomMode() == winrt::Microsoft::UI::Xaml::Controls::ZoomMode::Enabled;
+            PdfScrollViewer().ZoomMode(winrt::Microsoft::UI::Xaml::Controls::ZoomMode::Disabled);
             ZoomInButton().IsEnabled(false);
             ZoomOutButton().IsEnabled(false);
             RotateButton().IsEnabled(false);
@@ -615,6 +617,11 @@
 
         void MainWindow::ReleaseRenderingLock()
         {
+            if (m_zoomWasEnabled)
+            {
+                PdfScrollViewer().ZoomMode(winrt::Microsoft::UI::Xaml::Controls::ZoomMode::Enabled);
+            }
+            m_zoomWasEnabled = false;
             m_isRendering = false;
             ZoomInButton().IsEnabled(true);
             ZoomOutButton().IsEnabled(true);
