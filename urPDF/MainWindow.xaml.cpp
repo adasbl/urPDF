@@ -14,6 +14,7 @@
     #include <winrt/Windows.Storage.h>
     #include <winrt/Windows.Storage.Pickers.h>
     #include <winrt/Windows.Storage.Streams.h>
+    #include <winrt/Windows.ApplicationModel.DataTransfer.h>
     #include <winrt/Windows.Graphics.Imaging.h>
     #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
     #include <microsoft.ui.xaml.window.h>
@@ -21,6 +22,8 @@
     #include <MemoryBuffer.h>
     #include <map>
     #include <winrt/Microsoft.UI.Dispatching.h>
+    #include <algorithm>
+    #include <cwctype>
     #include <string>
     #include <memory>
     #include <coroutine>
@@ -322,7 +325,7 @@
                 MainTabView().SelectedItem(targetTab);
             }
             PagesContainer().Children().Clear();
-            EmptyTabPlaceholder().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+            EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
             targetTab.Header(winrt::box_value(fileName));
 
             winrt::Microsoft::UI::Xaml::Controls::SymbolIconSource tabIcon;
@@ -507,7 +510,7 @@
 
                 if (m_openedTabs.find(currentTab) != m_openedTabs.end())
                 {
-                    EmptyTabPlaceholder().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+                    EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
 
                     auto pdfInfo = m_openedTabs[currentTab];
 
@@ -524,12 +527,12 @@
                 }
                 else
                 {
-                    EmptyTabPlaceholder().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
+                    EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
                 }
             }
             else
             {
-                EmptyTabPlaceholder().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+                EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
                 DisplayPageNumber(0);
                 DisplayPageCount(0);
             }

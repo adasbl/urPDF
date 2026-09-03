@@ -210,13 +210,62 @@
                             
                         </ScrollViewer>
 
-                        <TextBlock x:Name="EmptyTabPlaceholder"
-                            Text="Here the document will be displayed"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            IsHitTestVisible="False"
-                            Visibility="Collapsed">
-                        </TextBlock>
+                        <Border x:Name="EmptyTabDropZone"
+                            AllowDrop="True"
+                            
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Stretch"
+                            Margin="24"
+                            Padding="32"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="12">
+                            <StackPanel HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                MaxWidth="420"
+                                Spacing="12">
+                                <Image Source="Assets/StoreLogo.scale-400.png"
+                                    Width="96"
+                                    Height="96"
+                                    HorizontalAlignment="Center"
+                                    Stretch="Uniform"/>
+                                <TextBlock Text="Welcome to urPDF"
+                                    FontSize="28"
+                                    FontWeight="SemiBold"
+                                    HorizontalAlignment="Center"
+                                    TextAlignment="Center"/>
+                                <Button x:Name="EmptyTabButton"
+                                    Click="OpenPdfFileAsync"
+                                    Width="180"
+                                    MinHeight="48"
+                                    HorizontalAlignment="Center"
+                                    HorizontalContentAlignment="Center"
+                                    Style="{StaticResource AccentButtonStyle}"
+                                    Padding="24,12"
+                                    Margin="0,8,0,0">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon Glyph="&#xE8A5;"/>
+                                        <TextBlock Text="Open PDF"
+                                            VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
+                                <TextBlock Text="or drag and drop a PDF anywhere in this area."
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    TextWrapping="Wrap"
+                                    TextAlignment="Center"
+                                    HorizontalAlignment="Center"/>
+                                <TextBlock x:Name="EmptyTabDropHint"
+                                    Text="Release to open PDF"
+                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                    FontWeight="SemiBold"
+                                    TextAlignment="Center"
+                                    HorizontalAlignment="Center"
+                                    Visibility="Collapsed"/>
+                            </StackPanel>
+                        </Border>
+                        
                     </Grid>
 
                 </Grid>
