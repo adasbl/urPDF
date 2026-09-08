@@ -191,6 +191,18 @@
     <Image Include="Assets\LargeTile.scale-400.png" />
     <Image Include="Assets\LockScreenLogo.scale-200.png" />
     <Image Include="Assets\logo.ico" />
+    <Image Include="Assets\logo.png" />
+    <Image Include="Assets\PdfFileIcon.png" />
+    <Image Include="Assets\PdfFileIcon.scale-100.png" />
+    <Image Include="Assets\PdfFileIcon.scale-125.png" />
+    <Image Include="Assets\PdfFileIcon.scale-150.png" />
+    <Image Include="Assets\PdfFileIcon.scale-200.png" />
+    <Image Include="Assets\PdfFileIcon.scale-400.png" />
+    <Image Include="Assets\PdfFileIcon.targetsize-16.png" />
+    <Image Include="Assets\PdfFileIcon.targetsize-24.png" />
+    <Image Include="Assets\PdfFileIcon.targetsize-256.png" />
+    <Image Include="Assets\PdfFileIcon.targetsize-32.png" />
+    <Image Include="Assets\PdfFileIcon.targetsize-48.png" />
     <Image Include="Assets\SmallTile.scale-100.png" />
     <Image Include="Assets\SmallTile.scale-125.png" />
     <Image Include="Assets\SmallTile.scale-150.png" />
@@ -226,6 +238,7 @@
     <Image Include="Assets\Square44x44Logo.targetsize-256.png" />
     <Image Include="Assets\Square44x44Logo.targetsize-32.png" />
     <Image Include="Assets\Square44x44Logo.targetsize-48.png" />
+    <Image Include="Assets\StoreLogo.backup.png" />
     <Image Include="Assets\StoreLogo.scale-100.png" />
     <Image Include="Assets\StoreLogo.scale-125.png" />
     <Image Include="Assets\StoreLogo.scale-150.png" />

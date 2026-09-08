@@ -47,6 +47,7 @@
         <uap:Extension Category="windows.fileTypeAssociation">
           <uap:FileTypeAssociation Name="pdf">
             <uap:DisplayName>PDF document</uap:DisplayName>
+            <uap:Logo>Assets\PdfFileIcon.png</uap:Logo>
             <uap:SupportedFileTypes>
               <uap:FileType ContentType="application/pdf">.pdf</uap:FileType>
             </uap:SupportedFileTypes>

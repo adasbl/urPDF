@@ -174,6 +174,19 @@
       <Filter>Assets</Filter>
     </Image>
     <Image Include="Assets\logo.ico" />
+    <Image Include="Assets\logo.png" />
+    <Image Include="Assets\PdfFileIcon.png" />
+    <Image Include="Assets\PdfFileIcon.scale-100.png" />
+    <Image Include="Assets\PdfFileIcon.scale-125.png" />
+    <Image Include="Assets\PdfFileIcon.scale-150.png" />
+    <Image Include="Assets\PdfFileIcon.scale-200.png" />
+    <Image Include="Assets\PdfFileIcon.scale-400.png" />
+    <Image Include="Assets\PdfFileIcon.targetsize-16.png" />
+    <Image Include="Assets\PdfFileIcon.targetsize-24.png" />
+    <Image Include="Assets\PdfFileIcon.targetsize-32.png" />
+    <Image Include="Assets\PdfFileIcon.targetsize-48.png" />
+    <Image Include="Assets\PdfFileIcon.targetsize-256.png" />
+    <Image Include="Assets\StoreLogo.backup.png" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Assets">
