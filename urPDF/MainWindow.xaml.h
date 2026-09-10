@@ -67,6 +67,7 @@ namespace winrt::urPDF::implementation
         void PageNumberBox_ValueChanged(winrt::Microsoft::UI::Xaml::Controls::NumberBox const& sender, winrt::Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const& args);
         void NextPageButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
         void PreviousPageButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
+        void BookViewButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
         void AboutButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
         winrt::fire_and_forget PrintButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
         void CloseSettings_Click(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -91,9 +92,11 @@ namespace winrt::urPDF::implementation
         bool m_isRendering{ false };
         bool m_isNormalizingZoom{ false };
         bool m_zoomWasEnabled{ false };
+        bool m_bookViewMode{ false };
 
         bool TryAcquireRenderingLock();
         void ReleaseRenderingLock();
+        void RebuildPagesContainer(std::vector<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> const& pages);
     };
 }
 

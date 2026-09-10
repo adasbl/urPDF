@@ -188,7 +188,9 @@
                                     </StackPanel>
                                 </Button.Content>
                             </Button>
-                            <Button>
+                            <Button x:Name="BookViewButton"
+                                    Click="BookViewButton_Click"
+                                    ToolTipService.ToolTip="Change to book view">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE89A;"/>
@@ -208,7 +210,7 @@
                             VerticalScrollBarVisibility="Auto"
                             ViewChanged="PdfScrollViewer_ViewChanged">
                             
-                            <StackPanel x:Name="PagesContainer" HorizontalAlignment="Center" Spacing="0" Margin="20"/>
+                            <StackPanel x:Name="PagesContainer" HorizontalAlignment="Center" Spacing="10" Margin="20"/>
                             
                         </ScrollViewer>
 
