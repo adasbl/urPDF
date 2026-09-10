@@ -75,7 +75,8 @@
                     <Grid Grid.Row="0" Margin="10,8,10,8">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Spacing="4">
 
-                            <Button Click="OpenPdfFileAsync">
+                            <Button Click="OpenPdfFileAsync"
+                                    ToolTipService.ToolTip="Open document">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE8A5;"/>
@@ -84,7 +85,8 @@
                                 </Button.Content>
                             </Button>
 
-                            <Button Click="PrintButton_Click">
+                            <Button Click="PrintButton_Click"
+                                    ToolTipService.ToolTip="Print document">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE749;"/>
@@ -93,7 +95,8 @@
                                 </Button.Content>
                             </Button>
 
-                            <Button Click="SettingsButton_Click" >
+                            <Button Click="SettingsButton_Click"
+                                    ToolTipService.ToolTip="Open settings">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE713;"/>
@@ -102,7 +105,8 @@
                                 </Button.Content>
                             </Button>
 
-                            <Button Click="AboutButton_Click" >
+                            <Button Click="AboutButton_Click"
+                                    ToolTipService.ToolTip="Go to about page">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE946;"/>
@@ -131,14 +135,16 @@
                                         <Run Text="{x:Bind DisplayPageCount, Mode=OneWay}"/>
                                 </TextBlock>
                             </StackPanel>
-                            <Button Click="PreviousPageButton_Click">
+                            <Button Click="PreviousPageButton_Click"
+                                    ToolTipService.ToolTip="Previous page">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE760;"/>
                                     </StackPanel>
                                 </Button.Content>
                             </Button>
-                            <Button Click="NextPageButton_Click">
+                            <Button Click="NextPageButton_Click"
+                                    ToolTipService.ToolTip="Next page">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE761;"/>
@@ -149,7 +155,9 @@
 
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="4">
 
-                            <Button x:Name="ZoomInButton" Click="ZoomInButton_Click">
+                            <Button x:Name="ZoomInButton" 
+                                    Click="ZoomInButton_Click"
+                                    ToolTipService.ToolTip="Zoom in">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE8A3;"/>
@@ -157,7 +165,9 @@
                                 </Button.Content>
                             </Button>
 
-                            <Button x:Name="ZoomOutButton" Click="ZoomOutButton_Click">
+                            <Button x:Name="ZoomOutButton" 
+                                    Click="ZoomOutButton_Click"
+                                    ToolTipService.ToolTip="Zoom out">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE71F;"/>
@@ -165,7 +175,9 @@
                                 </Button.Content>
                             </Button>
 
-                            <Button x:Name="RotateButton" Click="RotateButton_Click">
+                            <Button x:Name="RotateButton" 
+                                    Click="RotateButton_Click"
+                                    ToolTipService.ToolTip="Rotate pages">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE7AD;"/>
@@ -173,21 +185,24 @@
                                 </Button.Content>
                             </Button>
 
-                            <Button>
+                            <Button x:Name="FitPageButton" 
+                                    ToolTipService.ToolTip="Fit page to window">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <SymbolIcon Symbol="FullScreen" />
+                                        <FontIcon Glyph="&#xE740;"/>
                                     </StackPanel>
                                 </Button.Content>
                             </Button>
 
-                            <Button>
+                            <Button x:Name="FillWindowButton" 
+                                    ToolTipService.ToolTip="Fill window">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE9A6;"/>
                                     </StackPanel>
                                 </Button.Content>
                             </Button>
+                                
                             <Button x:Name="BookViewButton"
                                     Click="BookViewButton_Click"
                                     ToolTipService.ToolTip="Change to book view">
