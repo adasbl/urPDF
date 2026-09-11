@@ -795,87 +795,7 @@
 
         winrt::fire_and_forget MainWindow::PdfScrollViewer_ViewChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args)
         {
-            auto scrollViewer = sender.as<winrt::Microsoft::UI::Xaml::Controls::ScrollViewer>();
-
-            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
-
-            if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
-            {
-                auto pdfInfo = m_openedTabs[currentTab];
-                int totalPages = pdfInfo->m_pagecount;
-
-                if (!m_isNormalizingZoom && !args.IsIntermediate() && (scrollViewer.ZoomFactor() < 0.999f || scrollViewer.ZoomFactor() > 1.001f) && TryAcquireRenderingLock())
-                {
-                    constexpr double minZoom = 0.5;
-                    constexpr double maxZoom = 3.0;
-                    const double nativeZoom = scrollViewer.ZoomFactor();
-                    const double oldContentWidth = scrollViewer.ScrollableWidth() + scrollViewer.ViewportWidth();
-                    const double oldContentHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
-                    const double horizontalCenterRatio = oldContentWidth > 0.0 ? (scrollViewer.HorizontalOffset() + scrollViewer.ViewportWidth() / 2.0) / oldContentWidth : 0.0;
-                    const double verticalCenterRatio = oldContentHeight > 0.0 ? (scrollViewer.VerticalOffset() + scrollViewer.ViewportHeight() / 2.0) / oldContentHeight : 0.0;
-                    const double resetContentWidth = nativeZoom > 0.0 ? oldContentWidth / nativeZoom : oldContentWidth;
-                    const double resetContentHeight = nativeZoom > 0.0 ? oldContentHeight / nativeZoom : oldContentHeight;
-                    const double resetHorizontalOffset = (std::clamp)(
-                        horizontalCenterRatio * resetContentWidth - scrollViewer.ViewportWidth() / 2.0,
-                        0.0,
-                        (std::max)(0.0, resetContentWidth - scrollViewer.ViewportWidth()));
-                    const double resetVerticalOffset = (std::clamp)(
-                        verticalCenterRatio * resetContentHeight - scrollViewer.ViewportHeight() / 2.0,
-                        0.0,
-                        (std::max)(0.0, resetContentHeight - scrollViewer.ViewportHeight()));
-
-                    pdfInfo->m_currentPageZoom = (std::clamp)(pdfInfo->m_currentPageZoom * nativeZoom, minZoom, maxZoom);
-
-                    m_isNormalizingZoom = true;
-
-                    scrollViewer.ChangeView(resetHorizontalOffset, resetVerticalOffset, 1.0f);
-                    co_await resume_foreground(DispatcherQueue());
-                    scrollViewer.UpdateLayout();
-
-                    co_await RenderMultiPageAsync(pdfInfo);
-
-                    co_await resume_foreground(DispatcherQueue());
-                    scrollViewer.UpdateLayout();
-
-                    const double newContentWidth = scrollViewer.ScrollableWidth() + scrollViewer.ViewportWidth();
-                    const double newContentHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
-                    const double horizontalOffset = (std::clamp)(horizontalCenterRatio * newContentWidth - scrollViewer.ViewportWidth() / 2.0, 0.0, scrollViewer.ScrollableWidth());
-                    const double verticalOffset = (std::clamp)(verticalCenterRatio * newContentHeight - scrollViewer.ViewportHeight() / 2.0, 0.0, scrollViewer.ScrollableHeight());
-
-                    scrollViewer.ChangeView(horizontalOffset, verticalOffset, nullptr);
-                    co_await resume_foreground(DispatcherQueue());
-                    m_isNormalizingZoom = false;
-                    ReleaseRenderingLock();
-                }
-
-                double scrollOffset = scrollViewer.VerticalOffset();
-                double totalHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
-
-                if (totalPages > 0 && totalHeight > 0)
-                {
-                    double scrollPercentage = scrollViewer.ScrollableHeight() > 0.0
-                        ? scrollOffset / scrollViewer.ScrollableHeight()
-                        : 0.0;
-                    if (scrollPercentage > 1.0) scrollPercentage = 1.0;
-                    if (scrollPercentage < 0.0) scrollPercentage = 0.0;
-
-                    int pagesPerRow = m_bookViewMode ? 2 : 1;
-                    int totalRows = (totalPages + pagesPerRow - 1) / pagesPerRow;
-                    int currentRow = totalRows > 1
-                        ? static_cast<int>(std::round(scrollPercentage * (totalRows - 1)))
-                        : 0;
-
-                    int32_t currentPage = (currentRow * pagesPerRow) + 1;
-                    if (currentPage > totalPages)
-                    {
-                        currentPage = totalPages;
-                    }
-
-                    pdfInfo->m_currentPageIndex = currentPage;
-
-                    DisplayPageNumber(currentPage);
-                }
-            }
+            co_return;
         }
 
 
@@ -919,30 +839,6 @@
             {
                 co_return;
             }
-
-            auto scrollViewer = PdfScrollViewer();
-            const double oldContentWidth = scrollViewer.ScrollableWidth() + scrollViewer.ViewportWidth();
-            const double oldContentHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
-            const double horizontalCenterRatio = oldContentWidth > 0.0 ? (scrollViewer.HorizontalOffset() + scrollViewer.ViewportWidth() / 2.0) / oldContentWidth : 0.0;
-            const double verticalCenterRatio = oldContentHeight > 0.0 ? (scrollViewer.VerticalOffset() + scrollViewer.ViewportHeight() / 2.0) / oldContentHeight : 0.0;
-
-            if (!TryAcquireRenderingLock())
-            {
-                co_return;
-            }
-
-            pdfInfo->m_currentPageZoom = (std::min)(maxZoom, pdfInfo->m_currentPageZoom * zoomFactor);
-            co_await RenderMultiPageAsync(pdfInfo);
-
-            co_await resume_foreground(DispatcherQueue());
-            scrollViewer.UpdateLayout();
-            const double newContentWidth = scrollViewer.ScrollableWidth() + scrollViewer.ViewportWidth();
-            const double newContentHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
-            const double horizontalOffset = (std::clamp)(horizontalCenterRatio * newContentWidth - scrollViewer.ViewportWidth() / 2.0, 0.0, scrollViewer.ScrollableWidth());
-            const double verticalOffset = (std::clamp)(verticalCenterRatio * newContentHeight - scrollViewer.ViewportHeight() / 2.0, 0.0, scrollViewer.ScrollableHeight());
-            scrollViewer.ChangeView(horizontalOffset, verticalOffset, nullptr);
-
-            ReleaseRenderingLock();
         }
 
         winrt::fire_and_forget MainWindow::ZoomOutButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
@@ -961,30 +857,6 @@
             {
                 co_return;
             }
-
-            auto scrollViewer = PdfScrollViewer();
-            const double oldContentWidth = scrollViewer.ScrollableWidth() + scrollViewer.ViewportWidth();
-            const double oldContentHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
-            const double horizontalCenterRatio = oldContentWidth > 0.0 ? (scrollViewer.HorizontalOffset() + scrollViewer.ViewportWidth() / 2.0) / oldContentWidth : 0.0;
-            const double verticalCenterRatio = oldContentHeight > 0.0 ? (scrollViewer.VerticalOffset() + scrollViewer.ViewportHeight() / 2.0) / oldContentHeight : 0.0;
-
-            if (!TryAcquireRenderingLock())
-            {
-                co_return;
-            }
-
-            pdfInfo->m_currentPageZoom = (std::max)(minZoom, pdfInfo->m_currentPageZoom / zoomFactor);
-            co_await RenderMultiPageAsync(pdfInfo);
-
-            co_await resume_foreground(DispatcherQueue());
-            scrollViewer.UpdateLayout();
-            const double newContentWidth = scrollViewer.ScrollableWidth() + scrollViewer.ViewportWidth();
-            const double newContentHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
-            const double horizontalOffset = (std::clamp)(horizontalCenterRatio * newContentWidth - scrollViewer.ViewportWidth() / 2.0, 0.0, scrollViewer.ScrollableWidth());
-            const double verticalOffset = (std::clamp)(verticalCenterRatio * newContentHeight - scrollViewer.ViewportHeight() / 2.0, 0.0, scrollViewer.ScrollableHeight());
-            scrollViewer.ChangeView(horizontalOffset, verticalOffset, nullptr);
-
-            ReleaseRenderingLock();
         }
 
         void MainWindow::BookViewButton_Click(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
