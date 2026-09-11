@@ -65,7 +65,15 @@
 
     namespace winrt::urPDF::implementation
     {
-        // CLASSES
+        // MAINWINDOW
+        MainWindow::~MainWindow()
+        {
+            if (m_ctx) {
+                fz_drop_context(m_ctx);
+                m_ctx = nullptr;
+            }
+        }
+
         MainWindow::MainWindow()
         {
             InitializeComponent();
@@ -94,51 +102,8 @@
             }
         }
 
-        MainWindow::~MainWindow()
-        {
-            if (m_ctx) {
-                fz_drop_context(m_ctx);
-                m_ctx = nullptr;
-            }
-        }
 
-        PdfTabInfo::PdfTabInfo(fz_context* ctx, const std::string& filePath)
-        {
-            m_ctx = ctx;
-            m_doc = fz_open_document(m_ctx, filePath.c_str());
-        }
-
-        PdfTabInfo::~PdfTabInfo()
-        {
-            fz_drop_document(m_ctx, m_doc);
-        }
-
-        void MainWindow::TabView_Loaded(
-            winrt::Windows::Foundation::IInspectable const& sender,
-            winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
-        {
-            auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
-            TabView_AddButtonClick(tabView, nullptr);
-
-            if (m_pendingFile)
-            {
-                auto file = m_pendingFile;
-                m_pendingFile = nullptr;
-                OpenPdfFileAsync(file);
-            }
-        }
-
-        winrt::event_token MainWindow::PropertyChanged(winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler)
-        {
-            return m_propertyChanged.add(handler);
-        }
-
-        void MainWindow::PropertyChanged(winrt::event_token const& token) noexcept
-        {
-            m_propertyChanged.remove(token);
-        }
-
-        // MULTITHREADING
+        // HELPER FUNCTIONS
         auto resume_foreground(winrt::Microsoft::UI::Dispatching::DispatcherQueue const& dispatcher)
         {
             struct awaitable
@@ -154,7 +119,31 @@
             return awaitable{ dispatcher };
         }
 
-        // UI UPDATE
+
+        // PDFTABINFO
+        PdfTabInfo::PdfTabInfo(fz_context* ctx, const std::string& filePath)
+        {
+            m_ctx = ctx;
+            m_doc = fz_open_document(m_ctx, filePath.c_str());
+        }
+
+        PdfTabInfo::~PdfTabInfo()
+        {
+            fz_drop_document(m_ctx, m_doc);
+        }
+
+
+        // XAML DATA
+        winrt::event_token MainWindow::PropertyChanged(winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler)
+        {
+            return m_propertyChanged.add(handler);
+        }
+
+        void MainWindow::PropertyChanged(winrt::event_token const& token) noexcept
+        {
+            m_propertyChanged.remove(token);
+        }
+
         int32_t MainWindow::DisplayPageNumber()
         {
             return m_pageNumber;
@@ -183,7 +172,8 @@
             }
         }
 
-        // SETTINGS
+
+        // SETTINGS 
         void MainWindow::SettingsButton_Click(
             winrt::Windows::Foundation::IInspectable const&,
             winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
@@ -293,6 +283,7 @@
             }
         }
 
+
         // ABOUT
         void winrt::urPDF::implementation::MainWindow::AboutButton_Click(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
         {
@@ -302,7 +293,132 @@
             RootFrame().Navigate(winrt::xaml_typename<winrt::urPDF::AboutPage>());
         }
 
-        // FILE OPENING
+
+        // TABVIEW
+        void MainWindow::TabView_Loaded(
+            winrt::Windows::Foundation::IInspectable const& sender,
+            winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
+        {
+            auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
+            TabView_AddButtonClick(tabView, nullptr);
+
+            if (m_pendingFile)
+            {
+                auto file = m_pendingFile;
+                m_pendingFile = nullptr;
+                OpenPdfFileAsync(file);
+            }
+        }
+
+        void MainWindow::TabView_AddButtonClick(winrt::Windows::Foundation::IInspectable const& sender, winrt::Windows::Foundation::IInspectable const&)
+        {
+            auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
+
+            winrt::Microsoft::UI::Xaml::Controls::TabViewItem newTab;
+
+            newTab.Header(winrt::box_value(L"New document"));
+            winrt::Microsoft::UI::Xaml::Controls::SymbolIconSource tabIcon;
+            tabIcon.Symbol(winrt::Microsoft::UI::Xaml::Controls::Symbol::Document);
+            newTab.IconSource(tabIcon);
+
+            tabView.TabItems().Append(newTab);
+
+            tabView.SelectedItem(newTab);
+        }
+
+        void MainWindow::TabView_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&)
+        {
+            auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
+            auto currentTab = tabView.SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+
+            if (currentTab)
+            {
+                PagesContainer().Children().Clear();
+
+                if (m_openedTabs.find(currentTab) != m_openedTabs.end())
+                {
+                    EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+
+                    auto pdfInfo = m_openedTabs[currentTab];
+
+                    DisplayPageNumber(pdfInfo->m_currentPageIndex);
+                    DisplayPageCount(pdfInfo->m_pagecount);
+                    RebuildPagesContainer(pdfInfo->m_renderedPages);
+                }
+                else
+                {
+                    EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
+                }
+            }
+            else
+            {
+                EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+                DisplayPageNumber(0);
+                DisplayPageCount(0);
+            }
+        }
+
+        void MainWindow::TabView_TabCloseRequested(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::TabViewTabCloseRequestedEventArgs const& args)
+        {
+            auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
+
+            m_openedTabs.erase(args.Tab());
+
+            uint32_t index;
+            if (tabView.TabItems().IndexOf(args.Tab(), index))
+            {
+                tabView.TabItems().RemoveAt(index);
+            }
+        }
+
+        void MainWindow::EmptyTab_DragOver(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::DragEventArgs const& args)
+        {
+            if (args.DataView().Contains(winrt::Windows::ApplicationModel::DataTransfer::StandardDataFormats::StorageItems()))
+            {
+                args.AcceptedOperation(winrt::Windows::ApplicationModel::DataTransfer::DataPackageOperation::Copy);
+                EmptyTabDropHint().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
+            }
+            else
+            {
+                args.AcceptedOperation(winrt::Windows::ApplicationModel::DataTransfer::DataPackageOperation::None);
+            }
+        }
+
+        void MainWindow::EmptyTab_DragLeave(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::DragEventArgs const&)
+        {
+            EmptyTabDropHint().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+        }
+
+        winrt::fire_and_forget MainWindow::EmptyTab_Drop(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::DragEventArgs const& args)
+        {
+            auto deferral = args.GetDeferral();
+            auto storageItems = co_await args.DataView().GetStorageItemsAsync();
+
+            EmptyTabDropHint().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+
+            for (auto const& item : storageItems)
+            {
+                auto file = item.try_as<winrt::Windows::Storage::StorageFile>();
+                if (file)
+                {
+                    auto fileType = file.FileType();
+                    std::wstring normalizedFileType(fileType.c_str());
+                    std::transform(normalizedFileType.begin(), normalizedFileType.end(), normalizedFileType.begin(), [](wchar_t character) { return static_cast<wchar_t>(std::towlower(character)); });
+
+                    if (normalizedFileType == L".pdf")
+                    {
+                        deferral.Complete();
+                        OpenPdfFileAsync(file);
+                        co_return;
+                    }
+                }
+            }
+
+            deferral.Complete();
+        }
+
+
+        // FILE OPENING 
         winrt::fire_and_forget MainWindow::OpenPdfFileAsync(IInspectable const&, RoutedEventArgs const&)
         {
             // TODO: add check if empty tab is opened
@@ -365,84 +481,6 @@
             ReleaseRenderingLock();
         }
 
-        void MainWindow::EmptyTab_DragOver(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::DragEventArgs const& args)
-        {
-            if (args.DataView().Contains(winrt::Windows::ApplicationModel::DataTransfer::StandardDataFormats::StorageItems()))
-            {
-                args.AcceptedOperation(winrt::Windows::ApplicationModel::DataTransfer::DataPackageOperation::Copy);
-                EmptyTabDropHint().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
-            }
-            else
-            {
-                args.AcceptedOperation(winrt::Windows::ApplicationModel::DataTransfer::DataPackageOperation::None);
-            }
-        }
-
-        void MainWindow::EmptyTab_DragLeave(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::DragEventArgs const&)
-        {
-            EmptyTabDropHint().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
-        }
-
-        winrt::fire_and_forget MainWindow::EmptyTab_Drop(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::DragEventArgs const& args)
-        {
-            auto deferral = args.GetDeferral();
-            auto storageItems = co_await args.DataView().GetStorageItemsAsync();
-
-            EmptyTabDropHint().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
-
-            for (auto const& item : storageItems)
-            {
-                auto file = item.try_as<winrt::Windows::Storage::StorageFile>();
-                if (file)
-                {
-                    auto fileType = file.FileType();
-                    std::wstring normalizedFileType(fileType.c_str());
-                    std::transform(normalizedFileType.begin(), normalizedFileType.end(), normalizedFileType.begin(), [](wchar_t character) { return static_cast<wchar_t>(std::towlower(character)); });
-
-                    if (normalizedFileType == L".pdf")
-                    {
-                        deferral.Complete();
-                        OpenPdfFileAsync(file);
-                        co_return;
-                    }
-                }
-            }
-
-            deferral.Complete();
-        }
-
-        void MainWindow::RebuildPagesContainer(std::vector<WriteableBitmap> const& pages)
-        {
-            auto children = PagesContainer().Children();
-            children.Clear();
-
-            const size_t pagesPerRow = m_bookViewMode ? 2 : 1;
-
-            for (size_t i = 0; i < pages.size(); i += pagesPerRow)
-            {
-                winrt::Microsoft::UI::Xaml::Controls::StackPanel row;
-                row.Orientation(
-                    winrt::Microsoft::UI::Xaml::Controls::Orientation::Horizontal);
-                row.HorizontalAlignment(
-                    winrt::Microsoft::UI::Xaml::HorizontalAlignment::Center);
-                row.Spacing(10);
-
-                for (size_t j = i; j < (std::min)(i + pagesPerRow, pages.size()); ++j)
-                {
-                    winrt::Microsoft::UI::Xaml::Controls::Image image;
-                    image.Source(pages[j]);
-                    image.Stretch(
-                        winrt::Microsoft::UI::Xaml::Media::Stretch::None);
-                    image.VerticalAlignment(
-                        winrt::Microsoft::UI::Xaml::VerticalAlignment::Top);
-                    image.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 5 });
-
-                    row.Children().Append(image);
-                }
-
-                children.Append(row);
-            }
-        }
 
         // PAGE RENDERING
         winrt::Windows::Foundation::IAsyncAction MainWindow::RenderSinglePageAsync(std::shared_ptr<PdfTabInfo> PdfTab)
@@ -632,69 +670,216 @@
             RotateButton().IsEnabled(true);
         }
 
-        // TABS
-        void MainWindow::TabView_AddButtonClick(winrt::Windows::Foundation::IInspectable const& sender, winrt::Windows::Foundation::IInspectable const&)
+        void MainWindow::RebuildPagesContainer(std::vector<WriteableBitmap> const& pages)
         {
-            auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
+            auto children = PagesContainer().Children();
+            children.Clear();
 
-            winrt::Microsoft::UI::Xaml::Controls::TabViewItem newTab;
+            const size_t pagesPerRow = m_bookViewMode ? 2 : 1;
 
-            newTab.Header(winrt::box_value(L"New document"));
-            winrt::Microsoft::UI::Xaml::Controls::SymbolIconSource tabIcon;
-            tabIcon.Symbol(winrt::Microsoft::UI::Xaml::Controls::Symbol::Document);
-            newTab.IconSource(tabIcon);
-
-            tabView.TabItems().Append(newTab);
-
-            tabView.SelectedItem(newTab);
-        }
-
-        void MainWindow::TabView_TabCloseRequested(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::TabViewTabCloseRequestedEventArgs const& args)
-        {
-            auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
-
-            m_openedTabs.erase(args.Tab());
-
-            uint32_t index;
-            if (tabView.TabItems().IndexOf(args.Tab(), index))
+            for (size_t i = 0; i < pages.size(); i += pagesPerRow)
             {
-                tabView.TabItems().RemoveAt(index);
-            }
-        }
+                winrt::Microsoft::UI::Xaml::Controls::StackPanel row;
+                row.Orientation(
+                    winrt::Microsoft::UI::Xaml::Controls::Orientation::Horizontal);
+                row.HorizontalAlignment(
+                    winrt::Microsoft::UI::Xaml::HorizontalAlignment::Center);
+                row.Spacing(10);
 
-        void MainWindow::TabView_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&)
-        {
-            auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
-            auto currentTab = tabView.SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
-
-            if (currentTab)
-            {
-                PagesContainer().Children().Clear();
-
-                if (m_openedTabs.find(currentTab) != m_openedTabs.end())
+                for (size_t j = i; j < (std::min)(i + pagesPerRow, pages.size()); ++j)
                 {
-                    EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+                    winrt::Microsoft::UI::Xaml::Controls::Image image;
+                    image.Source(pages[j]);
+                    image.Stretch(
+                        winrt::Microsoft::UI::Xaml::Media::Stretch::None);
+                    image.VerticalAlignment(
+                        winrt::Microsoft::UI::Xaml::VerticalAlignment::Top);
+                    image.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 5 });
 
-                    auto pdfInfo = m_openedTabs[currentTab];
+                    row.Children().Append(image);
+                }
 
-                    DisplayPageNumber(pdfInfo->m_currentPageIndex);
-                    DisplayPageCount(pdfInfo->m_pagecount);
-                    RebuildPagesContainer(pdfInfo->m_renderedPages);
-                }
-                else
-                {
-                    EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
-                }
-            }
-            else
-            {
-                EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
-                DisplayPageNumber(0);
-                DisplayPageCount(0);
+                children.Append(row);
             }
         }
 
-        // BUTTONS
+
+        // NAVIGATION
+        void MainWindow::PageNumberBox_ValueChanged(winrt::Microsoft::UI::Xaml::Controls::NumberBox const& sender, winrt::Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const& args)
+        {
+            if (std::isnan(args.NewValue())) return;
+
+            int32_t newPage = static_cast<int32_t>(std::round(args.NewValue()));
+
+            if (newPage == m_pageNumber) return;
+
+            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+
+            if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
+            {
+                auto pdfInfo = m_openedTabs[currentTab];
+                int totalPages = pdfInfo->m_pagecount;
+
+                if (totalPages > 1 && newPage >= 1 && newPage <= totalPages)
+                {
+                    int pagesPerRow = m_bookViewMode ? 2 : 1;
+                    int totalRows = (totalPages + pagesPerRow - 1) / pagesPerRow;
+                    int targetRow = (newPage - 1) / pagesPerRow;
+                    double scrollPercentage = totalRows > 1
+                        ? static_cast<double>(targetRow) / (totalRows - 1)
+                        : 0.0;
+                    double targetOffset = scrollPercentage * PdfScrollViewer().ScrollableHeight();
+
+                    PdfScrollViewer().ChangeView(nullptr, targetOffset, nullptr);
+                }
+            }
+        }
+        
+        void MainWindow::NextPageButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+        {
+            auto button = sender.as<winrt::Microsoft::UI::Xaml::Controls::Button>();
+            button.IsEnabled(false);
+
+            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+
+            if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
+            {
+                auto pdfInfo = m_openedTabs[currentTab];
+                int currentPage = pdfInfo->m_currentPageIndex;
+                int totalPages = pdfInfo->m_pagecount;
+                int pagesPerRow = m_bookViewMode ? 2 : 1;
+                int totalRows = (totalPages + pagesPerRow - 1) / pagesPerRow;
+                int currentRow = (currentPage - 1) / pagesPerRow;
+
+                if (totalRows > 1 && currentRow + 1 < totalRows)
+                {
+                    int targetRow = currentRow + 1;
+
+                    double scrollPercentage = static_cast<double>(targetRow) / (totalRows - 1);
+                    double targetOffset = scrollPercentage * PdfScrollViewer().ScrollableHeight();
+
+                    PdfScrollViewer().ChangeView(nullptr, targetOffset, nullptr);
+                }
+            }
+            button.IsEnabled(true);
+        }
+
+        void MainWindow::PreviousPageButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+        {
+            auto button = sender.as<winrt::Microsoft::UI::Xaml::Controls::Button>();
+            button.IsEnabled(false);
+
+            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+
+            if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
+            {
+                auto pdfInfo = m_openedTabs[currentTab];
+                int currentPage = pdfInfo->m_currentPageIndex;
+                int totalPages = pdfInfo->m_pagecount;
+                int pagesPerRow = m_bookViewMode ? 2 : 1;
+                int totalRows = (totalPages + pagesPerRow - 1) / pagesPerRow;
+                int currentRow = (currentPage - 1) / pagesPerRow;
+
+                if (totalRows > 1 && currentRow > 0)
+                {
+                    int targetRow = currentRow - 1;
+
+                    double scrollPercentage = static_cast<double>(targetRow) / (totalRows - 1);
+                    double targetOffset = scrollPercentage * PdfScrollViewer().ScrollableHeight();
+
+                    PdfScrollViewer().ChangeView(nullptr, targetOffset, nullptr);
+                }
+            }
+            button.IsEnabled(true);
+        }
+
+        winrt::fire_and_forget MainWindow::PdfScrollViewer_ViewChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args)
+        {
+            auto scrollViewer = sender.as<winrt::Microsoft::UI::Xaml::Controls::ScrollViewer>();
+
+            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+
+            if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
+            {
+                auto pdfInfo = m_openedTabs[currentTab];
+                int totalPages = pdfInfo->m_pagecount;
+
+                if (!m_isNormalizingZoom && !args.IsIntermediate() && (scrollViewer.ZoomFactor() < 0.999f || scrollViewer.ZoomFactor() > 1.001f) && TryAcquireRenderingLock())
+                {
+                    constexpr double minZoom = 0.5;
+                    constexpr double maxZoom = 3.0;
+                    const double nativeZoom = scrollViewer.ZoomFactor();
+                    const double oldContentWidth = scrollViewer.ScrollableWidth() + scrollViewer.ViewportWidth();
+                    const double oldContentHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
+                    const double horizontalCenterRatio = oldContentWidth > 0.0 ? (scrollViewer.HorizontalOffset() + scrollViewer.ViewportWidth() / 2.0) / oldContentWidth : 0.0;
+                    const double verticalCenterRatio = oldContentHeight > 0.0 ? (scrollViewer.VerticalOffset() + scrollViewer.ViewportHeight() / 2.0) / oldContentHeight : 0.0;
+                    const double resetContentWidth = nativeZoom > 0.0 ? oldContentWidth / nativeZoom : oldContentWidth;
+                    const double resetContentHeight = nativeZoom > 0.0 ? oldContentHeight / nativeZoom : oldContentHeight;
+                    const double resetHorizontalOffset = (std::clamp)(
+                        horizontalCenterRatio * resetContentWidth - scrollViewer.ViewportWidth() / 2.0,
+                        0.0,
+                        (std::max)(0.0, resetContentWidth - scrollViewer.ViewportWidth()));
+                    const double resetVerticalOffset = (std::clamp)(
+                        verticalCenterRatio * resetContentHeight - scrollViewer.ViewportHeight() / 2.0,
+                        0.0,
+                        (std::max)(0.0, resetContentHeight - scrollViewer.ViewportHeight()));
+
+                    pdfInfo->m_currentPageZoom = (std::clamp)(pdfInfo->m_currentPageZoom * nativeZoom, minZoom, maxZoom);
+
+                    m_isNormalizingZoom = true;
+
+                    scrollViewer.ChangeView(resetHorizontalOffset, resetVerticalOffset, 1.0f);
+                    co_await resume_foreground(DispatcherQueue());
+                    scrollViewer.UpdateLayout();
+
+                    co_await RenderMultiPageAsync(pdfInfo);
+
+                    co_await resume_foreground(DispatcherQueue());
+                    scrollViewer.UpdateLayout();
+
+                    const double newContentWidth = scrollViewer.ScrollableWidth() + scrollViewer.ViewportWidth();
+                    const double newContentHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
+                    const double horizontalOffset = (std::clamp)(horizontalCenterRatio * newContentWidth - scrollViewer.ViewportWidth() / 2.0, 0.0, scrollViewer.ScrollableWidth());
+                    const double verticalOffset = (std::clamp)(verticalCenterRatio * newContentHeight - scrollViewer.ViewportHeight() / 2.0, 0.0, scrollViewer.ScrollableHeight());
+
+                    scrollViewer.ChangeView(horizontalOffset, verticalOffset, nullptr);
+                    co_await resume_foreground(DispatcherQueue());
+                    m_isNormalizingZoom = false;
+                    ReleaseRenderingLock();
+                }
+
+                double scrollOffset = scrollViewer.VerticalOffset();
+                double totalHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
+
+                if (totalPages > 0 && totalHeight > 0)
+                {
+                    double scrollPercentage = scrollViewer.ScrollableHeight() > 0.0
+                        ? scrollOffset / scrollViewer.ScrollableHeight()
+                        : 0.0;
+                    if (scrollPercentage > 1.0) scrollPercentage = 1.0;
+                    if (scrollPercentage < 0.0) scrollPercentage = 0.0;
+
+                    int pagesPerRow = m_bookViewMode ? 2 : 1;
+                    int totalRows = (totalPages + pagesPerRow - 1) / pagesPerRow;
+                    int currentRow = totalRows > 1
+                        ? static_cast<int>(std::round(scrollPercentage * (totalRows - 1)))
+                        : 0;
+
+                    int32_t currentPage = (currentRow * pagesPerRow) + 1;
+                    if (currentPage > totalPages)
+                    {
+                        currentPage = totalPages;
+                    }
+
+                    pdfInfo->m_currentPageIndex = currentPage;
+
+                    DisplayPageNumber(currentPage);
+                }
+            }
+        }
+
+
+        // VIEW
         winrt::fire_and_forget MainWindow::RotateButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
         {
             auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
@@ -718,7 +903,6 @@
             }
         }
 
-        // ZOOMING AND RESIZING
         winrt::fire_and_forget MainWindow::ZoomInButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
         {
             auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
@@ -801,180 +985,6 @@
             scrollViewer.ChangeView(horizontalOffset, verticalOffset, nullptr);
 
             ReleaseRenderingLock();
-        }
-
-        winrt::fire_and_forget MainWindow::PdfScrollViewer_ViewChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args)
-        {
-            auto scrollViewer = sender.as<winrt::Microsoft::UI::Xaml::Controls::ScrollViewer>();
-
-            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
-
-            if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
-            {
-                auto pdfInfo = m_openedTabs[currentTab];
-                int totalPages = pdfInfo->m_pagecount;
-
-                if (!m_isNormalizingZoom && !args.IsIntermediate() && (scrollViewer.ZoomFactor() < 0.999f || scrollViewer.ZoomFactor() > 1.001f) && TryAcquireRenderingLock())
-                {
-                    constexpr double minZoom = 0.5;
-                    constexpr double maxZoom = 3.0;
-                    const double nativeZoom = scrollViewer.ZoomFactor();
-                    const double oldContentWidth = scrollViewer.ScrollableWidth() + scrollViewer.ViewportWidth();
-                    const double oldContentHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
-                    const double horizontalCenterRatio = oldContentWidth > 0.0 ? (scrollViewer.HorizontalOffset() + scrollViewer.ViewportWidth() / 2.0) / oldContentWidth : 0.0;
-                    const double verticalCenterRatio = oldContentHeight > 0.0? (scrollViewer.VerticalOffset() + scrollViewer.ViewportHeight() / 2.0) / oldContentHeight: 0.0;
-                    const double resetContentWidth = nativeZoom > 0.0 ? oldContentWidth / nativeZoom : oldContentWidth;
-                    const double resetContentHeight = nativeZoom > 0.0 ? oldContentHeight / nativeZoom : oldContentHeight;
-                    const double resetHorizontalOffset = (std::clamp)(
-                        horizontalCenterRatio * resetContentWidth - scrollViewer.ViewportWidth() / 2.0,
-                        0.0,
-                        (std::max)(0.0, resetContentWidth - scrollViewer.ViewportWidth()));
-                    const double resetVerticalOffset = (std::clamp)(
-                        verticalCenterRatio * resetContentHeight - scrollViewer.ViewportHeight() / 2.0,
-                        0.0,
-                        (std::max)(0.0, resetContentHeight - scrollViewer.ViewportHeight()));
-
-                    pdfInfo->m_currentPageZoom = (std::clamp)(pdfInfo->m_currentPageZoom * nativeZoom, minZoom, maxZoom);
-
-                    m_isNormalizingZoom = true;
-
-                    scrollViewer.ChangeView(resetHorizontalOffset, resetVerticalOffset, 1.0f);
-                    co_await resume_foreground(DispatcherQueue());
-                    scrollViewer.UpdateLayout();
-
-                    co_await RenderMultiPageAsync(pdfInfo);
-
-                    co_await resume_foreground(DispatcherQueue());
-                    scrollViewer.UpdateLayout();
-
-                    const double newContentWidth = scrollViewer.ScrollableWidth() + scrollViewer.ViewportWidth();
-                    const double newContentHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
-                    const double horizontalOffset = (std::clamp)(horizontalCenterRatio * newContentWidth - scrollViewer.ViewportWidth() / 2.0, 0.0, scrollViewer.ScrollableWidth());
-                    const double verticalOffset = (std::clamp)(verticalCenterRatio * newContentHeight - scrollViewer.ViewportHeight() / 2.0, 0.0, scrollViewer.ScrollableHeight());
-
-                    scrollViewer.ChangeView(horizontalOffset, verticalOffset, nullptr);
-                    co_await resume_foreground(DispatcherQueue());
-                    m_isNormalizingZoom = false;
-                    ReleaseRenderingLock();
-                }
-
-                double scrollOffset = scrollViewer.VerticalOffset();
-                double totalHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
-
-                if (totalPages > 0 && totalHeight > 0)
-                {
-                    double scrollPercentage = scrollViewer.ScrollableHeight() > 0.0
-                        ? scrollOffset / scrollViewer.ScrollableHeight()
-                        : 0.0;
-                    if (scrollPercentage > 1.0) scrollPercentage = 1.0;
-                    if (scrollPercentage < 0.0) scrollPercentage = 0.0;
-
-                    int pagesPerRow = m_bookViewMode ? 2 : 1;
-                    int totalRows = (totalPages + pagesPerRow - 1) / pagesPerRow;
-                    int currentRow = totalRows > 1
-                        ? static_cast<int>(std::round(scrollPercentage * (totalRows - 1)))
-                        : 0;
-
-                    int32_t currentPage = (currentRow * pagesPerRow) + 1;
-                    if (currentPage > totalPages)
-                    {
-                        currentPage = totalPages;
-                    }
-
-                    pdfInfo->m_currentPageIndex = currentPage;
-
-                    DisplayPageNumber(currentPage);
-                }
-            }
-        }
-
-        // PAGE NUMBER
-        void MainWindow::PageNumberBox_ValueChanged(winrt::Microsoft::UI::Xaml::Controls::NumberBox const& sender, winrt::Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const& args)
-        {
-            if (std::isnan(args.NewValue())) return;
-
-            int32_t newPage = static_cast<int32_t>(std::round(args.NewValue()));
-
-            if (newPage == m_pageNumber) return;
-
-            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
-
-            if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
-            {
-                auto pdfInfo = m_openedTabs[currentTab];
-                int totalPages = pdfInfo->m_pagecount;
-
-                if (totalPages > 1 && newPage >= 1 && newPage <= totalPages)
-                {
-                    int pagesPerRow = m_bookViewMode ? 2 : 1;
-                    int totalRows = (totalPages + pagesPerRow - 1) / pagesPerRow;
-                    int targetRow = (newPage - 1) / pagesPerRow;
-                    double scrollPercentage = totalRows > 1
-                        ? static_cast<double>(targetRow) / (totalRows - 1)
-                        : 0.0;
-                    double targetOffset = scrollPercentage * PdfScrollViewer().ScrollableHeight();
-
-                    PdfScrollViewer().ChangeView(nullptr, targetOffset, nullptr);
-                }
-            }
-        }
-
-        void MainWindow::NextPageButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
-        {
-            auto button = sender.as<winrt::Microsoft::UI::Xaml::Controls::Button>();
-            button.IsEnabled(false);
-
-            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
-
-            if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
-            {
-                auto pdfInfo = m_openedTabs[currentTab];
-                int currentPage = pdfInfo->m_currentPageIndex;
-                int totalPages = pdfInfo->m_pagecount;
-                int pagesPerRow = m_bookViewMode ? 2 : 1;
-                int totalRows = (totalPages + pagesPerRow - 1) / pagesPerRow;
-                int currentRow = (currentPage - 1) / pagesPerRow;
-
-                if (totalRows > 1 && currentRow + 1 < totalRows)
-                {
-                    int targetRow = currentRow + 1;
-
-                    double scrollPercentage = static_cast<double>(targetRow) / (totalRows - 1);
-                    double targetOffset = scrollPercentage * PdfScrollViewer().ScrollableHeight();
-
-                    PdfScrollViewer().ChangeView(nullptr, targetOffset, nullptr);
-                }
-            }
-            button.IsEnabled(true);
-        }
-
-        void MainWindow::PreviousPageButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
-        {
-            auto button = sender.as<winrt::Microsoft::UI::Xaml::Controls::Button>();
-            button.IsEnabled(false);
-
-            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
-
-            if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
-            {
-                auto pdfInfo = m_openedTabs[currentTab];
-                int currentPage = pdfInfo->m_currentPageIndex;
-                int totalPages = pdfInfo->m_pagecount;
-                int pagesPerRow = m_bookViewMode ? 2 : 1;
-                int totalRows = (totalPages + pagesPerRow - 1) / pagesPerRow;
-                int currentRow = (currentPage - 1) / pagesPerRow;
-
-                if (totalRows > 1 && currentRow > 0)
-                {
-                    int targetRow = currentRow - 1;
-
-                    double scrollPercentage = static_cast<double>(targetRow) / (totalRows - 1);
-                    double targetOffset = scrollPercentage * PdfScrollViewer().ScrollableHeight();
-
-                    PdfScrollViewer().ChangeView(nullptr, targetOffset, nullptr);
-                }
-            }
-            button.IsEnabled(true);
         }
 
         void MainWindow::BookViewButton_Click(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
