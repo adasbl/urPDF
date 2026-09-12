@@ -795,6 +795,33 @@
 
         winrt::fire_and_forget MainWindow::PdfScrollViewer_ViewChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args)
         {
+            auto scrollViewer = sender.as<winrt::Microsoft::UI::Xaml::Controls::ScrollViewer>();
+
+            double scrollOffset = scrollViewer.VerticalOffset();
+            double totalHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
+
+            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+
+            if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
+            {
+                auto pdfInfo = m_openedTabs[currentTab];
+                int totalPages = pdfInfo->m_pagecount;
+
+                if (totalPages > 0 && totalHeight > 0)
+                {
+                    double scrollPercentage = scrollOffset / scrollViewer.ScrollableHeight();
+
+                    if (scrollViewer.ScrollableHeight() == 0) scrollPercentage = 0.0;
+                    if (scrollPercentage > 1.0) scrollPercentage = 1.0;
+                    if (scrollPercentage < 0.0) scrollPercentage = 0.0;
+
+                    int32_t currentPage = static_cast<int32_t>(std::round(scrollPercentage * (totalPages - 1))) + 1;
+
+                    pdfInfo->m_currentPageIndex = currentPage;
+
+                    DisplayPageNumber(currentPage);
+                }
+            }
             co_return;
         }
 
@@ -831,14 +858,17 @@
                 co_return;
             }
 
-            auto pdfInfo = m_openedTabs[currentTab];
-            constexpr double maxZoom = 3.0;
-            constexpr double zoomFactor = 1.1;
+            constexpr float maxZoom = 3.0f;
+            constexpr float zoomFactor = 1.1f;
+            const float currentZoom = PdfScrollViewer().ZoomFactor();
+            const float targetZoom = (std::min)(currentZoom * zoomFactor, maxZoom);
 
-            if (pdfInfo->m_currentPageZoom >= maxZoom)
+            if (targetZoom <= currentZoom)
             {
                 co_return;
             }
+
+            PdfScrollViewer().ChangeView(nullptr, nullptr, targetZoom);
         }
 
         winrt::fire_and_forget MainWindow::ZoomOutButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
@@ -849,14 +879,17 @@
                 co_return;
             }
 
-            auto pdfInfo = m_openedTabs[currentTab];
-            constexpr double minZoom = 0.5;
-            constexpr double zoomFactor = 1.1;
+            constexpr float minZoom = 0.5f;
+            constexpr float zoomFactor = 1.1f;
+            const float currentZoom = PdfScrollViewer().ZoomFactor();
+            const float targetZoom = (std::max)(currentZoom / zoomFactor, minZoom);
 
-            if (pdfInfo->m_currentPageZoom <= minZoom)
+            if (targetZoom >= currentZoom)
             {
                 co_return;
             }
+
+            PdfScrollViewer().ChangeView(nullptr, nullptr, targetZoom);
         }
 
         void MainWindow::BookViewButton_Click(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
