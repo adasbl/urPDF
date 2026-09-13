@@ -96,7 +96,7 @@ namespace winrt::urPDF::implementation
 
         bool TryAcquireRenderingLock();
         void ReleaseRenderingLock();
-        void RebuildPagesContainer(std::vector<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> const& pages);
+        void RebuildPagesContainer(std::vector<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> const& pages, double renderZoom);
     };
 }
 

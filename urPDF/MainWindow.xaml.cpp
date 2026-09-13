@@ -45,6 +45,8 @@
     
     namespace
     {
+        constexpr double PdfRenderQuality = 1.5;
+
         void LockMuPdf(void* user, int lock)
         {
             static_cast<std::mutex*>(user)[lock].lock();
@@ -59,7 +61,7 @@
         {
             constexpr double baseDpi = 96.0;
             constexpr double pdfPointsPerInch = 72.0;
-            return (baseDpi / pdfPointsPerInch) * zoom;
+            return (baseDpi / pdfPointsPerInch) * zoom * PdfRenderQuality;
         }
     }
 
@@ -343,11 +345,13 @@
 
                     DisplayPageNumber(pdfInfo->m_currentPageIndex);
                     DisplayPageCount(pdfInfo->m_pagecount);
-                    RebuildPagesContainer(pdfInfo->m_renderedPages);
+                    RebuildPagesContainer(pdfInfo->m_renderedPages, pdfInfo->m_currentPageZoom);
+                    PdfScrollViewer().ChangeView(nullptr, nullptr, static_cast<float>(pdfInfo->m_currentPageZoom));
                 }
                 else
                 {
                     EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
+                    PdfScrollViewer().ChangeView(nullptr, nullptr, 1.0f);
                 }
             }
             else
@@ -539,7 +543,7 @@
             std::vector<WriteableBitmap> singlePage{
                 current_writeable_bitmap
             };
-            RebuildPagesContainer(singlePage);
+            RebuildPagesContainer(singlePage, PdfTab->m_currentPageZoom);
 
             auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
             if (currentTab)
@@ -628,7 +632,7 @@
 
             if (isCurrentTab)
             {
-                RebuildPagesContainer(renderedPages);
+                RebuildPagesContainer(renderedPages, PdfTab->m_currentPageZoom);
 
                 PdfTab->m_renderedPages = std::move(renderedPages);
                 currentTab.Header(winrt::box_value(PdfTab->m_fileName));
@@ -670,10 +674,15 @@
             RotateButton().IsEnabled(true);
         }
 
-        void MainWindow::RebuildPagesContainer(std::vector<WriteableBitmap> const& pages)
+        void MainWindow::RebuildPagesContainer(std::vector<WriteableBitmap> const& pages, double renderZoom)
         {
             auto children = PagesContainer().Children();
             children.Clear();
+
+            if (!std::isfinite(renderZoom) || renderZoom <= 0.0)
+            {
+                renderZoom = 1.0;
+            }
 
             const size_t pagesPerRow = m_bookViewMode ? 2 : 1;
 
@@ -690,10 +699,10 @@
                 {
                     winrt::Microsoft::UI::Xaml::Controls::Image image;
                     image.Source(pages[j]);
-                    image.Stretch(
-                        winrt::Microsoft::UI::Xaml::Media::Stretch::None);
-                    image.VerticalAlignment(
-                        winrt::Microsoft::UI::Xaml::VerticalAlignment::Top);
+                    image.Stretch(winrt::Microsoft::UI::Xaml::Media::Stretch::Uniform);
+                    image.Width(pages[j].PixelWidth() / (renderZoom * PdfRenderQuality));
+                    image.Height(pages[j].PixelHeight() / (renderZoom * PdfRenderQuality));
+                    image.VerticalAlignment(winrt::Microsoft::UI::Xaml::VerticalAlignment::Top);
                     image.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 5 });
 
                     row.Children().Append(image);
@@ -807,6 +816,17 @@
                 auto pdfInfo = m_openedTabs[currentTab];
                 int totalPages = pdfInfo->m_pagecount;
 
+                const double currentZoom = scrollViewer.ZoomFactor();
+                if (!args.IsIntermediate() && !m_isRendering && std::abs(pdfInfo->m_currentPageZoom - currentZoom) > 0.001)
+                {
+                    if (TryAcquireRenderingLock())
+                    {
+                        pdfInfo->m_currentPageZoom = currentZoom;
+                        co_await RenderMultiPageAsync(pdfInfo);
+                        ReleaseRenderingLock();
+                    }
+                }
+
                 if (totalPages > 0 && totalHeight > 0)
                 {
                     double scrollPercentage = scrollOffset / scrollViewer.ScrollableHeight();
@@ -915,7 +935,7 @@
                 return;
             }
 
-            RebuildPagesContainer(pdfInfo->m_renderedPages);
+            RebuildPagesContainer(pdfInfo->m_renderedPages, pdfInfo->m_currentPageZoom);
 
             const int pagesPerRow = m_bookViewMode ? 2 : 1;
             const int totalRows = (pdfInfo->m_pagecount + pagesPerRow - 1) / pagesPerRow;
