@@ -490,6 +490,7 @@ namespace winrt::urPDF::implementation
     // PAGE RENDERING
     winrt::Windows::Foundation::IAsyncAction MainWindow::RenderSinglePageAsync(std::shared_ptr<PdfTabInfo> PdfTab)
     {
+        const std::uint64_t generation = ++PdfTab->m_renderGeneration;
         fz_context* renderCtx = fz_clone_context(m_ctx);
         if (!renderCtx)
         {
@@ -507,7 +508,8 @@ namespace winrt::urPDF::implementation
         fz_matrix transform = fz_scale(renderScale, renderScale);
         transform = fz_concat(transform, fz_rotate(PdfTab->m_currentRotation));
 
-        fz_rect rect = fz_bound_page(renderCtx, page);
+        fz_rect pdfBounds = fz_bound_page(renderCtx, page);
+        fz_rect rect = pdfBounds;
         rect = fz_transform_rect(rect, transform);
         fz_irect bbox = fz_round_rect(rect);
 
@@ -541,8 +543,14 @@ namespace winrt::urPDF::implementation
         winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap current_writeable_bitmap(width, height);
         bitmap.CopyToBuffer(current_writeable_bitmap.PixelBuffer());
 
-        std::vector<WriteableBitmap> singlePage{
-            current_writeable_bitmap
+        PageSlot singlePageSlot;
+        singlePageSlot.pdfBounds = pdfBounds;
+        singlePageSlot.state = PageRenderState::ready;
+        singlePageSlot.bitmap = current_writeable_bitmap;
+        singlePageSlot.generation = generation;
+
+        std::vector<PageSlot> singlePage{
+            std::move(singlePageSlot)
         };
         RebuildPagesContainer(singlePage, PdfTab->m_currentPageZoom);
 
@@ -558,7 +566,8 @@ namespace winrt::urPDF::implementation
 
     winrt::Windows::Foundation::IAsyncAction MainWindow::RenderMultiPageAsync(std::shared_ptr<PdfTabInfo> PdfTab)
     {
-        std::vector<WriteableBitmap> renderedPages;
+        const std::uint64_t generation = ++PdfTab->m_renderGeneration;
+        std::vector<PageSlot> renderedPages;
 
         fz_context* renderCtx = fz_clone_context(m_ctx);
         if (!renderCtx)
@@ -580,7 +589,8 @@ namespace winrt::urPDF::implementation
         {
             fz_page* page = fz_load_page(renderCtx, PdfTab->m_doc, i);
 
-            fz_rect rect = fz_bound_page(renderCtx, page);
+            fz_rect pdfBounds = fz_bound_page(renderCtx, page);
+            fz_rect rect = pdfBounds;
             rect = fz_transform_rect(rect, transform);
             fz_irect bbox = fz_round_rect(rect);
 
@@ -612,7 +622,13 @@ namespace winrt::urPDF::implementation
 
             winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap current_writeable_bitmap(width, height);
             bitmap.CopyToBuffer(current_writeable_bitmap.PixelBuffer());
-            renderedPages.push_back(current_writeable_bitmap);
+
+            PageSlot pageSlot;
+            pageSlot.pdfBounds = pdfBounds;
+            pageSlot.state = PageRenderState::ready;
+            pageSlot.bitmap = std::move(current_writeable_bitmap);
+            pageSlot.generation = generation;
+            renderedPages.push_back(std::move(pageSlot));
 
             if (i < pagecount - 1)
             {
@@ -675,7 +691,7 @@ namespace winrt::urPDF::implementation
         RotateButton().IsEnabled(true);
     }
 
-    void MainWindow::RebuildPagesContainer(std::vector<WriteableBitmap> const& pages, double renderZoom)
+    void MainWindow::RebuildPagesContainer(std::vector<PageSlot> const& pages, double renderZoom)
     {
         auto children = PagesContainer().Children();
         children.Clear();
@@ -698,11 +714,16 @@ namespace winrt::urPDF::implementation
 
             for (size_t j = i; j < (std::min)(i + pagesPerRow, pages.size()); ++j)
             {
+                if (!pages[j].bitmap || pages[j].state != PageRenderState::ready)
+                {
+                    continue;
+                }
+
                 winrt::Microsoft::UI::Xaml::Controls::Image image;
-                image.Source(pages[j]);
+                image.Source(*pages[j].bitmap);
                 image.Stretch(winrt::Microsoft::UI::Xaml::Media::Stretch::Uniform);
-                image.Width(pages[j].PixelWidth() / (renderZoom * PdfRenderQuality));
-                image.Height(pages[j].PixelHeight() / (renderZoom * PdfRenderQuality));
+                image.Width(pages[j].bitmap->PixelWidth() / (renderZoom * PdfRenderQuality));
+                image.Height(pages[j].bitmap->PixelHeight() / (renderZoom * PdfRenderQuality));
                 image.VerticalAlignment(winrt::Microsoft::UI::Xaml::VerticalAlignment::Top);
                 image.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 5 });
 
@@ -997,7 +1018,11 @@ namespace winrt::urPDF::implementation
                     pageContainer.Height(printSize->Height);
 
                     winrt::Microsoft::UI::Xaml::Controls::Image pageImage;
-                    pageImage.Source(pdfInfo->m_renderedPages[args.PageNumber() - 1]);
+                    auto const& pageSlot = pdfInfo->m_renderedPages[args.PageNumber() - 1];
+                    if (pageSlot.bitmap && pageSlot.state == PageRenderState::ready)
+                    {
+                        pageImage.Source(*pageSlot.bitmap);
+                    }
                     pageImage.Stretch(winrt::Microsoft::UI::Xaml::Media::Stretch::Uniform);
                     pageImage.HorizontalAlignment(winrt::Microsoft::UI::Xaml::HorizontalAlignment::Center);
                     pageImage.VerticalAlignment(winrt::Microsoft::UI::Xaml::VerticalAlignment::Center);
@@ -1018,7 +1043,11 @@ namespace winrt::urPDF::implementation
                     pageContainer.Height(printSize->Height);
 
                     winrt::Microsoft::UI::Xaml::Controls::Image pageImage;
-                    pageImage.Source(pdfInfo->m_renderedPages[i]);
+                    auto const& pageSlot = pdfInfo->m_renderedPages[i];
+                    if (pageSlot.bitmap && pageSlot.state == PageRenderState::ready)
+                    {
+                        pageImage.Source(*pageSlot.bitmap);
+                    }
                     pageImage.Stretch(winrt::Microsoft::UI::Xaml::Media::Stretch::Uniform);
                     pageImage.HorizontalAlignment(winrt::Microsoft::UI::Xaml::HorizontalAlignment::Center);
                     pageImage.VerticalAlignment(winrt::Microsoft::UI::Xaml::VerticalAlignment::Center);

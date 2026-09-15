@@ -9,7 +9,9 @@ extern "C" {
 
 #include <map>
 #include <array>
+#include <cstdint>
 #include <mutex>
+#include <optional>
 #include <vector>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
@@ -17,6 +19,22 @@ extern "C" {
 
 namespace winrt::urPDF::implementation
 {
+    enum class PageRenderState
+    {
+        ready,
+        unloaded,
+        loading,
+        error
+    };
+
+    struct PageSlot
+    {
+        fz_rect pdfBounds{};
+        PageRenderState state{ PageRenderState::unloaded };
+        std::optional<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> bitmap;
+        std::uint64_t generation{ 0 };
+    };
+
     class PdfTabInfo
     {
     public:
@@ -25,10 +43,11 @@ namespace winrt::urPDF::implementation
 
         winrt::hstring m_openedFilePath;
         winrt::hstring m_fileName = L"unknown";
-        std::vector<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> m_renderedPages;
+        std::vector<PageSlot> m_renderedPages;
         int32_t m_currentPageIndex = { 1 };
         double m_currentPageZoom = { 1.0 };
         int m_currentRotation = { 0 };
+        std::uint64_t m_renderGeneration{ 0 };
         
         fz_context* m_ctx{ nullptr };
         fz_document* m_doc{ nullptr };
@@ -96,7 +115,7 @@ namespace winrt::urPDF::implementation
 
         bool TryAcquireRenderingLock();
         void ReleaseRenderingLock();
-        void RebuildPagesContainer(std::vector<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> const& pages, double renderZoom);
+        void RebuildPagesContainer(std::vector<PageSlot> const& pages, double renderZoom);
     };
 }
 
