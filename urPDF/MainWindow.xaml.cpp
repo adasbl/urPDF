@@ -46,6 +46,7 @@ using namespace Microsoft::UI::Composition;
 namespace
 {
     constexpr double PdfRenderQuality = 1.5;
+    constexpr size_t PdfStoreBudgetBytes = 256ull * 1024ull * 1024ull;
 
     void LockMuPdf(void* user, int lock)
     {
@@ -90,7 +91,7 @@ namespace winrt::urPDF::implementation
         m_mupdfLocks.user = m_mupdfMutexes.data();
         m_mupdfLocks.lock = LockMuPdf;
         m_mupdfLocks.unlock = UnlockMuPdf;
-        m_ctx = fz_new_context(nullptr, &m_mupdfLocks, FZ_STORE_UNLIMITED);
+        m_ctx = fz_new_context(nullptr, &m_mupdfLocks, PdfStoreBudgetBytes);
         fz_register_document_handlers(m_ctx);
 
         auto activationArgs = winrt::Microsoft::Windows::AppLifecycle::AppInstance::GetCurrent().GetActivatedEventArgs();
