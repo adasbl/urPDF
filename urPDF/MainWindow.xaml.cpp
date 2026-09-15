@@ -64,6 +64,21 @@ namespace
         constexpr double pdfPointsPerInch = 72.0;
         return (baseDpi / pdfPointsPerInch) * zoom * PdfRenderQuality;
     }
+
+    std::vector<fz_rect> CollectPageBounds(fz_context* ctx, fz_document* doc, int pagecount)
+    {
+        std::vector<fz_rect> pageBounds;
+        pageBounds.reserve(pagecount);
+
+        for (int i = 0; i < pagecount; ++i)
+        {
+            fz_page* page = fz_load_page(ctx, doc, i);
+            pageBounds.push_back(fz_bound_page(ctx, page));
+            fz_drop_page(ctx, page);
+        }
+
+        return pageBounds;
+    }
 }
 
 namespace winrt::urPDF::implementation
@@ -501,6 +516,7 @@ namespace winrt::urPDF::implementation
 
         int pagecount = fz_count_pages(renderCtx, PdfTab->m_doc);
         PdfTab->m_pagecount = pagecount;
+        PdfTab->m_pageBounds = CollectPageBounds(renderCtx, PdfTab->m_doc, pagecount);
 
         fz_page* page = fz_load_page(renderCtx, PdfTab->m_doc, 0);
 
@@ -508,7 +524,7 @@ namespace winrt::urPDF::implementation
         fz_matrix transform = fz_scale(renderScale, renderScale);
         transform = fz_concat(transform, fz_rotate(PdfTab->m_currentRotation));
 
-        fz_rect pdfBounds = fz_bound_page(renderCtx, page);
+        fz_rect pdfBounds = PdfTab->m_pageBounds[0];
         fz_rect rect = pdfBounds;
         rect = fz_transform_rect(rect, transform);
         fz_irect bbox = fz_round_rect(rect);
@@ -579,7 +595,14 @@ namespace winrt::urPDF::implementation
 
         int pagecount = fz_count_pages(renderCtx, PdfTab->m_doc);
         PdfTab->m_pagecount = pagecount;
-        renderedPages.reserve(pagecount);
+        PdfTab->m_pageBounds = CollectPageBounds(renderCtx, PdfTab->m_doc, pagecount);
+        renderedPages.resize(pagecount);
+
+        for (int i = 0; i < pagecount; ++i)
+        {
+            renderedPages[i].pdfBounds = PdfTab->m_pageBounds[i];
+            renderedPages[i].generation = generation;
+        }
 
         double renderScale = PdfRenderScale(PdfTab->m_currentPageZoom);
         fz_matrix transform = fz_scale(renderScale, renderScale);
@@ -587,10 +610,10 @@ namespace winrt::urPDF::implementation
 
         for (int i = 0; i < pagecount; i++)
         {
+            renderedPages[i].state = PageRenderState::loading;
             fz_page* page = fz_load_page(renderCtx, PdfTab->m_doc, i);
 
-            fz_rect pdfBounds = fz_bound_page(renderCtx, page);
-            fz_rect rect = pdfBounds;
+            fz_rect rect = renderedPages[i].pdfBounds;
             rect = fz_transform_rect(rect, transform);
             fz_irect bbox = fz_round_rect(rect);
 
@@ -623,12 +646,8 @@ namespace winrt::urPDF::implementation
             winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap current_writeable_bitmap(width, height);
             bitmap.CopyToBuffer(current_writeable_bitmap.PixelBuffer());
 
-            PageSlot pageSlot;
-            pageSlot.pdfBounds = pdfBounds;
-            pageSlot.state = PageRenderState::ready;
-            pageSlot.bitmap = std::move(current_writeable_bitmap);
-            pageSlot.generation = generation;
-            renderedPages.push_back(std::move(pageSlot));
+            renderedPages[i].bitmap = std::move(current_writeable_bitmap);
+            renderedPages[i].state = PageRenderState::ready;
 
             if (i < pagecount - 1)
             {

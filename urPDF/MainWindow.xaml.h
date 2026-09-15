@@ -52,6 +52,7 @@ namespace winrt::urPDF::implementation
         fz_context* m_ctx{ nullptr };
         fz_document* m_doc{ nullptr };
         int m_pagecount{ 0 };
+        std::vector<fz_rect> m_pageBounds;
     };
 
 
