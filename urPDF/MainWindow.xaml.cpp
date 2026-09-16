@@ -604,43 +604,50 @@ namespace winrt::urPDF::implementation
             co_return;
         }
 
-        std::string filePath = winrt::to_string(file.Path());
-        winrt::hstring fileName = file.Name();
-
-        auto PdfInfo = std::make_shared<PdfTabInfo>(m_ctx, filePath);
-        PdfInfo->m_documentId = m_nextDocumentId++;
-        PdfInfo->m_fileName = fileName;
-
-        winrt::Microsoft::UI::Xaml::Controls::TabViewItem targetTab;
-
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
-
-        bool isCurrentTabEmpty = currentTab && !m_openedTabs.contains(currentTab);
-
-        if (isCurrentTabEmpty)
+        try
         {
-            targetTab = currentTab;
-            targetTab.Content(nullptr);
+            std::string filePath = winrt::to_string(file.Path());
+            winrt::hstring fileName = file.Name();
+
+            auto PdfInfo = std::make_shared<PdfTabInfo>(m_ctx, filePath);
+            PdfInfo->m_documentId = m_nextDocumentId++;
+            PdfInfo->m_fileName = fileName;
+
+            winrt::Microsoft::UI::Xaml::Controls::TabViewItem targetTab;
+
+            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+
+            bool isCurrentTabEmpty = currentTab && !m_openedTabs.contains(currentTab);
+
+            if (isCurrentTabEmpty)
+            {
+                targetTab = currentTab;
+                targetTab.Content(nullptr);
+            }
+            else
+            {
+                targetTab = winrt::Microsoft::UI::Xaml::Controls::TabViewItem();
+
+                MainTabView().TabItems().Append(targetTab);
+                MainTabView().SelectedItem(targetTab);
+            }
+            PagesContainer().Children().Clear();
+            EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+            targetTab.Header(winrt::box_value(fileName));
+
+            winrt::Microsoft::UI::Xaml::Controls::SymbolIconSource tabIcon;
+            tabIcon.Symbol(winrt::Microsoft::UI::Xaml::Controls::Symbol::Document);
+            targetTab.IconSource(tabIcon);
+
+            m_openedTabs[targetTab] = PdfInfo;
+
+            co_await RenderMultiPageAsync(PdfInfo);
+            ReleaseRenderingLock();
         }
-        else
+        catch (...)
         {
-            targetTab = winrt::Microsoft::UI::Xaml::Controls::TabViewItem();
-
-            MainTabView().TabItems().Append(targetTab);
-            MainTabView().SelectedItem(targetTab);
+            ReleaseRenderingLock();
         }
-        PagesContainer().Children().Clear();
-        EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
-        targetTab.Header(winrt::box_value(fileName));
-
-        winrt::Microsoft::UI::Xaml::Controls::SymbolIconSource tabIcon;
-        tabIcon.Symbol(winrt::Microsoft::UI::Xaml::Controls::Symbol::Document);
-        targetTab.IconSource(tabIcon);
-
-        m_openedTabs[targetTab] = PdfInfo;
-
-        co_await RenderMultiPageAsync(PdfInfo);
-        ReleaseRenderingLock();
     }
 
 
@@ -1056,9 +1063,16 @@ namespace winrt::urPDF::implementation
             {
                 if (TryAcquireRenderingLock())
                 {
-                    pdfInfo->m_currentPageZoom = currentZoom;
-                    co_await RenderMultiPageAsync(pdfInfo);
-                    ReleaseRenderingLock();
+                    try
+                    {
+                        pdfInfo->m_currentPageZoom = currentZoom;
+                        co_await RenderMultiPageAsync(pdfInfo);
+                        ReleaseRenderingLock();
+                    }
+                    catch (...)
+                    {
+                        ReleaseRenderingLock();
+                    }
                 }
             }
 
@@ -1092,16 +1106,23 @@ namespace winrt::urPDF::implementation
                 co_return;
             }
 
-            auto pdfInfo = m_openedTabs[currentTab];
-
-            pdfInfo->m_currentRotation += 90;
-            if (pdfInfo->m_currentRotation >= 360)
+            try
             {
-                pdfInfo->m_currentRotation = 0;
-            }
+                auto pdfInfo = m_openedTabs[currentTab];
 
-            co_await RenderMultiPageAsync(pdfInfo);
-            ReleaseRenderingLock();
+                pdfInfo->m_currentRotation += 90;
+                if (pdfInfo->m_currentRotation >= 360)
+                {
+                    pdfInfo->m_currentRotation = 0;
+                }
+
+                co_await RenderMultiPageAsync(pdfInfo);
+                ReleaseRenderingLock();
+            }
+            catch (...)
+            {
+                ReleaseRenderingLock();
+            }
         }
     }
 
