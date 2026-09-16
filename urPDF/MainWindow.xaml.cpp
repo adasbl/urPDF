@@ -23,7 +23,9 @@ extern "C" {
 #include <map>
 #include <winrt/Microsoft.UI.Dispatching.h>
 #include <algorithm>
+#include <cmath>
 #include <cwctype>
+#include <limits>
 #include <string>
 #include <memory>
 #include <coroutine>
@@ -65,6 +67,36 @@ namespace
         return (baseDpi / pdfPointsPerInch) * zoom * PdfRenderQuality;
     }
 
+    int ZoomBucket(double zoom) noexcept
+    {
+        if (!std::isfinite(zoom) || zoom <= 0.0)
+        {
+            return 0;
+        }
+
+        constexpr double bucketSize = 0.1;
+        return static_cast<int>(std::lround(zoom / bucketSize));
+    }
+
+    int NormalizeRotation(int rotation) noexcept
+    {
+        rotation %= 360;
+        return rotation < 0 ? rotation + 360 : rotation;
+    }
+
+    std::size_t BitmapMemoryBytes(WriteableBitmap const& bitmap) noexcept
+    {
+        constexpr std::uint64_t bytesPerPixel = 4;
+        const std::uint64_t bytes = static_cast<std::uint64_t>(bitmap.PixelWidth()) * static_cast<std::uint64_t>(bitmap.PixelHeight()) * bytesPerPixel;
+
+        if (bytes > (std::numeric_limits<std::size_t>::max)())
+        {
+            return (std::numeric_limits<std::size_t>::max)();
+        }
+
+        return static_cast<std::size_t>(bytes);
+    }
+
     std::vector<fz_rect> CollectPageBounds(fz_context* ctx, fz_document* doc, int pagecount)
     {
         std::vector<fz_rect> pageBounds;
@@ -80,6 +112,7 @@ namespace
         return pageBounds;
     }
 }
+
 
 namespace winrt::urPDF::implementation
 {
@@ -135,6 +168,103 @@ namespace winrt::urPDF::implementation
             void await_resume() const noexcept {}
         };
         return awaitable{ dispatcher };
+    }
+
+
+    // CASHE
+    std::size_t PageBitmapCacheKeyHash::operator() (PageBitmapCacheKey const& key) const noexcept
+    {
+        std::size_t hash = std::hash<std::uint64_t>{}(key.documentId);
+
+        const auto combine = [&hash](std::size_t value)
+        {
+            hash ^= value + static_cast<std::size_t>(0x9e3779b9) + (hash << 6) + (hash >> 2);
+        };
+
+        combine(std::hash<int>{}(key.pageIndex));
+        combine(std::hash<int>{}(key.rotation));
+        combine(std::hash<int>{}(key.zoomBucket));
+        return hash;
+    }
+
+    PageBitmapCache::PageBitmapCache(std::size_t budgetBytes)
+        : m_budgetBytes(budgetBytes)
+    {
+    }
+
+    std::optional<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap>PageBitmapCache::TryGetBitmap(PageBitmapCacheKey const& key)
+    {
+        auto entry = m_entries.find(key);
+        if (entry == m_entries.end())
+        {
+            return std::nullopt;
+        }
+
+        MarkAsRecentlyUsed(entry);
+        return entry->second.bitmap;
+    }
+
+    void PageBitmapCache::StoreBitmap(PageBitmapCacheKey const& key, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap)
+    {
+        const std::size_t memoryBytes = BitmapMemoryBytes(bitmap);
+        if (memoryBytes > m_budgetBytes)
+        {
+            return;
+        }
+
+        auto existingEntry = m_entries.find(key);
+        if (existingEntry != m_entries.end())
+        {
+            m_usedBytes -= existingEntry->second.memoryBytes;
+            m_lru.erase(existingEntry->second.lruPosition);
+            m_entries.erase(existingEntry);
+        }
+
+        m_lru.push_front(key);
+        Entry entry{ bitmap, memoryBytes, m_lru.begin() };
+        m_entries.emplace(key, std::move(entry));
+        m_usedBytes += memoryBytes;
+        EvictEntriesIfNeeded();
+    }
+
+    void PageBitmapCache::ClearDocumentEntries(std::uint64_t documentId)
+    {
+        for (auto entry = m_entries.begin(); entry != m_entries.end();)
+        {
+            if (entry->first.documentId != documentId)
+            {
+                ++entry;
+                continue;
+            }
+
+            m_usedBytes -= entry->second.memoryBytes;
+            m_lru.erase(entry->second.lruPosition);
+            entry = m_entries.erase(entry);
+        }
+    }
+
+    void PageBitmapCache::MarkAsRecentlyUsed(std::unordered_map<PageBitmapCacheKey, Entry, PageBitmapCacheKeyHash>::iterator entry)
+    {
+        m_lru.splice(m_lru.begin(), m_lru, entry->second.lruPosition);
+        entry->second.lruPosition = m_lru.begin();
+    }
+
+    void PageBitmapCache::EvictEntriesIfNeeded()
+    {
+        while (m_usedBytes > m_budgetBytes && !m_lru.empty())
+        {
+            const PageBitmapCacheKey key = m_lru.back();
+            m_lru.pop_back();
+
+            auto entry = m_entries.find(key);
+            if (entry == m_entries.end())
+            {
+                continue;
+            }
+
+            m_usedBytes -= entry->second.memoryBytes;
+            m_entries.erase(entry);
+        }
     }
 
 
@@ -382,7 +512,12 @@ namespace winrt::urPDF::implementation
     {
         auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
 
-        m_openedTabs.erase(args.Tab());
+        auto openedTab = m_openedTabs.find(args.Tab());
+        if (openedTab != m_openedTabs.end())
+        {
+            m_pageBitmapCache.ClearDocumentEntries(openedTab->second->m_documentId);
+            m_openedTabs.erase(openedTab);
+        }
 
         uint32_t index;
         if (tabView.TabItems().IndexOf(args.Tab(), index))
@@ -467,6 +602,7 @@ namespace winrt::urPDF::implementation
         winrt::hstring fileName = file.Name();
 
         auto PdfInfo = std::make_shared<PdfTabInfo>(m_ctx, filePath);
+        PdfInfo->m_documentId = m_nextDocumentId++;
         PdfInfo->m_fileName = fileName;
 
         winrt::Microsoft::UI::Xaml::Controls::TabViewItem targetTab;
@@ -559,6 +695,8 @@ namespace winrt::urPDF::implementation
         winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap current_writeable_bitmap(width, height);
         bitmap.CopyToBuffer(current_writeable_bitmap.PixelBuffer());
 
+        m_pageBitmapCache.StoreBitmap(PageBitmapCacheKey{PdfTab->m_documentId, 0, NormalizeRotation(PdfTab->m_currentRotation), ZoomBucket(PdfTab->m_currentPageZoom)}, current_writeable_bitmap );
+
         PageSlot singlePageSlot;
         singlePageSlot.pdfBounds = pdfBounds;
         singlePageSlot.state = PageRenderState::ready;
@@ -645,6 +783,8 @@ namespace winrt::urPDF::implementation
 
             winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap current_writeable_bitmap(width, height);
             bitmap.CopyToBuffer(current_writeable_bitmap.PixelBuffer());
+
+            m_pageBitmapCache.StoreBitmap(PageBitmapCacheKey{ PdfTab->m_documentId, i, NormalizeRotation(PdfTab->m_currentRotation), ZoomBucket(PdfTab->m_currentPageZoom) }, current_writeable_bitmap);
 
             renderedPages[i].bitmap = std::move(current_writeable_bitmap);
             renderedPages[i].state = PageRenderState::ready;

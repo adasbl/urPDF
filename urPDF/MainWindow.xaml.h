@@ -9,9 +9,13 @@ extern "C" {
 
 #include <map>
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <list>
 #include <mutex>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
@@ -27,6 +31,7 @@ namespace winrt::urPDF::implementation
         error
     };
 
+
     struct PageSlot
     {
         fz_rect pdfBounds{};
@@ -34,6 +39,57 @@ namespace winrt::urPDF::implementation
         std::optional<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> bitmap;
         std::uint64_t generation{ 0 };
     };
+
+
+    struct PageBitmapCacheKey
+    {
+        std::uint64_t documentId{ 0 };
+        int pageIndex{ 0 };
+        int rotation{ 0 };
+        int zoomBucket{ 0 };
+
+        bool operator== (PageBitmapCacheKey const& other) const noexcept
+        {
+            if (documentId == other.documentId && pageIndex == other.pageIndex && rotation == other.rotation && zoomBucket == other.zoomBucket)
+            {
+                return true;
+            }
+            return false;
+        }
+    };
+
+
+    struct PageBitmapCacheKeyHash
+    {
+        std::size_t operator()(PageBitmapCacheKey const& key) const noexcept;
+    };
+
+
+    class PageBitmapCache
+    {
+        struct Entry
+        {
+            winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap bitmap{ nullptr };
+            std::size_t memoryBytes{ 0 };
+            std::list<PageBitmapCacheKey>::iterator lruPosition;
+        };
+
+        void MarkAsRecentlyUsed(std::unordered_map<PageBitmapCacheKey, Entry, PageBitmapCacheKeyHash>::iterator entry);
+        void EvictEntriesIfNeeded();
+
+        std::size_t m_budgetBytes{ 0 };
+        std::size_t m_usedBytes{ 0 };
+        std::list<PageBitmapCacheKey> m_lru;
+        std::unordered_map<PageBitmapCacheKey, Entry, PageBitmapCacheKeyHash> m_entries;
+
+    public:
+        explicit PageBitmapCache(std::size_t budgetBytes);
+
+        std::optional<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> TryGetBitmap(PageBitmapCacheKey const& key);
+        void StoreBitmap(PageBitmapCacheKey const& key, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap);
+        void ClearDocumentEntries(std::uint64_t documentId);
+    };
+
 
     class PdfTabInfo
     {
@@ -53,6 +109,7 @@ namespace winrt::urPDF::implementation
         fz_document* m_doc{ nullptr };
         int m_pagecount{ 0 };
         std::vector<fz_rect> m_pageBounds;
+        std::uint64_t m_documentId{ 0 };
     };
 
 
@@ -113,6 +170,8 @@ namespace winrt::urPDF::implementation
         bool m_isNormalizingZoom{ false };
         bool m_zoomWasEnabled{ false };
         bool m_bookViewMode{ false };
+        std::uint64_t m_nextDocumentId{ 1 };
+        PageBitmapCache m_pageBitmapCache{ 256ull * 1024ull * 1024ull };
 
         bool TryAcquireRenderingLock();
         void ReleaseRenderingLock();
