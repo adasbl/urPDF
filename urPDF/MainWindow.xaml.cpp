@@ -119,6 +119,11 @@ namespace winrt::urPDF::implementation
     // MAINWINDOW
     MainWindow::~MainWindow()
     {
+        for (auto const& tabEntry : m_openedTabs)
+        {
+            ++tabEntry.second->m_renderGeneration;
+        }
+
         if (m_ctx) {
             fz_drop_context(m_ctx);
             m_ctx = nullptr;
@@ -194,14 +199,14 @@ namespace winrt::urPDF::implementation
 
     std::optional<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap>PageBitmapCache::TryGetBitmap(PageBitmapCacheKey const& key)
     {
-        auto entry = m_entries.find(key);
-        if (entry == m_entries.end())
+        auto cacheEntry = m_entries.find(key);
+        if (cacheEntry == m_entries.end())
         {
             return std::nullopt;
         }
 
-        MarkAsRecentlyUsed(entry);
-        return entry->second.bitmap;
+        MarkAsRecentlyUsed(cacheEntry);
+        return cacheEntry->second.bitmap;
     }
 
     void PageBitmapCache::StoreBitmap(PageBitmapCacheKey const& key, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap)
@@ -221,32 +226,32 @@ namespace winrt::urPDF::implementation
         }
 
         m_lru.push_front(key);
-        Entry entry{ bitmap, memoryBytes, m_lru.begin() };
-        m_entries.emplace(key, std::move(entry));
+        CacheEntry cacheEntry{ bitmap, memoryBytes, m_lru.begin() };
+        m_entries.emplace(key, std::move(cacheEntry));
         m_usedBytes += memoryBytes;
         EvictEntriesIfNeeded();
     }
 
     void PageBitmapCache::ClearDocumentEntries(std::uint64_t documentId)
     {
-        for (auto entry = m_entries.begin(); entry != m_entries.end();)
+        for (auto cacheEntry = m_entries.begin(); cacheEntry != m_entries.end();)
         {
-            if (entry->first.documentId != documentId)
+            if (cacheEntry->first.documentId != documentId)
             {
-                ++entry;
+                ++cacheEntry;
                 continue;
             }
 
-            m_usedBytes -= entry->second.memoryBytes;
-            m_lru.erase(entry->second.lruPosition);
-            entry = m_entries.erase(entry);
+            m_usedBytes -= cacheEntry->second.memoryBytes;
+            m_lru.erase(cacheEntry->second.lruPosition);
+            cacheEntry = m_entries.erase(cacheEntry);
         }
     }
 
-    void PageBitmapCache::MarkAsRecentlyUsed(std::unordered_map<PageBitmapCacheKey, Entry, PageBitmapCacheKeyHash>::iterator entry)
+    void PageBitmapCache::MarkAsRecentlyUsed(std::unordered_map<PageBitmapCacheKey, CacheEntry, PageBitmapCacheKeyHash>::iterator cacheEntry)
     {
-        m_lru.splice(m_lru.begin(), m_lru, entry->second.lruPosition);
-        entry->second.lruPosition = m_lru.begin();
+        m_lru.splice(m_lru.begin(), m_lru, cacheEntry->second.lruPosition);
+        cacheEntry->second.lruPosition = m_lru.begin();
     }
 
     void PageBitmapCache::EvictEntriesIfNeeded()
@@ -256,14 +261,14 @@ namespace winrt::urPDF::implementation
             const PageBitmapCacheKey key = m_lru.back();
             m_lru.pop_back();
 
-            auto entry = m_entries.find(key);
-            if (entry == m_entries.end())
+            auto cacheEntry = m_entries.find(key);
+            if (cacheEntry == m_entries.end())
             {
                 continue;
             }
 
-            m_usedBytes -= entry->second.memoryBytes;
-            m_entries.erase(entry);
+            m_usedBytes -= cacheEntry->second.memoryBytes;
+            m_entries.erase(cacheEntry);
         }
     }
 
@@ -515,6 +520,7 @@ namespace winrt::urPDF::implementation
         auto openedTab = m_openedTabs.find(args.Tab());
         if (openedTab != m_openedTabs.end())
         {
+            ++openedTab->second->m_renderGeneration;
             m_pageBitmapCache.ClearDocumentEntries(openedTab->second->m_documentId);
             m_openedTabs.erase(openedTab);
         }
@@ -641,7 +647,7 @@ namespace winrt::urPDF::implementation
     // PAGE RENDERING
     winrt::Windows::Foundation::IAsyncAction MainWindow::RenderSinglePageAsync(std::shared_ptr<PdfTabInfo> PdfTab)
     {
-        const std::uint64_t generation = ++PdfTab->m_renderGeneration;
+        const std::uint64_t generation = PdfTab->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
         fz_context* renderCtx = fz_clone_context(m_ctx);
         if (!renderCtx)
         {
@@ -650,17 +656,30 @@ namespace winrt::urPDF::implementation
 
         co_await winrt::resume_background();
 
+        if (PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
+        {
+            fz_drop_context(renderCtx);
+            co_return;
+        }
+
         int pagecount = fz_count_pages(renderCtx, PdfTab->m_doc);
-        PdfTab->m_pagecount = pagecount;
-        PdfTab->m_pageBounds = CollectPageBounds(renderCtx, PdfTab->m_doc, pagecount);
+        auto pageBounds = CollectPageBounds(renderCtx, PdfTab->m_doc, pagecount);
+
+        if (PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
+        {
+            fz_drop_context(renderCtx);
+            co_return;
+        }
 
         fz_page* page = fz_load_page(renderCtx, PdfTab->m_doc, 0);
 
-        double renderScale = PdfRenderScale(PdfTab->m_currentPageZoom);
+        const double pageZoom = PdfTab->m_currentPageZoom;
+        const int pageRotation = PdfTab->m_currentRotation;
+        double renderScale = PdfRenderScale(pageZoom);
         fz_matrix transform = fz_scale(renderScale, renderScale);
-        transform = fz_concat(transform, fz_rotate(PdfTab->m_currentRotation));
+        transform = fz_concat(transform, fz_rotate(pageRotation));
 
-        fz_rect pdfBounds = PdfTab->m_pageBounds[0];
+        fz_rect pdfBounds = pageBounds[0];
         fz_rect rect = pdfBounds;
         rect = fz_transform_rect(rect, transform);
         fz_irect bbox = fz_round_rect(rect);
@@ -692,10 +711,15 @@ namespace winrt::urPDF::implementation
 
         co_await resume_foreground(DispatcherQueue());
 
+        if (PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
+        {
+            co_return;
+        }
+
         winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap current_writeable_bitmap(width, height);
         bitmap.CopyToBuffer(current_writeable_bitmap.PixelBuffer());
 
-        m_pageBitmapCache.StoreBitmap(PageBitmapCacheKey{PdfTab->m_documentId, 0, NormalizeRotation(PdfTab->m_currentRotation), ZoomBucket(PdfTab->m_currentPageZoom)}, current_writeable_bitmap );
+        m_pageBitmapCache.StoreBitmap(PageBitmapCacheKey{ PdfTab->m_documentId, 0, NormalizeRotation(pageRotation), ZoomBucket(pageZoom) }, current_writeable_bitmap);
 
         PageSlot singlePageSlot;
         singlePageSlot.pdfBounds = pdfBounds;
@@ -706,6 +730,8 @@ namespace winrt::urPDF::implementation
         std::vector<PageSlot> singlePage{
             std::move(singlePageSlot)
         };
+        PdfTab->m_pagecount = pagecount;
+        PdfTab->m_pageBounds = std::move(pageBounds);
         RebuildPagesContainer(singlePage, PdfTab->m_currentPageZoom);
 
         auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
@@ -720,7 +746,7 @@ namespace winrt::urPDF::implementation
 
     winrt::Windows::Foundation::IAsyncAction MainWindow::RenderMultiPageAsync(std::shared_ptr<PdfTabInfo> PdfTab)
     {
-        const std::uint64_t generation = ++PdfTab->m_renderGeneration;
+        const std::uint64_t generation = PdfTab->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
         std::vector<PageSlot> renderedPages;
 
         fz_context* renderCtx = fz_clone_context(m_ctx);
@@ -731,23 +757,36 @@ namespace winrt::urPDF::implementation
 
         co_await winrt::resume_background();
 
+        if (PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
+        {
+            fz_drop_context(renderCtx);
+            co_return;
+        }
+
         int pagecount = fz_count_pages(renderCtx, PdfTab->m_doc);
-        PdfTab->m_pagecount = pagecount;
-        PdfTab->m_pageBounds = CollectPageBounds(renderCtx, PdfTab->m_doc, pagecount);
+        auto pageBounds = CollectPageBounds(renderCtx, PdfTab->m_doc, pagecount);
         renderedPages.resize(pagecount);
 
         for (int i = 0; i < pagecount; ++i)
         {
-            renderedPages[i].pdfBounds = PdfTab->m_pageBounds[i];
+            renderedPages[i].pdfBounds = pageBounds[i];
             renderedPages[i].generation = generation;
         }
 
-        double renderScale = PdfRenderScale(PdfTab->m_currentPageZoom);
+        const double pageZoom = PdfTab->m_currentPageZoom;
+        const int pageRotation = PdfTab->m_currentRotation;
+        double renderScale = PdfRenderScale(pageZoom);
         fz_matrix transform = fz_scale(renderScale, renderScale);
-        transform = fz_concat(transform, fz_rotate(PdfTab->m_currentRotation));
+        transform = fz_concat(transform, fz_rotate(pageRotation));
 
         for (int i = 0; i < pagecount; i++)
         {
+            if (PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
+            {
+                fz_drop_context(renderCtx);
+                co_return;
+            }
+
             renderedPages[i].state = PageRenderState::loading;
             fz_page* page = fz_load_page(renderCtx, PdfTab->m_doc, i);
 
@@ -781,10 +820,16 @@ namespace winrt::urPDF::implementation
                 
             co_await resume_foreground(DispatcherQueue());
 
+            if (PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
+            {
+                fz_drop_context(renderCtx);
+                co_return;
+            }
+
             winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap current_writeable_bitmap(width, height);
             bitmap.CopyToBuffer(current_writeable_bitmap.PixelBuffer());
 
-            m_pageBitmapCache.StoreBitmap(PageBitmapCacheKey{ PdfTab->m_documentId, i, NormalizeRotation(PdfTab->m_currentRotation), ZoomBucket(PdfTab->m_currentPageZoom) }, current_writeable_bitmap);
+            m_pageBitmapCache.StoreBitmap(PageBitmapCacheKey{ PdfTab->m_documentId, i, NormalizeRotation(pageRotation), ZoomBucket(pageZoom) }, current_writeable_bitmap);
 
             renderedPages[i].bitmap = std::move(current_writeable_bitmap);
             renderedPages[i].state = PageRenderState::ready;
@@ -798,6 +843,11 @@ namespace winrt::urPDF::implementation
 
         co_await resume_foreground(DispatcherQueue());
 
+        if (PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
+        {
+            co_return;
+        }
+
         auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
         bool isCurrentTab = false;
         if (currentTab)
@@ -810,6 +860,8 @@ namespace winrt::urPDF::implementation
         {
             RebuildPagesContainer(renderedPages, PdfTab->m_currentPageZoom);
 
+            PdfTab->m_pagecount = pagecount;
+            PdfTab->m_pageBounds = std::move(pageBounds);
             PdfTab->m_renderedPages = std::move(renderedPages);
             currentTab.Header(winrt::box_value(PdfTab->m_fileName));
             DisplayPageCount(PdfTab->m_pagecount);
@@ -817,6 +869,8 @@ namespace winrt::urPDF::implementation
         }
         else
         {
+            PdfTab->m_pagecount = pagecount;
+            PdfTab->m_pageBounds = std::move(pageBounds);
             PdfTab->m_renderedPages = std::move(renderedPages);
         }
     }

@@ -7,6 +7,7 @@ extern "C" {
 #include <mupdf/fitz.h>
 }
 
+#include <atomic>
 #include <map>
 #include <array>
 #include <cstddef>
@@ -67,20 +68,20 @@ namespace winrt::urPDF::implementation
 
     class PageBitmapCache
     {
-        struct Entry
+        struct CacheEntry
         {
             winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap bitmap{ nullptr };
             std::size_t memoryBytes{ 0 };
             std::list<PageBitmapCacheKey>::iterator lruPosition;
         };
 
-        void MarkAsRecentlyUsed(std::unordered_map<PageBitmapCacheKey, Entry, PageBitmapCacheKeyHash>::iterator entry);
+        void MarkAsRecentlyUsed(std::unordered_map<PageBitmapCacheKey, CacheEntry, PageBitmapCacheKeyHash>::iterator cacheEntry);
         void EvictEntriesIfNeeded();
 
         std::size_t m_budgetBytes{ 0 };
         std::size_t m_usedBytes{ 0 };
         std::list<PageBitmapCacheKey> m_lru;
-        std::unordered_map<PageBitmapCacheKey, Entry, PageBitmapCacheKeyHash> m_entries;
+        std::unordered_map<PageBitmapCacheKey, CacheEntry, PageBitmapCacheKeyHash> m_entries;
 
     public:
         explicit PageBitmapCache(std::size_t budgetBytes);
@@ -103,7 +104,7 @@ namespace winrt::urPDF::implementation
         int32_t m_currentPageIndex = { 1 };
         double m_currentPageZoom = { 1.0 };
         int m_currentRotation = { 0 };
-        std::uint64_t m_renderGeneration{ 0 };
+        std::atomic<std::uint64_t> m_renderGeneration{ 0 };
         
         fz_context* m_ctx{ nullptr };
         fz_document* m_doc{ nullptr };
