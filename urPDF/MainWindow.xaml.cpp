@@ -486,7 +486,8 @@ namespace winrt::urPDF::implementation
 
         if (currentTab)
         {
-            PagesContainer().Children().Clear();
+            PagesRepeater().ItemsSource(nullptr);
+            m_pageRepeaterItems = nullptr;
 
             if (m_openedTabs.find(currentTab) != m_openedTabs.end())
             {
@@ -631,7 +632,8 @@ namespace winrt::urPDF::implementation
                 MainTabView().TabItems().Append(targetTab);
                 MainTabView().SelectedItem(targetTab);
             }
-            PagesContainer().Children().Clear();
+            PagesRepeater().ItemsSource(nullptr);
+            m_pageRepeaterItems = nullptr;
             EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
             targetTab.Header(winrt::box_value(fileName));
 
@@ -739,6 +741,7 @@ namespace winrt::urPDF::implementation
         };
         PdfTab->m_pagecount = pagecount;
         PdfTab->m_pageBounds = std::move(pageBounds);
+        PdfTab->m_renderedPages = singlePage;
         RebuildPagesContainer(singlePage, PdfTab->m_currentPageZoom);
 
         auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
@@ -779,6 +782,36 @@ namespace winrt::urPDF::implementation
             renderedPages[i].pdfBounds = pageBounds[i];
             renderedPages[i].generation = generation;
         }
+
+        co_await resume_foreground(DispatcherQueue());
+
+        if (PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
+        {
+            fz_drop_context(renderCtx);
+            co_return;
+        }
+
+        PdfTab->m_pagecount = pagecount;
+        PdfTab->m_pageBounds = pageBounds;
+        PdfTab->m_renderedPages = renderedPages;
+
+        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        bool isCurrentTab = false;
+        if (currentTab)
+        {
+            auto openedTab = m_openedTabs.find(currentTab);
+            isCurrentTab = openedTab != m_openedTabs.end() && openedTab->second == PdfTab;
+        }
+
+        if (isCurrentTab)
+        {
+            RebuildPagesContainer(PdfTab->m_renderedPages, PdfTab->m_currentPageZoom);
+            currentTab.Header(winrt::box_value(PdfTab->m_fileName));
+            DisplayPageCount(PdfTab->m_pagecount);
+            DisplayPageNumber(PdfTab->m_currentPageIndex);
+        }
+
+        co_await winrt::resume_background();
 
         const double pageZoom = PdfTab->m_currentPageZoom;
         const int pageRotation = PdfTab->m_currentRotation;
@@ -840,6 +873,21 @@ namespace winrt::urPDF::implementation
 
             renderedPages[i].bitmap = std::move(current_writeable_bitmap);
             renderedPages[i].state = PageRenderState::ready;
+            PdfTab->m_renderedPages[i] = renderedPages[i];
+
+            auto selectedTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+            if (selectedTab)
+            {
+                auto openedTab = m_openedTabs.find(selectedTab);
+                if (openedTab != m_openedTabs.end() && openedTab->second == PdfTab)
+                {
+                    auto element = PagesRepeater().TryGetElement(i);
+                    if (element)
+                    {
+                        ConfigurePageElement(element, static_cast<std::size_t>(i));
+                    }
+                }
+            }
 
             if (i < pagecount - 1)
             {
@@ -855,30 +903,16 @@ namespace winrt::urPDF::implementation
             co_return;
         }
 
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
-        bool isCurrentTab = false;
-        if (currentTab)
+        auto finalTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        if (finalTab)
         {
-            auto openedTab = m_openedTabs.find(currentTab);
-            isCurrentTab = openedTab != m_openedTabs.end() && openedTab->second == PdfTab;
-        }
-
-        if (isCurrentTab)
-        {
-            RebuildPagesContainer(renderedPages, PdfTab->m_currentPageZoom);
-
-            PdfTab->m_pagecount = pagecount;
-            PdfTab->m_pageBounds = std::move(pageBounds);
-            PdfTab->m_renderedPages = std::move(renderedPages);
-            currentTab.Header(winrt::box_value(PdfTab->m_fileName));
-            DisplayPageCount(PdfTab->m_pagecount);
-            DisplayPageNumber(PdfTab->m_currentPageIndex);
-        }
-        else
-        {
-            PdfTab->m_pagecount = pagecount;
-            PdfTab->m_pageBounds = std::move(pageBounds);
-            PdfTab->m_renderedPages = std::move(renderedPages);
+            auto openedTab = m_openedTabs.find(finalTab);
+            if (openedTab != m_openedTabs.end() && openedTab->second == PdfTab)
+            {
+                finalTab.Header(winrt::box_value(PdfTab->m_fileName));
+                DisplayPageCount(PdfTab->m_pagecount);
+                DisplayPageNumber(PdfTab->m_currentPageIndex);
+            }
         }
     }
 
@@ -913,45 +947,105 @@ namespace winrt::urPDF::implementation
 
     void MainWindow::RebuildPagesContainer(std::vector<PageSlot> const& pages, double renderZoom)
     {
-        auto children = PagesContainer().Children();
-        children.Clear();
-
         if (!std::isfinite(renderZoom) || renderZoom <= 0.0)
         {
             renderZoom = 1.0;
         }
 
-        const size_t pagesPerRow = m_bookViewMode ? 2 : 1;
-
-        for (size_t i = 0; i < pages.size(); i += pagesPerRow)
+        int currentRotation = 0;
+        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        if (currentTab)
         {
-            winrt::Microsoft::UI::Xaml::Controls::StackPanel row;
-            row.Orientation(
-                winrt::Microsoft::UI::Xaml::Controls::Orientation::Horizontal);
-            row.HorizontalAlignment(
-                winrt::Microsoft::UI::Xaml::HorizontalAlignment::Center);
-            row.Spacing(10);
-
-            for (size_t j = i; j < (std::min)(i + pagesPerRow, pages.size()); ++j)
+            auto openedTab = m_openedTabs.find(currentTab);
+            if (openedTab != m_openedTabs.end())
             {
-                if (!pages[j].bitmap || pages[j].state != PageRenderState::ready)
-                {
-                    continue;
-                }
-
-                winrt::Microsoft::UI::Xaml::Controls::Image image;
-                image.Source(*pages[j].bitmap);
-                image.Stretch(winrt::Microsoft::UI::Xaml::Media::Stretch::Uniform);
-                image.Width(pages[j].bitmap->PixelWidth() / (renderZoom * PdfRenderQuality));
-                image.Height(pages[j].bitmap->PixelHeight() / (renderZoom * PdfRenderQuality));
-                image.VerticalAlignment(winrt::Microsoft::UI::Xaml::VerticalAlignment::Top);
-                image.Margin(winrt::Microsoft::UI::Xaml::Thickness{ 0, 0, 0, 5 });
-
-                row.Children().Append(image);
+                currentRotation = openedTab->second->m_currentRotation;
             }
-
-            children.Append(row);
         }
+
+        auto pageSizes = winrt::single_threaded_vector<winrt::Windows::Foundation::Size>();
+
+        const bool swapDimensions = NormalizeRotation(currentRotation) == 90 || NormalizeRotation(currentRotation) == 270;
+        constexpr double dipPerPdfPoint = 96.0 / 72.0;
+
+        for (auto const& page : pages)
+        {
+            const double pdfWidth = std::abs(static_cast<double>(page.pdfBounds.x1 - page.pdfBounds.x0));
+            const double pdfHeight = std::abs(static_cast<double>(page.pdfBounds.y1 - page.pdfBounds.y0));
+            const double width = (swapDimensions ? pdfHeight : pdfWidth) * dipPerPdfPoint;
+            const double height = (swapDimensions ? pdfWidth : pdfHeight) * dipPerPdfPoint;
+            pageSizes.Append(winrt::Windows::Foundation::Size{static_cast<float>((std::max)(1.0, width)), static_cast<float>((std::max)(1.0, height))});
+        }
+
+        PagesLayout().ColumnCount(m_bookViewMode ? 2 : 1);
+        PagesLayout().PageSizes(pageSizes.GetView());
+
+        m_pageRepeaterItems = winrt::single_threaded_observable_vector<winrt::Windows::Foundation::IInspectable>();
+        for (size_t i = 0; i < pages.size(); ++i)
+        {
+            m_pageRepeaterItems.Append(winrt::box_value(static_cast<int32_t>(i)));
+        }
+
+        PagesRepeater().ItemsSource(m_pageRepeaterItems);
+    }
+
+    void MainWindow::ConfigurePageElement(winrt::Microsoft::UI::Xaml::UIElement const& element, std::size_t pageIndex)
+    {
+        auto border = element.try_as<winrt::Microsoft::UI::Xaml::Controls::Border>();
+        if (!border)
+        {
+            return;
+        }
+
+        auto image = border.Child().try_as<winrt::Microsoft::UI::Xaml::Controls::Image>();
+        if (!image)
+        {
+            return;
+        }
+
+        image.Source(nullptr);
+        border.Opacity(0.65);
+
+        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        if (!currentTab)
+        {
+            return;
+        }
+
+        auto openedTab = m_openedTabs.find(currentTab);
+        if (openedTab == m_openedTabs.end() || pageIndex >= openedTab->second->m_renderedPages.size())
+        {
+            return;
+        }
+
+        auto const& page = openedTab->second->m_renderedPages[pageIndex];
+        if (page.bitmap && page.state == PageRenderState::ready)
+        {
+            image.Source(*page.bitmap);
+            border.Opacity(1.0);
+        }
+    }
+
+    void MainWindow::PagesRepeater_ElementPrepared(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::Controls::ItemsRepeaterElementPreparedEventArgs const& args)
+    {
+        ConfigurePageElement(args.Element(), static_cast<std::size_t>(args.Index()));
+    }
+
+    void MainWindow::PagesRepeater_ElementClearing(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::Controls::ItemsRepeaterElementClearingEventArgs const& args)
+    {
+        auto border = args.Element().try_as<winrt::Microsoft::UI::Xaml::Controls::Border>();
+        if (!border)
+        {
+            return;
+        }
+
+        auto image = border.Child().try_as<winrt::Microsoft::UI::Xaml::Controls::Image>();
+        if (image)
+        {
+            image.Source(nullptr);
+        }
+
+        border.Opacity(0.65);
     }
 
 

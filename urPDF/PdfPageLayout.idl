@@ -1,0 +1,12 @@
+namespace urPDF
+{
+    [default_interface]
+    runtimeclass PdfPageLayout : Microsoft.UI.Xaml.Controls.VirtualizingLayout
+    {
+        PdfPageLayout();
+
+        Int32 ColumnCount;
+        Double Spacing;
+        Windows.Foundation.Collections.IVectorView<Windows.Foundation.Size> PageSizes;
+    }
+}
