@@ -15,6 +15,12 @@ namespace winrt::urPDF::implementation
         double Spacing();
         void Spacing(double value);
 
+        double ViewportWidth();
+        void ViewportWidth(double value);
+
+        double ZoomFactor();
+        void ZoomFactor(double value);
+
         winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Foundation::Size> PageSizes();
         void PageSizes(winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Foundation::Size> const& value);
 
@@ -28,6 +34,9 @@ namespace winrt::urPDF::implementation
 
         int32_t m_columnCount{ 1 };
         double m_spacing{ 10.0 };
+        double m_viewportWidth{ 0.0 };
+        double m_zoomFactor{ 1.0 };
+        double m_contentWidth{ 0.0 };
         winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Foundation::Size> m_pageSizes{ nullptr };
         std::vector<winrt::Windows::Foundation::Rect> m_pageRects;
     };

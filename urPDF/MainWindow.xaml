@@ -224,6 +224,7 @@
                             MaxZoomFactor="3.0"
                             HorizontalScrollBarVisibility="Auto"
                             VerticalScrollBarVisibility="Auto"
+                            SizeChanged="PdfScrollViewer_SizeChanged"
                             ViewChanged="PdfScrollViewer_ViewChanged">
                             
                             <ItemsRepeater x:Name="PagesRepeater"

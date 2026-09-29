@@ -977,6 +977,8 @@ namespace winrt::urPDF::implementation
             pageSizes.Append(winrt::Windows::Foundation::Size{static_cast<float>((std::max)(1.0, width)), static_cast<float>((std::max)(1.0, height))});
         }
 
+        PagesLayout().ViewportWidth(PdfScrollViewer().ViewportWidth());
+        PagesLayout().ZoomFactor(PdfScrollViewer().ZoomFactor());
         PagesLayout().ColumnCount(m_bookViewMode ? 2 : 1);
         PagesLayout().PageSizes(pageSizes.GetView());
 
@@ -1138,12 +1140,22 @@ namespace winrt::urPDF::implementation
         button.IsEnabled(true);
     }
 
+    void MainWindow::PdfScrollViewer_SizeChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::SizeChangedEventArgs const&)
+    {
+        auto scrollViewer = sender.as<winrt::Microsoft::UI::Xaml::Controls::ScrollViewer>();
+        PagesLayout().ViewportWidth(scrollViewer.ViewportWidth());
+        PagesLayout().ZoomFactor(scrollViewer.ZoomFactor());
+    }
+
     winrt::fire_and_forget MainWindow::PdfScrollViewer_ViewChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args)
     {
         auto scrollViewer = sender.as<winrt::Microsoft::UI::Xaml::Controls::ScrollViewer>();
 
         double scrollOffset = scrollViewer.VerticalOffset();
         double totalHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
+        const double currentZoom = scrollViewer.ZoomFactor();
+        PagesLayout().ViewportWidth(scrollViewer.ViewportWidth());
+        PagesLayout().ZoomFactor(currentZoom);
 
         auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
 
@@ -1152,7 +1164,6 @@ namespace winrt::urPDF::implementation
             auto pdfInfo = m_openedTabs[currentTab];
             int totalPages = pdfInfo->m_pagecount;
 
-            const double currentZoom = scrollViewer.ZoomFactor();
             if (!args.IsIntermediate() && !m_isRendering && std::abs(pdfInfo->m_currentPageZoom - currentZoom) > 0.001)
             {
                 if (TryAcquireRenderingLock())
