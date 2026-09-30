@@ -224,11 +224,10 @@
                             MaxZoomFactor="3.0"
                             HorizontalScrollBarVisibility="Auto"
                             VerticalScrollBarVisibility="Auto"
-                            SizeChanged="PdfScrollViewer_SizeChanged"
                             ViewChanged="PdfScrollViewer_ViewChanged">
                             
                             <ItemsRepeater x:Name="PagesRepeater"
-                                           HorizontalAlignment="Stretch"
+                                           HorizontalAlignment="Center"
                                            Margin="0,20"
                                            ElementPrepared="PagesRepeater_ElementPrepared"
                                            ElementClearing="PagesRepeater_ElementClearing">

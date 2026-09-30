@@ -46,44 +46,6 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    double PdfPageLayout::ViewportWidth()
-    {
-        return m_viewportWidth;
-    }
-
-    void PdfPageLayout::ViewportWidth(double value)
-    {
-        if (!std::isfinite(value) || value < 0.0)
-        {
-            value = 0.0;
-        }
-
-        if (std::abs(m_viewportWidth - value) > 0.001)
-        {
-            m_viewportWidth = value;
-            InvalidateMeasure();
-        }
-    }
-
-    double PdfPageLayout::ZoomFactor()
-    {
-        return m_zoomFactor;
-    }
-
-    void PdfPageLayout::ZoomFactor(double value)
-    {
-        if (!std::isfinite(value) || value <= 0.0)
-        {
-            value = 1.0;
-        }
-
-        if (std::abs(m_zoomFactor - value) > 0.001)
-        {
-            m_zoomFactor = value;
-            InvalidateMeasure();
-        }
-    }
-
     Windows::Foundation::Collections::IVectorView<Size> PdfPageLayout::PageSizes()
     {
         return m_pageSizes;
@@ -133,11 +95,6 @@ namespace winrt::urPDF::implementation
                     contentWidth = (std::max)(contentWidth, firstWidth + secondWidth + m_spacing);
                 }
             }
-        }
-
-        if (m_viewportWidth > 0.0 && m_zoomFactor > 0.0)
-        {
-            contentWidth = (std::max)(contentWidth, m_viewportWidth / m_zoomFactor);
         }
 
         m_contentWidth = contentWidth;

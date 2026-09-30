@@ -7,8 +7,6 @@ namespace urPDF
 
         Int32 ColumnCount;
         Double Spacing;
-        Double ViewportWidth;
-        Double ZoomFactor;
         Windows.Foundation.Collections.IVectorView<Windows.Foundation.Size> PageSizes;
     }
 }
