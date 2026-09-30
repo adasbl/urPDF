@@ -741,6 +741,7 @@ namespace winrt::urPDF::implementation
 
         winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap current_writeable_bitmap(width, height);
         bitmap.CopyToBuffer(current_writeable_bitmap.PixelBuffer());
+        current_writeable_bitmap.Invalidate();
 
         m_pageBitmapCache.StoreBitmap(PageBitmapCacheKey{ PdfTab->m_documentId, 0, NormalizeRotation(pageRotation), ZoomBucket(pageZoom) }, current_writeable_bitmap);
 
@@ -901,6 +902,7 @@ namespace winrt::urPDF::implementation
 
             winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap current_writeable_bitmap(width, height);
             bitmap.CopyToBuffer(current_writeable_bitmap.PixelBuffer());
+            current_writeable_bitmap.Invalidate();
 
             m_pageBitmapCache.StoreBitmap(PageBitmapCacheKey{ PdfTab->m_documentId, i, NormalizeRotation(pageRotation), ZoomBucket(pageZoom) }, current_writeable_bitmap);
 
@@ -1037,27 +1039,46 @@ namespace winrt::urPDF::implementation
             return;
         }
 
-        image.Source(nullptr);
-        border.Opacity(0.65);
+        auto clearImage = [&]()
+        {
+            image.Source(nullptr);
+            border.Opacity(0.65);
+        };
 
         auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
         if (!currentTab)
         {
+            clearImage();
             return;
         }
 
         auto openedTab = m_openedTabs.find(currentTab);
         if (openedTab == m_openedTabs.end() || pageIndex >= openedTab->second->m_renderedPages.size())
         {
+            clearImage();
             return;
         }
 
         auto const& page = openedTab->second->m_renderedPages[pageIndex];
-        if (page.bitmap && page.state == PageRenderState::ready)
+        if (!page.bitmap || page.state != PageRenderState::ready)
         {
-            image.Source(*page.bitmap);
-            border.Opacity(1.0);
+            clearImage();
+            return;
         }
+
+        if (image.Source() != *page.bitmap)
+        {
+            // Swapping Source to a bitmap of different pixel size keeps a stale composition surface after zoom, clipping the page.
+            winrt::Microsoft::UI::Xaml::Controls::Image freshImage;
+            freshImage.Stretch(winrt::Microsoft::UI::Xaml::Media::Stretch::Uniform);
+            freshImage.HorizontalAlignment(winrt::Microsoft::UI::Xaml::HorizontalAlignment::Stretch);
+            freshImage.VerticalAlignment(winrt::Microsoft::UI::Xaml::VerticalAlignment::Stretch);
+            freshImage.Source(*page.bitmap);
+            image.Source(nullptr);
+            border.Child(freshImage);
+        }
+
+        border.Opacity(1.0);
     }
 
     void MainWindow::PagesRepeater_ElementPrepared(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::Controls::ItemsRepeaterElementPreparedEventArgs const& args)
