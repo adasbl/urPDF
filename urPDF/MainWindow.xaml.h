@@ -44,6 +44,21 @@ namespace winrt::urPDF::implementation
     };
 
 
+    enum class PageRenderPriority
+    {
+        visible = 0,
+        prefetch = 1
+    };
+
+
+    struct PageRenderRequest
+    {
+        int32_t pageIndex{ 0 };
+        PageRenderPriority priority{ PageRenderPriority::visible };
+        int32_t distance{ 0 };
+    };
+
+
     struct PageBitmapCacheKey
     {
         std::uint64_t documentId{ 0 };
@@ -188,7 +203,7 @@ namespace winrt::urPDF::implementation
         void ReleaseRenderingLock();
         void RebuildPagesContainer(std::vector<PageSlot> const& pages, double renderZoom);
         void ConfigurePageElement(winrt::Microsoft::UI::Xaml::UIElement const& element, std::size_t pageIndex);
-        std::vector<int32_t> CollectPagesToRender(int32_t pageCount);
+        std::vector<PageRenderRequest> BuildRenderQueue(int32_t pageCount);
         void ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap, int zoomBucket);
     };
 }

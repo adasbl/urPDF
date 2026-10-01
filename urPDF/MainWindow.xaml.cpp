@@ -1084,12 +1084,12 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    std::vector<int32_t> MainWindow::CollectPagesToRender(int32_t pageCount)
+    std::vector<PageRenderRequest> MainWindow::BuildRenderQueue(int32_t pageCount)
     {
-        std::vector<int32_t> pagesToRender;
+        std::vector<PageRenderRequest> renderQueue;
         if (pageCount <= 0)
         {
-            return pagesToRender;
+            return renderQueue;
         }
 
         auto const& pageRects = winrt::get_self<winrt::urPDF::implementation::PdfPageLayout>(PagesLayout())->PageRects();
@@ -1136,7 +1136,7 @@ namespace winrt::urPDF::implementation
 
         for (int32_t i = firstVisible; i <= lastVisible; ++i)
         {
-            pagesToRender.push_back(i);
+            renderQueue.push_back(PageRenderRequest{ i, PageRenderPriority::visible, i - firstVisible });
         }
 
         const int32_t prefetchPages = PrefetchPageCount * (std::max)(1, PagesLayout().ColumnCount());
@@ -1144,15 +1144,24 @@ namespace winrt::urPDF::implementation
         {
             if (lastVisible + distance < pageCount)
             {
-                pagesToRender.push_back(lastVisible + distance);
+                renderQueue.push_back(PageRenderRequest{ lastVisible + distance, PageRenderPriority::prefetch, distance });
             }
             if (firstVisible - distance >= 0)
             {
-                pagesToRender.push_back(firstVisible - distance);
+                renderQueue.push_back(PageRenderRequest{ firstVisible - distance, PageRenderPriority::prefetch, distance });
             }
         }
 
-        return pagesToRender;
+        std::stable_sort(renderQueue.begin(), renderQueue.end(), [](PageRenderRequest const& left, PageRenderRequest const& right)
+        {
+            if (left.priority != right.priority)
+            {
+                return left.priority < right.priority;
+            }
+            return left.distance < right.distance;
+        });
+
+        return renderQueue;
     }
 
     void MainWindow::ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, WriteableBitmap const& bitmap, int zoomBucket)
@@ -1221,10 +1230,11 @@ namespace winrt::urPDF::implementation
                 const double pageZoom = pdfTab->m_currentPageZoom;
                 const int pageRotation = NormalizeRotation(pdfTab->m_currentRotation);
                 const int zoomBucket = ZoomBucket(pageZoom);
-                const std::vector<int32_t> pagesToRender = CollectPagesToRender(pdfTab->m_pagecount);
+                const std::vector<PageRenderRequest> renderQueue = BuildRenderQueue(pdfTab->m_pagecount);
 
-                for (const int32_t pageIndex : pagesToRender)
+                for (const PageRenderRequest& request : renderQueue)
                 {
+                    const int32_t pageIndex = request.pageIndex;
                     if (m_visibleRenderRequested || pdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation || static_cast<std::size_t>(pageIndex) >= pdfTab->m_renderedPages.size())
                     {
                         break;
