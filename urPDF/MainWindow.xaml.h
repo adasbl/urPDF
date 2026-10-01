@@ -40,6 +40,7 @@ namespace winrt::urPDF::implementation
         PageRenderState state{ PageRenderState::unloaded };
         std::optional<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> bitmap;
         std::uint64_t generation{ 0 };
+        int zoomBucket{ 0 };
     };
 
 
@@ -140,6 +141,8 @@ namespace winrt::urPDF::implementation
         winrt::fire_and_forget EmptyTab_Drop(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::DragEventArgs const& args);
         winrt::Windows::Foundation::IAsyncAction RenderSinglePageAsync(std::shared_ptr<PdfTabInfo> PdfTabInfo);
         winrt::Windows::Foundation::IAsyncAction RenderMultiPageAsync(std::shared_ptr<PdfTabInfo> PdfTab);
+        winrt::Windows::Foundation::IAsyncAction LoadDocumentLayoutAsync(std::shared_ptr<PdfTabInfo> PdfTab);
+        winrt::fire_and_forget RenderVisiblePagesAsync();
         winrt::fire_and_forget PdfScrollViewer_ViewChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args);
         void PagesRepeater_ElementPrepared(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ItemsRepeaterElementPreparedEventArgs const& args);
         void PagesRepeater_ElementClearing(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ItemsRepeaterElementClearingEventArgs const& args);
@@ -174,6 +177,8 @@ namespace winrt::urPDF::implementation
         bool m_isNormalizingZoom{ false };
         bool m_zoomWasEnabled{ false };
         bool m_bookViewMode{ false };
+        bool m_isVisibleRenderRunning{ false };
+        bool m_visibleRenderRequested{ false };
         int m_layoutRotation{ 0 };
         std::uint64_t m_nextDocumentId{ 1 };
         PageBitmapCache m_pageBitmapCache{ 256ull * 1024ull * 1024ull };
@@ -183,6 +188,8 @@ namespace winrt::urPDF::implementation
         void ReleaseRenderingLock();
         void RebuildPagesContainer(std::vector<PageSlot> const& pages, double renderZoom);
         void ConfigurePageElement(winrt::Microsoft::UI::Xaml::UIElement const& element, std::size_t pageIndex);
+        std::vector<int32_t> CollectPagesToRender(int32_t pageCount);
+        void ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap, int zoomBucket);
     };
 }
 

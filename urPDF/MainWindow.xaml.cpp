@@ -49,6 +49,7 @@ namespace
 {
     constexpr double PdfRenderQuality = 1.5;
     constexpr size_t PdfStoreBudgetBytes = 256ull * 1024ull * 1024ull;
+    constexpr int PrefetchPageCount = 2;
 
     void LockMuPdf(void* user, int lock)
     {
@@ -124,6 +125,86 @@ namespace
         }
 
         return pageBounds;
+    }
+
+    fz_pixmap* RenderPagePixmap(fz_context* ctx, fz_document* doc, int pageIndex, fz_rect pageBounds, fz_matrix transform)
+    {
+        fz_page* page = nullptr;
+        fz_device* dev = nullptr;
+        fz_pixmap* pix = nullptr;
+
+        fz_var(page);
+        fz_var(dev);
+        fz_var(pix);
+
+        fz_try(ctx)
+        {
+            page = fz_load_page(ctx, doc, pageIndex);
+            const fz_irect bbox = fz_round_rect(fz_transform_rect(pageBounds, transform));
+            pix = fz_new_pixmap_with_bbox(ctx, fz_device_bgr(ctx), bbox, nullptr, 1);
+            fz_clear_pixmap_with_value(ctx, pix, 255);
+            dev = fz_new_draw_device(ctx, fz_identity, pix);
+            fz_run_page(ctx, page, dev, transform, nullptr);
+            fz_close_device(ctx, dev);
+        }
+        fz_always(ctx)
+        {
+            fz_drop_device(ctx, dev);
+            fz_drop_page(ctx, page);
+        }
+        fz_catch(ctx)
+        {
+            fz_drop_pixmap(ctx, pix);
+            pix = nullptr;
+        }
+
+        return pix;
+    }
+
+    SoftwareBitmap RenderPageToSoftwareBitmap(fz_context* baseCtx, fz_document* doc, int pageIndex, fz_rect pageBounds, double zoom, int rotation)
+    {
+        fz_context* ctx = fz_clone_context(baseCtx);
+        if (!ctx)
+        {
+            return nullptr;
+        }
+
+        const double renderScale = PdfRenderScale(zoom);
+        const fz_matrix transform = fz_concat(fz_scale(renderScale, renderScale), fz_rotate(rotation));
+
+        SoftwareBitmap bitmap{ nullptr };
+        fz_pixmap* pix = RenderPagePixmap(ctx, doc, pageIndex, pageBounds, transform);
+        if (pix)
+        {
+            const int width = fz_pixmap_width(ctx, pix);
+            const int height = fz_pixmap_height(ctx, pix);
+            const std::size_t sourceStride = static_cast<std::size_t>(fz_pixmap_stride(ctx, pix));
+            const unsigned char* samples = fz_pixmap_samples(ctx, pix);
+
+            try
+            {
+                bitmap = SoftwareBitmap(BitmapPixelFormat::Bgra8, width, height, BitmapAlphaMode::Premultiplied);
+                BitmapBuffer buffer = bitmap.LockBuffer(BitmapBufferAccessMode::Write);
+                const BitmapPlaneDescription plane = buffer.GetPlaneDescription(0);
+                winrt::Windows::Foundation::IMemoryBufferReference reference = buffer.CreateReference();
+                uint8_t* data = reference.data();
+
+                const std::size_t rowBytes = static_cast<std::size_t>(width) * 4;
+                for (int y = 0; y < height; ++y)
+                {
+                    memcpy(data + plane.StartIndex + static_cast<std::size_t>(y) * plane.Stride, samples + static_cast<std::size_t>(y) * sourceStride, rowBytes);
+                }
+            }
+            catch (...)
+            {
+                bitmap = nullptr;
+            }
+
+            fz_drop_pixmap(ctx, pix);
+        }
+
+        fz_drop_context(ctx);
+        return bitmap;
     }
 }
 
@@ -513,6 +594,7 @@ namespace winrt::urPDF::implementation
                 DisplayPageCount(pdfInfo->m_pagecount);
                 RebuildPagesContainer(pdfInfo->m_renderedPages, pdfInfo->m_currentPageZoom);
                 PdfScrollViewer().ChangeView(nullptr, nullptr, static_cast<float>(pdfInfo->m_currentPageZoom));
+                RenderVisiblePagesAsync();
             }
             else
             {
@@ -657,12 +739,63 @@ namespace winrt::urPDF::implementation
 
             m_openedTabs[targetTab] = PdfInfo;
 
-            co_await RenderMultiPageAsync(PdfInfo);
+            co_await LoadDocumentLayoutAsync(PdfInfo);
             ReleaseRenderingLock();
+            RenderVisiblePagesAsync();
         }
         catch (...)
         {
             ReleaseRenderingLock();
+        }
+    }
+
+    winrt::Windows::Foundation::IAsyncAction MainWindow::LoadDocumentLayoutAsync(std::shared_ptr<PdfTabInfo> PdfTab)
+    {
+        auto strongThis = get_strong();
+        auto dispatcher = DispatcherQueue();
+        const std::uint64_t generation = PdfTab->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+        fz_context* layoutCtx = fz_clone_context(m_ctx);
+        if (!layoutCtx)
+        {
+            co_return;
+        }
+
+        co_await winrt::resume_background();
+
+        const int pagecount = fz_count_pages(layoutCtx, PdfTab->m_doc);
+        auto pageBounds = CollectPageBounds(layoutCtx, PdfTab->m_doc, pagecount);
+        fz_drop_context(layoutCtx);
+
+        co_await resume_foreground(dispatcher);
+
+        if (PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
+        {
+            co_return;
+        }
+
+        std::vector<PageSlot> pageSlots(pagecount);
+        for (int i = 0; i < pagecount; ++i)
+        {
+            pageSlots[i].pdfBounds = pageBounds[i];
+            pageSlots[i].generation = generation;
+        }
+
+        PdfTab->m_pagecount = pagecount;
+        PdfTab->m_pageBounds = std::move(pageBounds);
+        PdfTab->m_renderedPages = std::move(pageSlots);
+
+        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        if (currentTab)
+        {
+            auto openedTab = m_openedTabs.find(currentTab);
+            if (openedTab != m_openedTabs.end() && openedTab->second == PdfTab)
+            {
+                RebuildPagesContainer(PdfTab->m_renderedPages, PdfTab->m_currentPageZoom);
+                currentTab.Header(winrt::box_value(PdfTab->m_fileName));
+                DisplayPageCount(PdfTab->m_pagecount);
+                DisplayPageNumber(PdfTab->m_currentPageIndex);
+            }
         }
     }
 
@@ -951,6 +1084,208 @@ namespace winrt::urPDF::implementation
         }
     }
 
+    std::vector<int32_t> MainWindow::CollectPagesToRender(int32_t pageCount)
+    {
+        std::vector<int32_t> pagesToRender;
+        if (pageCount <= 0)
+        {
+            return pagesToRender;
+        }
+
+        auto const& pageRects = winrt::get_self<winrt::urPDF::implementation::PdfPageLayout>(PagesLayout())->PageRects();
+        const int32_t knownPages = (std::min)(pageCount, static_cast<int32_t>(pageRects.size()));
+
+        auto scrollViewer = PdfScrollViewer();
+        const double zoom = (std::max)(0.01, static_cast<double>(scrollViewer.ZoomFactor()));
+        const double repeaterTop = PagesRepeater().ActualOffset().y;
+        const double viewportTop = scrollViewer.VerticalOffset() / zoom - repeaterTop;
+        const double viewportBottom = (scrollViewer.VerticalOffset() + scrollViewer.ViewportHeight()) / zoom - repeaterTop;
+
+        int32_t firstVisible = -1;
+        int32_t lastVisible = -1;
+        for (int32_t i = 0; i < knownPages; ++i)
+        {
+            const auto& rect = pageRects[i];
+            if (rect.Y + rect.Height >= viewportTop && rect.Y <= viewportBottom)
+            {
+                if (firstVisible < 0)
+                {
+                    firstVisible = i;
+                }
+                lastVisible = i;
+            }
+            else if (rect.Y > viewportBottom)
+            {
+                break;
+            }
+        }
+
+        if (firstVisible < 0)
+        {
+            firstVisible = 0;
+            for (int32_t i = 0; i < knownPages; ++i)
+            {
+                if (pageRects[i].Y + pageRects[i].Height >= viewportTop)
+                {
+                    firstVisible = i;
+                    break;
+                }
+            }
+            lastVisible = firstVisible;
+        }
+
+        for (int32_t i = firstVisible; i <= lastVisible; ++i)
+        {
+            pagesToRender.push_back(i);
+        }
+
+        const int32_t prefetchPages = PrefetchPageCount * (std::max)(1, PagesLayout().ColumnCount());
+        for (int32_t distance = 1; distance <= prefetchPages; ++distance)
+        {
+            if (lastVisible + distance < pageCount)
+            {
+                pagesToRender.push_back(lastVisible + distance);
+            }
+            if (firstVisible - distance >= 0)
+            {
+                pagesToRender.push_back(firstVisible - distance);
+            }
+        }
+
+        return pagesToRender;
+    }
+
+    void MainWindow::ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, WriteableBitmap const& bitmap, int zoomBucket)
+    {
+        if (pageIndex < 0 || static_cast<std::size_t>(pageIndex) >= PdfTab->m_renderedPages.size())
+        {
+            return;
+        }
+
+        auto& slot = PdfTab->m_renderedPages[pageIndex];
+        slot.bitmap = bitmap;
+        slot.state = PageRenderState::ready;
+        slot.zoomBucket = zoomBucket;
+        slot.generation = PdfTab->m_renderGeneration.load(std::memory_order_acquire);
+
+        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        if (!currentTab)
+        {
+            return;
+        }
+
+        auto openedTab = m_openedTabs.find(currentTab);
+        if (openedTab == m_openedTabs.end() || openedTab->second != PdfTab)
+        {
+            return;
+        }
+
+        if (auto element = PagesRepeater().TryGetElement(pageIndex))
+        {
+            ConfigurePageElement(element, static_cast<std::size_t>(pageIndex));
+        }
+    }
+
+    winrt::fire_and_forget MainWindow::RenderVisiblePagesAsync()
+    {
+        if (m_isVisibleRenderRunning)
+        {
+            m_visibleRenderRequested = true;
+            co_return;
+        }
+
+        auto strongThis = get_strong();
+        auto dispatcher = DispatcherQueue();
+        m_isVisibleRenderRunning = true;
+
+        try
+        {
+            do
+            {
+                m_visibleRenderRequested = false;
+
+                auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+                if (!currentTab)
+                {
+                    break;
+                }
+
+                auto openedTab = m_openedTabs.find(currentTab);
+                if (openedTab == m_openedTabs.end())
+                {
+                    break;
+                }
+
+                auto pdfTab = openedTab->second;
+                const std::uint64_t generation = pdfTab->m_renderGeneration.load(std::memory_order_acquire);
+                const double pageZoom = pdfTab->m_currentPageZoom;
+                const int pageRotation = NormalizeRotation(pdfTab->m_currentRotation);
+                const int zoomBucket = ZoomBucket(pageZoom);
+                const std::vector<int32_t> pagesToRender = CollectPagesToRender(pdfTab->m_pagecount);
+
+                for (const int32_t pageIndex : pagesToRender)
+                {
+                    if (m_visibleRenderRequested || pdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation || static_cast<std::size_t>(pageIndex) >= pdfTab->m_renderedPages.size())
+                    {
+                        break;
+                    }
+
+                    auto& slot = pdfTab->m_renderedPages[pageIndex];
+                    const bool isUpToDate = slot.zoomBucket == zoomBucket && ((slot.state == PageRenderState::ready && slot.bitmap) || slot.state == PageRenderState::error);
+                    if (isUpToDate)
+                    {
+                        continue;
+                    }
+
+                    const PageBitmapCacheKey cacheKey{ pdfTab->m_documentId, pageIndex, pageRotation, zoomBucket };
+                    if (auto cachedBitmap = m_pageBitmapCache.TryGetBitmap(cacheKey))
+                    {
+                        ApplyPageBitmap(pdfTab, pageIndex, *cachedBitmap, zoomBucket);
+                        continue;
+                    }
+
+                    if (!slot.bitmap)
+                    {
+                        slot.state = PageRenderState::loading;
+                    }
+                    const fz_rect pageBounds = slot.pdfBounds;
+
+                    co_await winrt::resume_background();
+                    SoftwareBitmap pageBitmap = RenderPageToSoftwareBitmap(m_ctx, pdfTab->m_doc, pageIndex, pageBounds, pageZoom, pageRotation);
+                    co_await resume_foreground(dispatcher);
+
+                    if (pdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation || static_cast<std::size_t>(pageIndex) >= pdfTab->m_renderedPages.size())
+                    {
+                        break;
+                    }
+
+                    if (!pageBitmap)
+                    {
+                        auto& failedSlot = pdfTab->m_renderedPages[pageIndex];
+                        failedSlot.zoomBucket = zoomBucket;
+                        if (!failedSlot.bitmap)
+                        {
+                            failedSlot.state = PageRenderState::error;
+                        }
+                        continue;
+                    }
+
+                    WriteableBitmap writeableBitmap(pageBitmap.PixelWidth(), pageBitmap.PixelHeight());
+                    pageBitmap.CopyToBuffer(writeableBitmap.PixelBuffer());
+                    writeableBitmap.Invalidate();
+
+                    m_pageBitmapCache.StoreBitmap(cacheKey, writeableBitmap);
+                    ApplyPageBitmap(pdfTab, pageIndex, writeableBitmap, zoomBucket);
+                }
+            } while (m_visibleRenderRequested);
+        }
+        catch (...)
+        {
+        }
+
+        m_isVisibleRenderRunning = false;
+    }
+
     bool MainWindow::TryAcquireRenderingLock()
     {
         if (m_isRendering)
@@ -1023,6 +1358,7 @@ namespace winrt::urPDF::implementation
         }
 
         PagesRepeater().ItemsSource(m_pageRepeaterItems);
+        PdfScrollViewer().UpdateLayout();
     }
 
     void MainWindow::ConfigurePageElement(winrt::Microsoft::UI::Xaml::UIElement const& element, std::size_t pageIndex)
@@ -1208,21 +1544,14 @@ namespace winrt::urPDF::implementation
             auto pdfInfo = m_openedTabs[currentTab];
             int totalPages = pdfInfo->m_pagecount;
 
-            if (!args.IsIntermediate() && !m_isRendering && std::abs(pdfInfo->m_currentPageZoom - currentZoom) > 0.001)
+            if (!args.IsIntermediate() && !m_isRendering)
             {
-                if (TryAcquireRenderingLock())
-                {
-                    try
-                    {
-                        pdfInfo->m_currentPageZoom = currentZoom;
-                        co_await RenderMultiPageAsync(pdfInfo);
-                        ReleaseRenderingLock();
-                    }
-                    catch (...)
-                    {
-                        ReleaseRenderingLock();
-                    }
-                }
+                pdfInfo->m_currentPageZoom = currentZoom;
+            }
+
+            if (!m_isRendering)
+            {
+                RenderVisiblePagesAsync();
             }
 
             if (totalPages > 0 && totalHeight > 0)
@@ -1248,31 +1577,28 @@ namespace winrt::urPDF::implementation
     winrt::fire_and_forget MainWindow::RotateButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
     {
         auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
-        if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
+        if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end() && !m_isRendering)
         {
-            if (!TryAcquireRenderingLock())
+            auto pdfInfo = m_openedTabs[currentTab];
+
+            pdfInfo->m_currentRotation += 90;
+            if (pdfInfo->m_currentRotation >= 360)
             {
-                co_return;
+                pdfInfo->m_currentRotation = 0;
             }
 
-            try
+            const std::uint64_t generation = pdfInfo->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+            for (auto& slot : pdfInfo->m_renderedPages)
             {
-                auto pdfInfo = m_openedTabs[currentTab];
-
-                pdfInfo->m_currentRotation += 90;
-                if (pdfInfo->m_currentRotation >= 360)
-                {
-                    pdfInfo->m_currentRotation = 0;
-                }
-
-                co_await RenderMultiPageAsync(pdfInfo);
-                ReleaseRenderingLock();
+                slot.bitmap.reset();
+                slot.state = PageRenderState::unloaded;
+                slot.generation = generation;
             }
-            catch (...)
-            {
-                ReleaseRenderingLock();
-            }
+
+            RebuildPagesContainer(pdfInfo->m_renderedPages, pdfInfo->m_currentPageZoom);
+            RenderVisiblePagesAsync();
         }
+        co_return;
     }
 
     winrt::fire_and_forget MainWindow::ZoomInButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
@@ -1356,6 +1682,7 @@ namespace winrt::urPDF::implementation
         const double targetOffset = scrollPercentage * PdfScrollViewer().ScrollableHeight();
 
         PdfScrollViewer().ChangeView(nullptr, targetOffset, nullptr);
+        RenderVisiblePagesAsync();
     }
 
     // PRINT

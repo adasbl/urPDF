@@ -18,6 +18,8 @@ namespace winrt::urPDF::implementation
         winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Foundation::Size> PageSizes();
         void PageSizes(winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Foundation::Size> const& value);
 
+        std::vector<winrt::Windows::Foundation::Rect> const& PageRects() const noexcept { return m_pageRects; }
+
         winrt::Windows::Foundation::Size MeasureOverride(winrt::Microsoft::UI::Xaml::Controls::VirtualizingLayoutContext const& context, winrt::Windows::Foundation::Size const& availableSize);
         winrt::Windows::Foundation::Size ArrangeOverride(winrt::Microsoft::UI::Xaml::Controls::VirtualizingLayoutContext const& context, winrt::Windows::Foundation::Size const& finalSize);
 
