@@ -1359,6 +1359,14 @@ namespace winrt::urPDF::implementation
 
         PagesRepeater().ItemsSource(m_pageRepeaterItems);
         PdfScrollViewer().UpdateLayout();
+
+        for (int32_t i = 0; i < static_cast<int32_t>(pages.size()); ++i)
+        {
+            if (auto element = PagesRepeater().TryGetElement(i))
+            {
+                ConfigurePageElement(element, static_cast<std::size_t>(i));
+            }
+        }
     }
 
     void MainWindow::ConfigurePageElement(winrt::Microsoft::UI::Xaml::UIElement const& element, std::size_t pageIndex)
