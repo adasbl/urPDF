@@ -41,6 +41,16 @@ namespace winrt::urPDF::implementation
         std::optional<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> bitmap;
         std::uint64_t generation{ 0 };
         int zoomBucket{ 0 };
+
+        bool requestInFlight{ false };
+        std::uint64_t requestGeneration{ 0 };
+        int requestZoomBucket{ 0 };
+        int requestRotation{ 0 };
+
+        bool IsRequestInFlight(std::uint64_t generation, int zoomBucketValue, int rotation) const noexcept
+        {
+            return requestInFlight && requestGeneration == generation && requestZoomBucket == zoomBucketValue && requestRotation == rotation;
+        }
     };
 
 

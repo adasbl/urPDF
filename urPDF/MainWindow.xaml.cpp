@@ -1207,6 +1207,9 @@ namespace winrt::urPDF::implementation
         auto dispatcher = DispatcherQueue();
         m_isVisibleRenderRunning = true;
 
+        std::shared_ptr<PdfTabInfo> inFlightTab;
+        int32_t inFlightPage = -1;
+
         try
         {
             do
@@ -1254,22 +1257,60 @@ namespace winrt::urPDF::implementation
                         continue;
                     }
 
+                    if (slot.IsRequestInFlight(generation, zoomBucket, pageRotation))
+                    {
+                        continue;
+                    }
+
                     if (!slot.bitmap)
                     {
                         slot.state = PageRenderState::loading;
                     }
+                    slot.requestInFlight = true;
+                    slot.requestGeneration = generation;
+                    slot.requestZoomBucket = zoomBucket;
+                    slot.requestRotation = pageRotation;
+                    inFlightTab = pdfTab;
+                    inFlightPage = pageIndex;
                     const fz_rect pageBounds = slot.pdfBounds;
 
                     co_await winrt::resume_background();
                     SoftwareBitmap pageBitmap = RenderPageToSoftwareBitmap(m_ctx, pdfTab->m_doc, pageIndex, pageBounds, pageZoom, pageRotation);
                     co_await resume_foreground(dispatcher);
 
+                    inFlightTab = nullptr;
+                    inFlightPage = -1;
+                    if (static_cast<std::size_t>(pageIndex) < pdfTab->m_renderedPages.size())
+                    {
+                        auto& finishedSlot = pdfTab->m_renderedPages[pageIndex];
+                        if (finishedSlot.IsRequestInFlight(generation, zoomBucket, pageRotation))
+                        {
+                            finishedSlot.requestInFlight = false;
+                        }
+                    }
+
                     if (pdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation || static_cast<std::size_t>(pageIndex) >= pdfTab->m_renderedPages.size())
                     {
                         break;
                     }
 
-                    if (!pageBitmap)
+                    std::optional<WriteableBitmap> writeableBitmap;
+                    if (pageBitmap)
+                    {
+                        writeableBitmap.emplace(pageBitmap.PixelWidth(), pageBitmap.PixelHeight());
+                        pageBitmap.CopyToBuffer(writeableBitmap->PixelBuffer());
+                        writeableBitmap->Invalidate();
+
+                        m_pageBitmapCache.StoreBitmap(cacheKey, *writeableBitmap);
+                    }
+
+                    if (NormalizeRotation(pdfTab->m_currentRotation) != pageRotation || ZoomBucket(pdfTab->m_currentPageZoom) != zoomBucket)
+                    {
+                        m_visibleRenderRequested = true;
+                        break;
+                    }
+
+                    if (!writeableBitmap)
                     {
                         auto& failedSlot = pdfTab->m_renderedPages[pageIndex];
                         failedSlot.zoomBucket = zoomBucket;
@@ -1280,17 +1321,16 @@ namespace winrt::urPDF::implementation
                         continue;
                     }
 
-                    WriteableBitmap writeableBitmap(pageBitmap.PixelWidth(), pageBitmap.PixelHeight());
-                    pageBitmap.CopyToBuffer(writeableBitmap.PixelBuffer());
-                    writeableBitmap.Invalidate();
-
-                    m_pageBitmapCache.StoreBitmap(cacheKey, writeableBitmap);
-                    ApplyPageBitmap(pdfTab, pageIndex, writeableBitmap, zoomBucket);
+                    ApplyPageBitmap(pdfTab, pageIndex, *writeableBitmap, zoomBucket);
                 }
             } while (m_visibleRenderRequested);
         }
         catch (...)
         {
+            if (inFlightTab && inFlightPage >= 0 && static_cast<std::size_t>(inFlightPage) < inFlightTab->m_renderedPages.size())
+            {
+                inFlightTab->m_renderedPages[inFlightPage].requestInFlight = false;
+            }
         }
 
         m_isVisibleRenderRunning = false;
