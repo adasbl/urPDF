@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "urpdf",
+  "version-string": "0.1.0",
+  "builtin-baseline": "940f58770cee8e2011bfb4847fb2bd70057301a8",
+  "dependencies": [
+    "libmupdf"
+  ],
+  "overrides": [
+    {
+      "name": "libmupdf",
+      "version": "1.26.10",
+      "port-version": 0
+    }
+  ]
+}
