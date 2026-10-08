@@ -50,6 +50,7 @@ namespace
     constexpr double PdfRenderQuality = 1.5;
     constexpr size_t PdfStoreBudgetBytes = 256ull * 1024ull * 1024ull;
     constexpr int PrefetchPageCount = 2;
+    constexpr int SlotRetainMarginPages = 3;
 
     void LockMuPdf(void* user, int lock)
     {
@@ -324,7 +325,7 @@ namespace winrt::urPDF::implementation
         CacheEntry cacheEntry{ bitmap, memoryBytes, m_lru.begin() };
         m_entries.emplace(key, std::move(cacheEntry));
         m_usedBytes += memoryBytes;
-        EvictEntriesIfNeeded();
+        TrimToBudget();
     }
 
     void PageBitmapCache::ClearDocumentEntries(std::uint64_t documentId)
@@ -349,22 +350,80 @@ namespace winrt::urPDF::implementation
         cacheEntry->second.lruPosition = m_lru.begin();
     }
 
-    void PageBitmapCache::EvictEntriesIfNeeded()
+    void PageBitmapCache::SetViewContext(PageBitmapCacheViewContext const& context)
+    {
+        m_viewContext = context;
+        m_hasViewContext = true;
+    }
+
+    void PageBitmapCache::TrimToBudget()
     {
         while (m_usedBytes > m_budgetBytes && !m_lru.empty())
         {
-            const PageBitmapCacheKey key = m_lru.back();
-            m_lru.pop_back();
+            if (!TryEvictOneEntry())
+            {
+                break;
+            }
+        }
+    }
 
-            auto cacheEntry = m_entries.find(key);
-            if (cacheEntry == m_entries.end())
+    void PageBitmapCache::EvictEntry(PageBitmapCacheKey const& key)
+    {
+        const PageBitmapCacheKey keyCopy = key;
+        auto cacheEntry = m_entries.find(keyCopy);
+        if (cacheEntry == m_entries.end())
+        {
+            return;
+        }
+
+        m_usedBytes -= cacheEntry->second.memoryBytes;
+        m_lru.erase(cacheEntry->second.lruPosition);
+        m_entries.erase(cacheEntry);
+    }
+
+    bool PageBitmapCache::TryEvictOneEntry()
+    {
+        bool hasFarthest = false;
+        int farthestDistance = -1;
+        PageBitmapCacheKey farthestKey;
+
+        for (auto entry = m_lru.rbegin(); entry != m_lru.rend(); ++entry)
+        {
+            const PageBitmapCacheKey& key = *entry;
+
+            if (!m_hasViewContext
+                || key.documentId != m_viewContext.documentId
+                || key.rotation != m_viewContext.rotation
+                || key.zoomBucket != m_viewContext.zoomBucket)
+            {
+                EvictEntry(key);
+                return true;
+            }
+
+            if (key.pageIndex >= m_viewContext.firstPage && key.pageIndex <= m_viewContext.lastPage)
             {
                 continue;
             }
 
-            m_usedBytes -= cacheEntry->second.memoryBytes;
-            m_entries.erase(cacheEntry);
+            const int distance = key.pageIndex < m_viewContext.firstPage
+                ? m_viewContext.firstPage - key.pageIndex
+                : key.pageIndex - m_viewContext.lastPage;
+
+            if (distance > farthestDistance)
+            {
+                farthestDistance = distance;
+                farthestKey = key;
+                hasFarthest = true;
+            }
         }
+
+        if (!hasFarthest)
+        {
+            return false;
+        }
+
+        EvictEntry(farthestKey);
+        return true;
     }
 
 
@@ -574,9 +633,24 @@ namespace winrt::urPDF::implementation
         tabView.SelectedItem(newTab);
     }
 
-    void MainWindow::TabView_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&)
+    void MainWindow::TabView_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& args)
     {
         auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
+
+        for (auto const& removedItem : args.RemovedItems())
+        {
+            auto removedTab = removedItem.try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+            if (!removedTab)
+            {
+                continue;
+            }
+
+            auto removedEntry = m_openedTabs.find(removedTab);
+            if (removedEntry != m_openedTabs.end())
+            {
+                ReleaseSlotsOutsideRange(removedEntry->second, 0, -1);
+            }
+        }
         auto currentTab = tabView.SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
 
         if (currentTab)
@@ -592,6 +666,7 @@ namespace winrt::urPDF::implementation
 
                 DisplayPageNumber(pdfInfo->m_currentPageIndex);
                 DisplayPageCount(pdfInfo->m_pagecount);
+                RestoreSlotsFromCache(pdfInfo);
                 RebuildPagesContainer(pdfInfo->m_renderedPages, pdfInfo->m_currentPageZoom);
                 PdfScrollViewer().ChangeView(nullptr, nullptr, static_cast<float>(pdfInfo->m_currentPageZoom));
                 RenderVisiblePagesAsync();
@@ -1084,9 +1159,10 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    std::vector<PageRenderRequest> MainWindow::BuildRenderQueue(int32_t pageCount)
+    std::vector<PageRenderRequest> MainWindow::BuildRenderQueue(int32_t pageCount, PageViewRange& viewRange)
     {
         std::vector<PageRenderRequest> renderQueue;
+        viewRange = PageViewRange{};
         if (pageCount <= 0)
         {
             return renderQueue;
@@ -1161,7 +1237,76 @@ namespace winrt::urPDF::implementation
             return left.distance < right.distance;
         });
 
+        const int32_t retainMargin = prefetchPages + SlotRetainMarginPages;
+        viewRange.firstVisible = firstVisible;
+        viewRange.lastVisible = lastVisible;
+        viewRange.keepFirst = (std::max)(0, firstVisible - retainMargin);
+        viewRange.keepLast = (std::min)(pageCount - 1, lastVisible + retainMargin);
+
         return renderQueue;
+    }
+
+    void MainWindow::ReleaseSlotsOutsideRange(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t keepFirst, int32_t keepLast)
+    {
+        bool isCurrentTab = false;
+        if (auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>())
+        {
+            auto openedTab = m_openedTabs.find(currentTab);
+            isCurrentTab = openedTab != m_openedTabs.end() && openedTab->second == PdfTab;
+        }
+
+        const int32_t slotCount = static_cast<int32_t>(PdfTab->m_renderedPages.size());
+        for (int32_t i = 0; i < slotCount; ++i)
+        {
+            if (i >= keepFirst && i <= keepLast)
+            {
+                continue;
+            }
+
+            auto& slot = PdfTab->m_renderedPages[i];
+            if (!slot.bitmap && slot.state != PageRenderState::error)
+            {
+                continue;
+            }
+
+            slot.bitmap.reset();
+            slot.state = PageRenderState::unloaded;
+            slot.zoomBucket = 0;
+
+            if (isCurrentTab)
+            {
+                if (auto element = PagesRepeater().TryGetElement(i))
+                {
+                    ConfigurePageElement(element, static_cast<std::size_t>(i));
+                }
+            }
+        }
+    }
+
+    void MainWindow::RestoreSlotsFromCache(std::shared_ptr<PdfTabInfo> const& PdfTab)
+    {
+        const int32_t slotCount = static_cast<int32_t>(PdfTab->m_renderedPages.size());
+        const int32_t first = (std::max)(0, PdfTab->m_retainedPageFirst);
+        const int32_t last = (std::min)(slotCount - 1, PdfTab->m_retainedPageLast);
+        const int rotation = NormalizeRotation(PdfTab->m_currentRotation);
+        const int zoomBucket = ZoomBucket(PdfTab->m_currentPageZoom);
+
+        for (int32_t i = first; i <= last; ++i)
+        {
+            auto& slot = PdfTab->m_renderedPages[i];
+            if (slot.bitmap)
+            {
+                continue;
+            }
+
+            if (auto cachedBitmap = m_pageBitmapCache.TryGetBitmap(PageBitmapCacheKey{ PdfTab->m_documentId, i, rotation, zoomBucket }))
+            {
+                slot.bitmap = *cachedBitmap;
+                slot.state = PageRenderState::ready;
+                slot.zoomBucket = zoomBucket;
+                slot.generation = PdfTab->m_renderGeneration.load(std::memory_order_acquire);
+            }
+        }
     }
 
     void MainWindow::ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, WriteableBitmap const& bitmap, int zoomBucket)
@@ -1170,12 +1315,6 @@ namespace winrt::urPDF::implementation
         {
             return;
         }
-
-        auto& slot = PdfTab->m_renderedPages[pageIndex];
-        slot.bitmap = bitmap;
-        slot.state = PageRenderState::ready;
-        slot.zoomBucket = zoomBucket;
-        slot.generation = PdfTab->m_renderGeneration.load(std::memory_order_acquire);
 
         auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
         if (!currentTab)
@@ -1188,6 +1327,12 @@ namespace winrt::urPDF::implementation
         {
             return;
         }
+
+        auto& slot = PdfTab->m_renderedPages[pageIndex];
+        slot.bitmap = bitmap;
+        slot.state = PageRenderState::ready;
+        slot.zoomBucket = zoomBucket;
+        slot.generation = PdfTab->m_renderGeneration.load(std::memory_order_acquire);
 
         if (auto element = PagesRepeater().TryGetElement(pageIndex))
         {
@@ -1233,7 +1378,14 @@ namespace winrt::urPDF::implementation
                 const double pageZoom = pdfTab->m_currentPageZoom;
                 const int pageRotation = NormalizeRotation(pdfTab->m_currentRotation);
                 const int zoomBucket = ZoomBucket(pageZoom);
-                const std::vector<PageRenderRequest> renderQueue = BuildRenderQueue(pdfTab->m_pagecount);
+                PageViewRange viewRange;
+                const std::vector<PageRenderRequest> renderQueue = BuildRenderQueue(pdfTab->m_pagecount, viewRange);
+
+                pdfTab->m_retainedPageFirst = viewRange.keepFirst;
+                pdfTab->m_retainedPageLast = viewRange.keepLast;
+                ReleaseSlotsOutsideRange(pdfTab, viewRange.keepFirst, viewRange.keepLast);
+                m_pageBitmapCache.SetViewContext(PageBitmapCacheViewContext{ pdfTab->m_documentId, viewRange.keepFirst, viewRange.keepLast, pageRotation, zoomBucket });
+                m_pageBitmapCache.TrimToBudget();
 
                 for (const PageRenderRequest& request : renderQueue)
                 {
