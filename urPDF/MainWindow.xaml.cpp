@@ -24,6 +24,7 @@ extern "C" {
 #include <winrt/Microsoft.UI.Dispatching.h>
 #include <algorithm>
 #include <chrono>
+#include <exception>
 #include <cmath>
 #include <cwctype>
 #include <limits>
@@ -1318,23 +1319,23 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    void MainWindow::ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, WriteableBitmap const& bitmap, int zoomBucket)
+    bool MainWindow::ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, WriteableBitmap const& bitmap, int zoomBucket)
     {
         if (pageIndex < 0 || static_cast<std::size_t>(pageIndex) >= PdfTab->m_renderedPages.size())
         {
-            return;
+            return false;
         }
 
         auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
         if (!currentTab)
         {
-            return;
+            return false;
         }
 
         auto openedTab = m_openedTabs.find(currentTab);
         if (openedTab == m_openedTabs.end() || openedTab->second != PdfTab)
         {
-            return;
+            return false;
         }
 
         auto& slot = PdfTab->m_renderedPages[pageIndex];
@@ -1346,6 +1347,31 @@ namespace winrt::urPDF::implementation
         if (auto element = PagesRepeater().TryGetElement(pageIndex))
         {
             ConfigurePageElement(element, static_cast<std::size_t>(pageIndex));
+        }
+        return true;
+    }
+
+    void MainWindow::RecordPageRenderMetrics(std::shared_ptr<PdfTabInfo> const& PdfTab, PageRenderMetrics const& metrics) noexcept
+    {
+        auto& documentMetrics = PdfTab->m_renderMetrics;
+        documentMetrics.lastRenderAttempt = metrics;
+        documentMetrics.totalRenderMs += metrics.elapsedMs;
+        switch (metrics.status)
+        {
+        case PageRenderOutcome::applied:
+            ++documentMetrics.appliedRenderCount;
+            break;
+        case PageRenderOutcome::discarded:
+            ++documentMetrics.discardedRenderCount;
+            break;
+        case PageRenderOutcome::error:
+            ++documentMetrics.failedRenderCount;
+            break;
+        }
+
+        if (metrics.pageNumber > 0 && static_cast<std::size_t>(metrics.pageNumber - 1) < PdfTab->m_renderedPages.size())
+        {
+            PdfTab->m_renderedPages[metrics.pageNumber - 1].lastRenderMetrics = metrics;
         }
     }
 
@@ -1363,6 +1389,26 @@ namespace winrt::urPDF::implementation
 
         std::shared_ptr<PdfTabInfo> inFlightTab;
         int32_t inFlightPage = -1;
+        std::optional<PageRenderMetrics> inFlightMetrics;
+        auto finishRender = [&](PageRenderOutcome status)
+        {
+            if (inFlightTab && inFlightMetrics)
+            {
+                inFlightMetrics->status = status;
+                if (inFlightPage >= 0 && static_cast<std::size_t>(inFlightPage) < inFlightTab->m_renderedPages.size())
+                {
+                    auto& slot = inFlightTab->m_renderedPages[inFlightPage];
+                    if (slot.IsRequestInFlight(inFlightMetrics->generation, ZoomBucket(inFlightMetrics->zoom), inFlightMetrics->rotation))
+                    {
+                        slot.requestInFlight = false;
+                    }
+                }
+                RecordPageRenderMetrics(inFlightTab, *inFlightMetrics);
+            }
+            inFlightMetrics.reset();
+            inFlightTab = nullptr;
+            inFlightPage = -1;
+        };
 
         try
         {
@@ -1437,37 +1483,48 @@ namespace winrt::urPDF::implementation
                     slot.requestRotation = pageRotation;
                     inFlightTab = pdfTab;
                     inFlightPage = pageIndex;
+                    inFlightMetrics.emplace();
+                    auto& renderMetrics = *inFlightMetrics;
+                    renderMetrics.documentId = pdfTab->m_documentId;
+                    renderMetrics.pageNumber = pageIndex + 1;
+                    renderMetrics.generation = generation;
+                    renderMetrics.zoom = pageZoom;
+                    renderMetrics.rotation = pageRotation;
                     const fz_rect pageBounds = slot.pdfBounds;
 
                     co_await winrt::resume_background();
                     const auto renderStart = std::chrono::steady_clock::now();
-                    SoftwareBitmap pageBitmap = RenderPageToSoftwareBitmap(m_ctx, pdfTab->m_doc, pageIndex, pageBounds, pageZoom, pageRotation);
-                    const double renderMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - renderStart).count();
-                    PageRenderMetrics renderMetrics{ renderMs, generation, pageZoom, pageRotation, static_cast<bool>(pageBitmap) };
-                    if (pageBitmap)
+                    SoftwareBitmap pageBitmap{ nullptr };
+                    std::exception_ptr renderError;
+                    try
                     {
-                        renderMetrics.pixelWidth = pageBitmap.PixelWidth();
-                        renderMetrics.pixelHeight = pageBitmap.PixelHeight();
-                        renderMetrics.pixelCount = static_cast<std::uint64_t>(renderMetrics.pixelWidth)
-                            * static_cast<std::uint64_t>(renderMetrics.pixelHeight);
-                        renderMetrics.estimatedBufferBytes = renderMetrics.pixelCount * 4ull;
+                        pageBitmap = RenderPageToSoftwareBitmap(m_ctx, pdfTab->m_doc, pageIndex, pageBounds, pageZoom, pageRotation);
+                        renderMetrics.elapsedMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - renderStart).count();
+                        renderMetrics.bitmapCreated = static_cast<bool>(pageBitmap);
+                        if (pageBitmap)
+                        {
+                            renderMetrics.pixelWidth = pageBitmap.PixelWidth();
+                            renderMetrics.pixelHeight = pageBitmap.PixelHeight();
+                            renderMetrics.pixelCount = static_cast<std::uint64_t>(renderMetrics.pixelWidth)
+                                * static_cast<std::uint64_t>(renderMetrics.pixelHeight);
+                            renderMetrics.estimatedBufferBytes = renderMetrics.pixelCount * 4ull;
+                        }
+                    }
+                    catch (...)
+                    {
+                        renderMetrics.elapsedMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - renderStart).count();
+                        renderError = std::current_exception();
                     }
                     co_await resume_foreground(dispatcher);
 
-                    inFlightTab = nullptr;
-                    inFlightPage = -1;
-                    if (static_cast<std::size_t>(pageIndex) < pdfTab->m_renderedPages.size())
+                    if (renderError)
                     {
-                        auto& finishedSlot = pdfTab->m_renderedPages[pageIndex];
-                        finishedSlot.lastRenderMetrics = renderMetrics;
-                        if (finishedSlot.IsRequestInFlight(generation, zoomBucket, pageRotation))
-                        {   
-                            finishedSlot.requestInFlight = false;
-                        }
+                        std::rethrow_exception(renderError);
                     }
 
                     if (pdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation || static_cast<std::size_t>(pageIndex) >= pdfTab->m_renderedPages.size())
                     {
+                        finishRender(PageRenderOutcome::discarded);
                         break;
                     }
 
@@ -1484,6 +1541,7 @@ namespace winrt::urPDF::implementation
                     if (NormalizeRotation(pdfTab->m_currentRotation) != pageRotation || ZoomBucket(pdfTab->m_currentPageZoom) != zoomBucket)
                     {
                         m_visibleRenderRequested = true;
+                        finishRender(PageRenderOutcome::discarded);
                         break;
                     }
 
@@ -1495,19 +1553,18 @@ namespace winrt::urPDF::implementation
                         {
                             failedSlot.state = PageRenderState::error;
                         }
+                        finishRender(PageRenderOutcome::error);
                         continue;
                     }
 
-                    ApplyPageBitmap(pdfTab, pageIndex, *writeableBitmap, zoomBucket);
+                    const bool applied = ApplyPageBitmap(pdfTab, pageIndex, *writeableBitmap, zoomBucket);
+                    finishRender(applied ? PageRenderOutcome::applied : PageRenderOutcome::discarded);
                 }
             } while (m_visibleRenderRequested);
         }
         catch (...)
         {
-            if (inFlightTab && inFlightPage >= 0 && static_cast<std::size_t>(inFlightPage) < inFlightTab->m_renderedPages.size())
-            {
-                inFlightTab->m_renderedPages[inFlightPage].requestInFlight = false;
-            }
+            finishRender(PageRenderOutcome::error);
         }
 
         m_isVisibleRenderRunning = false;

@@ -35,6 +35,14 @@ namespace winrt::urPDF::implementation
     };
 
 
+    enum class PageRenderOutcome
+    {
+        applied,
+        discarded,
+        error
+    };
+
+
     struct PageRenderMetrics
     {
         double elapsedMs{ 0.0 };
@@ -46,6 +54,9 @@ namespace winrt::urPDF::implementation
         int32_t pixelHeight{ 0 };
         std::uint64_t pixelCount{ 0 };
         std::uint64_t estimatedBufferBytes{ 0 };
+        std::uint64_t documentId{ 0 };
+        int32_t pageNumber{ 0 };
+        PageRenderOutcome status{ PageRenderOutcome::discarded };
     };
 
 
@@ -186,6 +197,11 @@ namespace winrt::urPDF::implementation
         std::optional<std::chrono::steady_clock::time_point> openStartedAt;
         std::optional<double> firstPageAttachedMs;
         std::optional<int32_t> firstVisiblePageIndex;
+        std::optional<PageRenderMetrics> lastRenderAttempt;
+        double totalRenderMs{ 0.0 }; // Includes discarded and failed attempts.
+        std::uint64_t appliedRenderCount{ 0 };
+        std::uint64_t discardedRenderCount{ 0 };
+        std::uint64_t failedRenderCount{ 0 };
     };
 
 
@@ -292,7 +308,8 @@ namespace winrt::urPDF::implementation
         std::vector<PageRenderRequest> BuildRenderQueue(int32_t pageCount, PageViewRange& viewRange);
         void ReleaseSlotsOutsideRange(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t keepFirst, int32_t keepLast);
         void RestoreSlotsFromCache(std::shared_ptr<PdfTabInfo> const& PdfTab);
-        void ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap, int zoomBucket);
+        bool ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap, int zoomBucket);
+        void RecordPageRenderMetrics(std::shared_ptr<PdfTabInfo> const& PdfTab, PageRenderMetrics const& metrics) noexcept;
     };
 }
 
