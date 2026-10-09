@@ -53,6 +53,7 @@ namespace
     constexpr size_t PdfStoreBudgetBytes = 256ull * 1024ull * 1024ull;
     constexpr int PrefetchPageCount = 2;
     constexpr int SlotRetainMarginPages = 3;
+    constexpr auto ZoomRenderDebounce = std::chrono::milliseconds(200);
 
     void LockMuPdf(void* user, int lock)
     {
@@ -217,6 +218,7 @@ namespace winrt::urPDF::implementation
     // MAINWINDOW
     MainWindow::~MainWindow()
     {
+        CancelPendingZoomRender();
         for (auto const& tabEntry : m_openedTabs)
         {
             ++tabEntry.second->m_renderGeneration;
@@ -231,6 +233,26 @@ namespace winrt::urPDF::implementation
     MainWindow::MainWindow()
     {
         InitializeComponent();
+
+        m_zoomRenderTimer = DispatcherQueue().CreateTimer();
+        m_zoomRenderTimer.IsRepeating(false);
+        m_zoomRenderTimer.Interval(ZoomRenderDebounce);
+        m_zoomRenderTimer.Tick([weakThis = get_weak()](auto const&, auto const&)
+        {
+            if (auto self = weakThis.get())
+            {
+                self->m_zoomDebounceElapsed = true;
+                self->ApplyPendingRenderZoom();
+            }
+        });
+
+        Closed([weakThis = get_weak()](auto const&, auto const&)
+        {
+            if (auto self = weakThis.get())
+            {
+                self->CancelPendingZoomRender();
+            }
+        });
 
         AppWindow().SetIcon(L"Assets\\logo.ico");
 
@@ -639,6 +661,7 @@ namespace winrt::urPDF::implementation
 
     void MainWindow::TabView_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& args)
     {
+        CancelPendingZoomRender();
         auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
 
         for (auto const& removedItem : args.RemovedItems())
@@ -696,6 +719,10 @@ namespace winrt::urPDF::implementation
         auto openedTab = m_openedTabs.find(args.Tab());
         if (openedTab != m_openedTabs.end())
         {
+            if (m_pendingZoomTab.lock() == openedTab->second)
+            {
+                CancelPendingZoomRender();
+            }
             ++openedTab->second->m_renderGeneration;
             m_pageBitmapCache.ClearDocumentEntries(openedTab->second->m_documentId);
             m_openedTabs.erase(openedTab);
@@ -1577,6 +1604,7 @@ namespace winrt::urPDF::implementation
             return false;
         }
 
+        CancelPendingZoomRender();
         m_isRendering = true;
         m_zoomWasEnabled = PdfScrollViewer().ZoomMode() == winrt::Microsoft::UI::Xaml::Controls::ZoomMode::Enabled;
         PdfScrollViewer().ZoomMode(winrt::Microsoft::UI::Xaml::Controls::ZoomMode::Disabled);
@@ -1865,6 +1893,52 @@ namespace winrt::urPDF::implementation
         button.IsEnabled(true);
     }
 
+    void MainWindow::UpdateRenderZoom(std::shared_ptr<PdfTabInfo> const& pdfTab, double zoom, bool isIntermediate)
+    {
+        auto pendingTab = m_pendingZoomTab.lock();
+        const double lastZoom = pendingTab == pdfTab ? m_pendingRenderZoom : pdfTab->m_currentPageZoom;
+        if (zoom != lastZoom)
+        {
+            m_pendingZoomTab = pdfTab;
+            m_pendingRenderZoom = zoom;
+            m_zoomIsIntermediate = isIntermediate;
+            m_zoomDebounceElapsed = false;
+            m_zoomRenderTimer.Stop();
+            m_zoomRenderTimer.Start();
+        }
+        else if (pendingTab == pdfTab)
+        {
+            m_zoomIsIntermediate = isIntermediate;
+            ApplyPendingRenderZoom();
+        }
+    }
+
+    void MainWindow::ApplyPendingRenderZoom()
+    {
+        if (!m_zoomDebounceElapsed || m_zoomIsIntermediate) { return; }
+
+        auto pdfTab = m_pendingZoomTab.lock();
+        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto openedTab = m_openedTabs.find(currentTab);
+        const double zoom = m_pendingRenderZoom;
+        CancelPendingZoomRender();
+        if (m_isRendering || !pdfTab || openedTab == m_openedTabs.end() || openedTab->second != pdfTab) { return; }
+
+        pdfTab->m_currentPageZoom = zoom;
+        RenderVisiblePagesAsync();
+    }
+
+    void MainWindow::CancelPendingZoomRender()
+    {
+        if (m_zoomRenderTimer)
+        {
+            m_zoomRenderTimer.Stop();
+        }
+        m_pendingZoomTab.reset();
+        m_zoomIsIntermediate = false;
+        m_zoomDebounceElapsed = false;
+    }
+
     winrt::fire_and_forget MainWindow::PdfScrollViewer_ViewChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args)
     {
         auto scrollViewer = sender.as<winrt::Microsoft::UI::Xaml::Controls::ScrollViewer>();
@@ -1882,13 +1956,9 @@ namespace winrt::urPDF::implementation
 
             TryRecordFirstVisiblePage(pdfInfo);
 
-            if (!args.IsIntermediate() && !m_isRendering)
-            {
-                pdfInfo->m_currentPageZoom = currentZoom;
-            }
-
             if (!m_isRendering)
             {
+                UpdateRenderZoom(pdfInfo, currentZoom, args.IsIntermediate());
                 RenderVisiblePagesAsync();
             }
 

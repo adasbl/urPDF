@@ -295,6 +295,11 @@ namespace winrt::urPDF::implementation
         bool m_bookViewMode{ false };
         bool m_isVisibleRenderRunning{ false };
         bool m_visibleRenderRequested{ false };
+        winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_zoomRenderTimer{ nullptr };
+        std::weak_ptr<PdfTabInfo> m_pendingZoomTab;
+        double m_pendingRenderZoom{ 1.0 };
+        bool m_zoomIsIntermediate{ false };
+        bool m_zoomDebounceElapsed{ false };
         int m_layoutRotation{ 0 };
         std::uint64_t m_nextDocumentId{ 1 };
         PageBitmapCache m_pageBitmapCache{ 256ull * 1024ull * 1024ull };
@@ -302,6 +307,9 @@ namespace winrt::urPDF::implementation
 
         bool TryAcquireRenderingLock();
         void ReleaseRenderingLock();
+        void UpdateRenderZoom(std::shared_ptr<PdfTabInfo> const& pdfTab, double zoom, bool isIntermediate);
+        void ApplyPendingRenderZoom();
+        void CancelPendingZoomRender();
         void RebuildPagesContainer(std::vector<PageSlot> const& pages, double renderZoom);
         void ConfigurePageElement(winrt::Microsoft::UI::Xaml::UIElement const& element, std::size_t pageIndex);
         void TryRecordFirstVisiblePage(std::shared_ptr<PdfTabInfo> const& PdfTab);
