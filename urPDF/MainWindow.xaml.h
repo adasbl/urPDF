@@ -198,7 +198,7 @@ namespace winrt::urPDF::implementation
         std::optional<double> firstPageAttachedMs;
         std::optional<int32_t> firstVisiblePageIndex;
         std::optional<PageRenderMetrics> lastRenderAttempt;
-        double totalRenderMs{ 0.0 }; // Includes discarded and failed attempts.
+        double totalRenderMs{ 0.0 };
         std::uint64_t appliedRenderCount{ 0 };
         std::uint64_t discardedRenderCount{ 0 };
         std::uint64_t failedRenderCount{ 0 };
@@ -215,7 +215,8 @@ namespace winrt::urPDF::implementation
         winrt::hstring m_fileName = L"unknown";
         std::vector<PageSlot> m_renderedPages;
         int32_t m_currentPageIndex = { 1 };
-        double m_currentPageZoom = { 1.0 };
+        double m_uiZoom{ 1.0 };
+        double m_renderZoom{ 1.0 };
         int m_currentRotation = { 0 };
         std::atomic<std::uint64_t> m_renderGeneration{ 0 };
         
@@ -290,14 +291,13 @@ namespace winrt::urPDF::implementation
         winrt::Microsoft::UI::Xaml::Printing::PrintDocument m_printDocument{ nullptr };
         winrt::event_token m_printTaskRequestedToken{};
         bool m_isRendering{ false };
-        bool m_isNormalizingZoom{ false };
+        bool m_isRestoringTabView{ false };
         bool m_zoomWasEnabled{ false };
         bool m_bookViewMode{ false };
         bool m_isVisibleRenderRunning{ false };
         bool m_visibleRenderRequested{ false };
         winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_zoomRenderTimer{ nullptr };
         std::weak_ptr<PdfTabInfo> m_pendingZoomTab;
-        double m_pendingRenderZoom{ 1.0 };
         bool m_zoomIsIntermediate{ false };
         bool m_zoomDebounceElapsed{ false };
         int m_layoutRotation{ 0 };
@@ -310,7 +310,7 @@ namespace winrt::urPDF::implementation
         void UpdateRenderZoom(std::shared_ptr<PdfTabInfo> const& pdfTab, double zoom, bool isIntermediate);
         void ApplyPendingRenderZoom();
         void CancelPendingZoomRender();
-        void RebuildPagesContainer(std::vector<PageSlot> const& pages, double renderZoom);
+        void RebuildPagesContainer(std::vector<PageSlot> const& pages);
         void ConfigurePageElement(winrt::Microsoft::UI::Xaml::UIElement const& element, std::size_t pageIndex);
         void TryRecordFirstVisiblePage(std::shared_ptr<PdfTabInfo> const& PdfTab);
         std::vector<PageRenderRequest> BuildRenderQueue(int32_t pageCount, PageViewRange& viewRange);

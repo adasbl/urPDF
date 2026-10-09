@@ -30,6 +30,7 @@ extern "C" {
 #include <limits>
 #include <string>
 #include <memory>
+#include <wil/resource.h>
 #include <coroutine>
 #include <winrt/Windows.Graphics.Printing.h>
 #include <winrt/Microsoft.UI.Xaml.Printing.h>
@@ -43,9 +44,9 @@ using namespace winrt::Windows::Storage::Pickers;
 using namespace winrt::Windows::Graphics::Imaging;
 using namespace winrt::Windows::Storage;
 using namespace winrt::Microsoft::UI::Xaml::Media::Imaging;
-using namespace Microsoft::UI::Xaml;
-using namespace Microsoft::UI::Composition::SystemBackdrops;
-using namespace Microsoft::UI::Composition;
+using namespace winrt::Microsoft::UI::Xaml;
+using namespace winrt::Microsoft::UI::Composition::SystemBackdrops;
+using namespace winrt::Microsoft::UI::Composition;
     
 namespace
 {
@@ -664,6 +665,9 @@ namespace winrt::urPDF::implementation
         CancelPendingZoomRender();
         auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
 
+        m_isRestoringTabView = true;
+        auto restoreViewState = wil::scope_exit([this] { m_isRestoringTabView = false; });
+
         for (auto const& removedItem : args.RemovedItems())
         {
             auto removedTab = removedItem.try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
@@ -694,14 +698,15 @@ namespace winrt::urPDF::implementation
                 DisplayPageNumber(pdfInfo->m_currentPageIndex);
                 DisplayPageCount(pdfInfo->m_pagecount);
                 RestoreSlotsFromCache(pdfInfo);
-                RebuildPagesContainer(pdfInfo->m_renderedPages, pdfInfo->m_currentPageZoom);
-                PdfScrollViewer().ChangeView(nullptr, nullptr, static_cast<float>(pdfInfo->m_currentPageZoom));
+                RebuildPagesContainer(pdfInfo->m_renderedPages);
+                PdfScrollViewer().ChangeView(nullptr, nullptr, static_cast<float>(pdfInfo->m_uiZoom), true);
+                UpdateRenderZoom(pdfInfo, pdfInfo->m_uiZoom, false);
                 RenderVisiblePagesAsync();
             }
             else
             {
                 EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
-                PdfScrollViewer().ChangeView(nullptr, nullptr, 1.0f);
+                PdfScrollViewer().ChangeView(nullptr, nullptr, 1.0f, true);
             }
         }
         else
@@ -899,7 +904,7 @@ namespace winrt::urPDF::implementation
             auto openedTab = m_openedTabs.find(currentTab);
             if (openedTab != m_openedTabs.end() && openedTab->second == PdfTab)
             {
-                RebuildPagesContainer(PdfTab->m_renderedPages, PdfTab->m_currentPageZoom);
+                RebuildPagesContainer(PdfTab->m_renderedPages);
                 currentTab.Header(winrt::box_value(PdfTab->m_fileName));
                 DisplayPageCount(PdfTab->m_pagecount);
                 DisplayPageNumber(PdfTab->m_currentPageIndex);
@@ -937,7 +942,7 @@ namespace winrt::urPDF::implementation
 
         fz_page* page = fz_load_page(renderCtx, PdfTab->m_doc, 0);
 
-        const double pageZoom = PdfTab->m_currentPageZoom;
+        const double pageZoom = PdfTab->m_renderZoom;
         const int pageRotation = PdfTab->m_currentRotation;
         double renderScale = PdfRenderScale(pageZoom);
         fz_matrix transform = fz_scale(renderScale, renderScale);
@@ -998,7 +1003,7 @@ namespace winrt::urPDF::implementation
         PdfTab->m_pagecount = pagecount;
         PdfTab->m_pageBounds = std::move(pageBounds);
         PdfTab->m_renderedPages = singlePage;
-        RebuildPagesContainer(singlePage, PdfTab->m_currentPageZoom);
+        RebuildPagesContainer(singlePage);
 
         auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
         if (currentTab)
@@ -1079,7 +1084,7 @@ namespace winrt::urPDF::implementation
         {
             if (!keepLayout)
             {
-                RebuildPagesContainer(PdfTab->m_renderedPages, PdfTab->m_currentPageZoom);
+                RebuildPagesContainer(PdfTab->m_renderedPages);
             }
             currentTab.Header(winrt::box_value(PdfTab->m_fileName));
             DisplayPageCount(PdfTab->m_pagecount);
@@ -1088,7 +1093,7 @@ namespace winrt::urPDF::implementation
 
         co_await winrt::resume_background();
 
-        const double pageZoom = PdfTab->m_currentPageZoom;
+        const double pageZoom = PdfTab->m_renderZoom;
         const int pageRotation = PdfTab->m_currentRotation;
         double renderScale = PdfRenderScale(pageZoom);
         fz_matrix transform = fz_scale(renderScale, renderScale);
@@ -1322,7 +1327,7 @@ namespace winrt::urPDF::implementation
         const int32_t first = (std::max)(0, PdfTab->m_retainedPageFirst);
         const int32_t last = (std::min)(slotCount - 1, PdfTab->m_retainedPageLast);
         const int rotation = NormalizeRotation(PdfTab->m_currentRotation);
-        const int zoomBucket = ZoomBucket(PdfTab->m_currentPageZoom);
+        const int zoomBucket = ZoomBucket(PdfTab->m_renderZoom);
 
         for (int32_t i = first; i <= last; ++i)
         {
@@ -1457,7 +1462,7 @@ namespace winrt::urPDF::implementation
 
                 auto pdfTab = openedTab->second;
                 const std::uint64_t generation = pdfTab->m_renderGeneration.load(std::memory_order_acquire);
-                const double pageZoom = pdfTab->m_currentPageZoom;
+                const double pageZoom = pdfTab->m_renderZoom;
                 const int pageRotation = NormalizeRotation(pdfTab->m_currentRotation);
                 const int zoomBucket = ZoomBucket(pageZoom);
                 PageViewRange viewRange;
@@ -1565,7 +1570,7 @@ namespace winrt::urPDF::implementation
                         m_pageBitmapCache.StoreBitmap(cacheKey, *writeableBitmap);
                     }
 
-                    if (NormalizeRotation(pdfTab->m_currentRotation) != pageRotation || ZoomBucket(pdfTab->m_currentPageZoom) != zoomBucket)
+                    if (NormalizeRotation(pdfTab->m_currentRotation) != pageRotation || ZoomBucket(pdfTab->m_renderZoom) != zoomBucket)
                     {
                         m_visibleRenderRequested = true;
                         finishRender(PageRenderOutcome::discarded);
@@ -1627,13 +1632,8 @@ namespace winrt::urPDF::implementation
         RotateButton().IsEnabled(true);
     }
 
-    void MainWindow::RebuildPagesContainer(std::vector<PageSlot> const& pages, double renderZoom)
+    void MainWindow::RebuildPagesContainer(std::vector<PageSlot> const& pages)
     {
-        if (!std::isfinite(renderZoom) || renderZoom <= 0.0)
-        {
-            renderZoom = 1.0;
-        }
-
         int currentRotation = 0;
         auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
         if (currentTab)
@@ -1895,12 +1895,21 @@ namespace winrt::urPDF::implementation
 
     void MainWindow::UpdateRenderZoom(std::shared_ptr<PdfTabInfo> const& pdfTab, double zoom, bool isIntermediate)
     {
+        const bool zoomChanged = pdfTab->m_uiZoom != zoom;
+        pdfTab->m_uiZoom = zoom;
         auto pendingTab = m_pendingZoomTab.lock();
-        const double lastZoom = pendingTab == pdfTab ? m_pendingRenderZoom : pdfTab->m_currentPageZoom;
-        if (zoom != lastZoom)
+        if (zoom == pdfTab->m_renderZoom)
+        {
+            if (pendingTab == pdfTab)
+            {
+                CancelPendingZoomRender();
+            }
+            return;
+        }
+
+        if (zoomChanged || pendingTab != pdfTab)
         {
             m_pendingZoomTab = pdfTab;
-            m_pendingRenderZoom = zoom;
             m_zoomIsIntermediate = isIntermediate;
             m_zoomDebounceElapsed = false;
             m_zoomRenderTimer.Stop();
@@ -1920,11 +1929,10 @@ namespace winrt::urPDF::implementation
         auto pdfTab = m_pendingZoomTab.lock();
         auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
         auto openedTab = m_openedTabs.find(currentTab);
-        const double zoom = m_pendingRenderZoom;
         CancelPendingZoomRender();
         if (m_isRendering || !pdfTab || openedTab == m_openedTabs.end() || openedTab->second != pdfTab) { return; }
 
-        pdfTab->m_currentPageZoom = zoom;
+        pdfTab->m_renderZoom = pdfTab->m_uiZoom;
         RenderVisiblePagesAsync();
     }
 
@@ -1941,6 +1949,7 @@ namespace winrt::urPDF::implementation
 
     winrt::fire_and_forget MainWindow::PdfScrollViewer_ViewChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args)
     {
+        if (m_isRestoringTabView) { co_return; }
         auto scrollViewer = sender.as<winrt::Microsoft::UI::Xaml::Controls::ScrollViewer>();
 
         double scrollOffset = scrollViewer.VerticalOffset();
@@ -2003,7 +2012,7 @@ namespace winrt::urPDF::implementation
                 slot.generation = generation;
             }
 
-            RebuildPagesContainer(pdfInfo->m_renderedPages, pdfInfo->m_currentPageZoom);
+            RebuildPagesContainer(pdfInfo->m_renderedPages);
             RenderVisiblePagesAsync();
         }
         co_return;
@@ -2074,7 +2083,7 @@ namespace winrt::urPDF::implementation
             return;
         }
 
-        RebuildPagesContainer(pdfInfo->m_renderedPages, pdfInfo->m_currentPageZoom);
+        RebuildPagesContainer(pdfInfo->m_renderedPages);
 
         const int pagesPerRow = m_bookViewMode ? 2 : 1;
         const int totalRows = (pdfInfo->m_pagecount + pagesPerRow - 1) / pagesPerRow;
