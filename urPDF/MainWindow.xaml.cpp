@@ -299,9 +299,11 @@ namespace winrt::urPDF::implementation
         auto cacheEntry = m_entries.find(key);
         if (cacheEntry == m_entries.end())
         {
+            ++m_metrics.misses;
             return std::nullopt;
         }
 
+        ++m_metrics.hits;
         MarkAsRecentlyUsed(cacheEntry);
         return cacheEntry->second.bitmap;
     }
@@ -1297,6 +1299,10 @@ namespace winrt::urPDF::implementation
             auto& slot = PdfTab->m_renderedPages[i];
             if (slot.bitmap)
             {
+                if (slot.state == PageRenderState::ready && slot.zoomBucket == zoomBucket)
+                {
+                    ++PdfTab->m_slotBitmapReuses;
+                }
                 continue;
             }
 
@@ -1400,6 +1406,10 @@ namespace winrt::urPDF::implementation
                     const bool isUpToDate = slot.zoomBucket == zoomBucket && ((slot.state == PageRenderState::ready && slot.bitmap) || slot.state == PageRenderState::error);
                     if (isUpToDate)
                     {
+                        if (slot.state == PageRenderState::ready && slot.bitmap)
+                        {
+                            ++pdfTab->m_slotBitmapReuses;
+                        }
                         continue;
                     }
 

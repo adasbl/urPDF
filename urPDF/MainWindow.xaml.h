@@ -128,6 +128,23 @@ namespace winrt::urPDF::implementation
     };
 
 
+    struct PageBitmapCacheMetrics
+    {
+        std::uint64_t hits{ 0 };
+        std::uint64_t misses{ 0 };
+
+        std::optional<double> HitRate() const noexcept
+        {
+            if (hits == 0 && misses == 0)
+            {
+                return std::nullopt;
+            }
+
+            return static_cast<double>(hits) / (static_cast<double>(hits) + static_cast<double>(misses));
+        }
+    };
+
+
     class PageBitmapCache
     {
         struct CacheEntry
@@ -143,6 +160,7 @@ namespace winrt::urPDF::implementation
 
         std::size_t m_budgetBytes{ 0 };
         std::size_t m_usedBytes{ 0 };
+        PageBitmapCacheMetrics m_metrics;
         bool m_hasViewContext{ false };
         PageBitmapCacheViewContext m_viewContext;
         std::list<PageBitmapCacheKey> m_lru;
@@ -154,6 +172,8 @@ namespace winrt::urPDF::implementation
         std::optional<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> TryGetBitmap(PageBitmapCacheKey const& key);
         void StoreBitmap(PageBitmapCacheKey const& key, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap);
         void ClearDocumentEntries(std::uint64_t documentId);
+
+        PageBitmapCacheMetrics GetMetrics() const noexcept { return m_metrics; }
 
         void SetViewContext(PageBitmapCacheViewContext const& context);
         void TrimToBudget();
@@ -179,6 +199,7 @@ namespace winrt::urPDF::implementation
         int m_pagecount{ 0 };
         std::vector<fz_rect> m_pageBounds;
         std::uint64_t m_documentId{ 0 };
+        std::uint64_t m_slotBitmapReuses{ 0 };
 
         int32_t m_retainedPageFirst{ 0 };
         int32_t m_retainedPageLast{ -1 };
