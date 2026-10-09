@@ -23,6 +23,7 @@ extern "C" {
 #include <map>
 #include <winrt/Microsoft.UI.Dispatching.h>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cwctype>
 #include <limits>
@@ -1427,7 +1428,10 @@ namespace winrt::urPDF::implementation
                     const fz_rect pageBounds = slot.pdfBounds;
 
                     co_await winrt::resume_background();
+                    const auto renderStart = std::chrono::steady_clock::now();
                     SoftwareBitmap pageBitmap = RenderPageToSoftwareBitmap(m_ctx, pdfTab->m_doc, pageIndex, pageBounds, pageZoom, pageRotation);
+                    const double renderMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - renderStart).count();
+                    const PageRenderTiming renderTiming{ renderMs, generation, pageZoom, pageRotation, static_cast<bool>(pageBitmap) };
                     co_await resume_foreground(dispatcher);
 
                     inFlightTab = nullptr;
@@ -1435,8 +1439,9 @@ namespace winrt::urPDF::implementation
                     if (static_cast<std::size_t>(pageIndex) < pdfTab->m_renderedPages.size())
                     {
                         auto& finishedSlot = pdfTab->m_renderedPages[pageIndex];
+                        finishedSlot.lastRenderTiming = renderTiming;
                         if (finishedSlot.IsRequestInFlight(generation, zoomBucket, pageRotation))
-                        {
+                        {   
                             finishedSlot.requestInFlight = false;
                         }
                     }

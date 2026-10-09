@@ -34,6 +34,16 @@ namespace winrt::urPDF::implementation
     };
 
 
+    struct PageRenderTiming
+    {
+        double elapsedMs{ 0.0 };
+        std::uint64_t generation{ 0 };
+        double zoom{ 1.0 };
+        int rotation{ 0 };
+        bool bitmapCreated{ false };
+    };
+
+
     struct PageSlot
     {
         fz_rect pdfBounds{};
@@ -41,6 +51,8 @@ namespace winrt::urPDF::implementation
         std::optional<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> bitmap;
         std::uint64_t generation{ 0 };
         int zoomBucket{ 0 };
+
+        std::optional<PageRenderTiming> lastRenderTiming;
 
         bool requestInFlight{ false };
         std::uint64_t requestGeneration{ 0 };
@@ -139,9 +151,7 @@ namespace winrt::urPDF::implementation
         void StoreBitmap(PageBitmapCacheKey const& key, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap);
         void ClearDocumentEntries(std::uint64_t documentId);
 
-        // Describes the active document and its retained page window. Used to pick eviction victims.
         void SetViewContext(PageBitmapCacheViewContext const& context);
-        // Evicts entries until the budget is satisfied (entries of the retained window are never evicted).
         void TrimToBudget();
     };
 
@@ -166,7 +176,6 @@ namespace winrt::urPDF::implementation
         std::vector<fz_rect> m_pageBounds;
         std::uint64_t m_documentId{ 0 };
 
-        // Last retained page window (visible + prefetch + margin), used to restore slots from cache on tab switch.
         int32_t m_retainedPageFirst{ 0 };
         int32_t m_retainedPageLast{ -1 };
     };
