@@ -1431,7 +1431,15 @@ namespace winrt::urPDF::implementation
                     const auto renderStart = std::chrono::steady_clock::now();
                     SoftwareBitmap pageBitmap = RenderPageToSoftwareBitmap(m_ctx, pdfTab->m_doc, pageIndex, pageBounds, pageZoom, pageRotation);
                     const double renderMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - renderStart).count();
-                    const PageRenderTiming renderTiming{ renderMs, generation, pageZoom, pageRotation, static_cast<bool>(pageBitmap) };
+                    PageRenderMetrics renderMetrics{ renderMs, generation, pageZoom, pageRotation, static_cast<bool>(pageBitmap) };
+                    if (pageBitmap)
+                    {
+                        renderMetrics.pixelWidth = pageBitmap.PixelWidth();
+                        renderMetrics.pixelHeight = pageBitmap.PixelHeight();
+                        renderMetrics.pixelCount = static_cast<std::uint64_t>(renderMetrics.pixelWidth)
+                            * static_cast<std::uint64_t>(renderMetrics.pixelHeight);
+                        renderMetrics.estimatedBufferBytes = renderMetrics.pixelCount * 4ull;
+                    }
                     co_await resume_foreground(dispatcher);
 
                     inFlightTab = nullptr;
@@ -1439,7 +1447,7 @@ namespace winrt::urPDF::implementation
                     if (static_cast<std::size_t>(pageIndex) < pdfTab->m_renderedPages.size())
                     {
                         auto& finishedSlot = pdfTab->m_renderedPages[pageIndex];
-                        finishedSlot.lastRenderTiming = renderTiming;
+                        finishedSlot.lastRenderMetrics = renderMetrics;
                         if (finishedSlot.IsRequestInFlight(generation, zoomBucket, pageRotation))
                         {   
                             finishedSlot.requestInFlight = false;

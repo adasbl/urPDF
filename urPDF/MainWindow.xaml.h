@@ -34,13 +34,17 @@ namespace winrt::urPDF::implementation
     };
 
 
-    struct PageRenderTiming
+    struct PageRenderMetrics
     {
         double elapsedMs{ 0.0 };
         std::uint64_t generation{ 0 };
         double zoom{ 1.0 };
         int rotation{ 0 };
         bool bitmapCreated{ false };
+        int32_t pixelWidth{ 0 };
+        int32_t pixelHeight{ 0 };
+        std::uint64_t pixelCount{ 0 };
+        std::uint64_t estimatedBufferBytes{ 0 };
     };
 
 
@@ -52,7 +56,7 @@ namespace winrt::urPDF::implementation
         std::uint64_t generation{ 0 };
         int zoomBucket{ 0 };
 
-        std::optional<PageRenderTiming> lastRenderTiming;
+        std::optional<PageRenderMetrics> lastRenderMetrics;
 
         bool requestInFlight{ false };
         std::uint64_t requestGeneration{ 0 };
