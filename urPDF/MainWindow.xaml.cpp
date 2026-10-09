@@ -781,10 +781,12 @@ namespace winrt::urPDF::implementation
 
         try
         {
+            const auto openStartedAt = std::chrono::steady_clock::now();
             std::string filePath = winrt::to_string(file.Path());
             winrt::hstring fileName = file.Name();
 
             auto PdfInfo = std::make_shared<PdfTabInfo>(m_ctx, filePath);
+            PdfInfo->m_renderMetrics.openStartedAt = openStartedAt;
             PdfInfo->m_documentId = m_nextDocumentId++;
             PdfInfo->m_fileName = fileName;
 
@@ -1637,7 +1639,6 @@ namespace winrt::urPDF::implementation
 
         if (image.Source() != *page.bitmap)
         {
-            // Swapping Source to a bitmap of different pixel size keeps a stale composition surface after zoom, clipping the page.
             winrt::Microsoft::UI::Xaml::Controls::Image freshImage;
             freshImage.Stretch(winrt::Microsoft::UI::Xaml::Media::Stretch::Uniform);
             freshImage.HorizontalAlignment(winrt::Microsoft::UI::Xaml::HorizontalAlignment::Stretch);
@@ -1648,6 +1649,51 @@ namespace winrt::urPDF::implementation
         }
 
         border.Opacity(1.0);
+        TryRecordFirstVisiblePage(openedTab->second);
+    }
+
+    void MainWindow::TryRecordFirstVisiblePage(std::shared_ptr<PdfTabInfo> const& PdfTab)
+    {
+        auto& metrics = PdfTab->m_renderMetrics;
+        if (!metrics.openStartedAt || metrics.firstPageAttachedMs) { return; }
+
+        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto openedTab = m_openedTabs.find(currentTab);
+        if (openedTab == m_openedTabs.end() || openedTab->second != PdfTab) { return; }
+
+        auto scrollViewer = PdfScrollViewer();
+        const double zoom = scrollViewer.ZoomFactor();
+        const double viewportWidth = scrollViewer.ViewportWidth();
+        const double viewportHeight = scrollViewer.ViewportHeight();
+        if (!std::isfinite(zoom) || zoom <= 0.0 || !std::isfinite(viewportWidth) || viewportWidth <= 0.0 || !std::isfinite(viewportHeight) || viewportHeight <= 0.0) { return; }
+
+        auto repeaterOffset = PagesRepeater().ActualOffset();
+        const double viewportLeft = scrollViewer.HorizontalOffset() / zoom - repeaterOffset.x;
+        const double viewportTop = scrollViewer.VerticalOffset() / zoom - repeaterOffset.y;
+        const double viewportRight = viewportLeft + viewportWidth / zoom;
+        const double viewportBottom = viewportTop + viewportHeight / zoom;
+
+        auto const& pageRects = winrt::get_self<winrt::urPDF::implementation::PdfPageLayout>(PagesLayout())->PageRects();
+        const std::size_t knownPages = (std::min)(pageRects.size(), PdfTab->m_renderedPages.size());
+        for (std::size_t i = 0; i < knownPages; ++i)
+        {
+            auto const& rect = pageRects[i];
+            if (rect.Y >= viewportBottom) { break; }
+            if (rect.Y + rect.Height <= viewportTop || rect.X + rect.Width <= viewportLeft || rect.X >= viewportRight) { continue; }
+
+            auto const& slot = PdfTab->m_renderedPages[i];
+            if (slot.state != PageRenderState::ready || !slot.bitmap || !*slot.bitmap || slot.generation != PdfTab->m_renderGeneration.load(std::memory_order_acquire)) { continue; }
+
+            auto element = PagesRepeater().TryGetElement(static_cast<int32_t>(i));
+            auto border = element ? element.try_as<winrt::Microsoft::UI::Xaml::Controls::Border>() : nullptr;
+            auto image = border ? border.Child().try_as<winrt::Microsoft::UI::Xaml::Controls::Image>() : nullptr;
+
+            if (!image || image.Source() != *slot.bitmap) { continue; }
+
+            metrics.firstPageAttachedMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - *metrics.openStartedAt).count();
+            metrics.firstVisiblePageIndex = static_cast<int32_t>(i);
+            return;
+        }
     }
 
     void MainWindow::PagesRepeater_ElementPrepared(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::Controls::ItemsRepeaterElementPreparedEventArgs const& args)
@@ -1776,6 +1822,8 @@ namespace winrt::urPDF::implementation
         {
             auto pdfInfo = m_openedTabs[currentTab];
             int totalPages = pdfInfo->m_pagecount;
+
+            TryRecordFirstVisiblePage(pdfInfo);
 
             if (!args.IsIntermediate() && !m_isRendering)
             {

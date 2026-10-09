@@ -9,6 +9,7 @@ extern "C" {
 }
 
 #include <atomic>
+#include <chrono>
 #include <map>
 #include <array>
 #include <cstddef>
@@ -180,6 +181,14 @@ namespace winrt::urPDF::implementation
     };
 
 
+    struct DocumentRenderMetrics
+    {
+        std::optional<std::chrono::steady_clock::time_point> openStartedAt;
+        std::optional<double> firstPageAttachedMs;
+        std::optional<int32_t> firstVisiblePageIndex;
+    };
+
+
     class PdfTabInfo
     {
     public:
@@ -200,6 +209,7 @@ namespace winrt::urPDF::implementation
         std::vector<fz_rect> m_pageBounds;
         std::uint64_t m_documentId{ 0 };
         std::uint64_t m_slotBitmapReuses{ 0 };
+        DocumentRenderMetrics m_renderMetrics;
 
         int32_t m_retainedPageFirst{ 0 };
         int32_t m_retainedPageLast{ -1 };
@@ -278,6 +288,7 @@ namespace winrt::urPDF::implementation
         void ReleaseRenderingLock();
         void RebuildPagesContainer(std::vector<PageSlot> const& pages, double renderZoom);
         void ConfigurePageElement(winrt::Microsoft::UI::Xaml::UIElement const& element, std::size_t pageIndex);
+        void TryRecordFirstVisiblePage(std::shared_ptr<PdfTabInfo> const& PdfTab);
         std::vector<PageRenderRequest> BuildRenderQueue(int32_t pageCount, PageViewRange& viewRange);
         void ReleaseSlotsOutsideRange(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t keepFirst, int32_t keepLast);
         void RestoreSlotsFromCache(std::shared_ptr<PdfTabInfo> const& PdfTab);
