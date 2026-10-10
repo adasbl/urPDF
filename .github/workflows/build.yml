@@ -1,0 +1,153 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Release x64
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Check out urPDF
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Locate Visual Studio and prepare paths
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $visualStudio = & $vswhere -latest -prerelease -products '*' -version '[18.0,19.0)' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or -not $visualStudio) {
+              throw 'Visual Studio 2026 with the C++ workload was not found.'
+          }
+
+          $msbuild = Join-Path $visualStudio 'MSBuild/Current/Bin/MSBuild.exe'
+          $vstest = Join-Path $visualStudio 'Common7/IDE/CommonExtensions/Microsoft/TestWindow/vstest.console.exe'
+          $sdkHeader = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10/Include/10.0.26100.0/um/Windows.h'
+          foreach ($requiredFile in @($msbuild, $vstest, $sdkHeader)) {
+              if (-not (Test-Path -LiteralPath $requiredFile)) {
+                  throw "Required tool or SDK file was not found: $requiredFile"
+              }
+          }
+
+          $vcpkgRoot = Join-Path $env:GITHUB_WORKSPACE 'out/tools/vcpkg'
+          $binaryCache = Join-Path $env:RUNNER_TEMP 'vcpkg-binary-cache'
+          $null = New-Item -ItemType Directory -Force -Path $binaryCache, 'out/ci/logs', 'out/ci/test-results'
+          "MSBUILD_PATH=$msbuild" >> $env:GITHUB_ENV
+          "VSTEST_PATH=$vstest" >> $env:GITHUB_ENV
+          "VCPKG_ROOT=$vcpkgRoot" >> $env:GITHUB_ENV
+          "VCPKG_VISUAL_STUDIO_PATH=$visualStudio" >> $env:GITHUB_ENV
+          "VCPKG_BINARY_SOURCES=clear;files,$binaryCache,readwrite" >> $env:GITHUB_ENV
+          "RUNNER_IMAGE_VERSION=$env:ImageVersion" >> $env:GITHUB_ENV
+          'VCPKG_DISABLE_METRICS=1' >> $env:GITHUB_ENV
+          & $msbuild -version -nologo
+          if ($LASTEXITCODE -ne 0) { throw 'MSBuild could not be started.' }
+
+      - name: Read pinned vcpkg revision
+        id: vcpkg
+        run: |
+          $manifest = Get-Content -LiteralPath vcpkg.json -Raw | ConvertFrom-Json
+          $revision = $manifest.'builtin-baseline'
+          if ($revision -notmatch '\A[0-9a-f]{40}\z') {
+              throw 'vcpkg.json must contain a full builtin-baseline commit SHA.'
+          }
+          "revision=$revision" >> $env:GITHUB_OUTPUT
+
+      - name: Check out pinned vcpkg
+        uses: actions/checkout@v7
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ steps.vcpkg.outputs.revision }}
+          path: out/tools/vcpkg
+          persist-credentials: false
+
+      - name: Cache dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ runner.temp }}/vcpkg-binary-cache
+            packages
+          key: windows-vs2026-deps-v1-${{ env.RUNNER_IMAGE_VERSION }}-${{ hashFiles('vcpkg.json', 'urPDF/packages.config') }}
+          restore-keys: |
+            windows-vs2026-deps-v1-${{ env.RUNNER_IMAGE_VERSION }}-
+
+      - name: Bootstrap vcpkg
+        run: |
+          & "$env:VCPKG_ROOT/bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg bootstrap failed.' }
+
+      - name: Restore MuPDF dependencies
+        run: |
+          & "$env:VCPKG_ROOT/vcpkg.exe" install --triplet x64-windows "--x-manifest-root=$env:GITHUB_WORKSPACE" "--x-install-root=$env:GITHUB_WORKSPACE/vcpkg_installed"
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg dependency restore failed.' }
+
+      - name: Restore NuGet packages
+        run: |
+          nuget restore urPDF/packages.config -PackagesDirectory packages -NonInteractive
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet package restore failed.' }
+
+      - name: Build urPDF
+        run: |
+          & $env:MSBUILD_PATH urPDF/urPDF.vcxproj /m /nologo /verbosity:minimal `
+              /p:Configuration=Release /p:Platform=x64 `
+              "/p:VcpkgRoot=$env:VCPKG_ROOT" /p:VcpkgTriplet=x64-windows `
+              /p:VcpkgManifestInstall=false /p:AppxPackageSigningEnabled=false `
+              /p:GenerateAppxPackageOnBuild=false `
+              /bl:out/ci/logs/urPDF.binlog
+          if ($LASTEXITCODE -ne 0) { throw 'urPDF build failed.' }
+
+      - name: Build unit tests
+        run: |
+          & $env:MSBUILD_PATH tests/urPDF.Tests.vcxproj /m /nologo /verbosity:minimal `
+              /p:Configuration=Release /p:Platform=x64 `
+              /bl:out/ci/logs/tests.binlog
+          if ($LASTEXITCODE -ne 0) { throw 'Unit test build failed.' }
+
+      - name: Run unit tests
+        run: |
+          & $env:VSTEST_PATH out/tests/x64/Release/urPDF.Tests.dll /Platform:x64 `
+              '/Logger:trx;LogFileName=urPDF.Tests.trx' `
+              /ResultsDirectory:out/ci/test-results
+          if ($LASTEXITCODE -ne 0) { throw 'Unit tests failed.' }
+
+          $report = [xml](Get-Content -LiteralPath out/ci/test-results/urPDF.Tests.trx -Raw)
+          if ([int]$report.TestRun.ResultSummary.Counters.executed -eq 0) {
+              throw 'No unit tests were executed.'
+          }
+
+      - name: Summarize test results
+        if: always()
+        run: |
+          $reportPath = 'out/ci/test-results/urPDF.Tests.trx'
+          if (Test-Path -LiteralPath $reportPath) {
+              $report = [xml](Get-Content -LiteralPath $reportPath -Raw)
+              $counters = $report.TestRun.ResultSummary.Counters
+              "Tests: $($counters.executed) executed, $($counters.passed) passed, $($counters.failed) failed." >> $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Upload build logs and test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-and-test-x64
+          path: |
+            out/ci/logs
+            out/ci/test-results
+          if-no-files-found: warn
+          retention-days: 14
