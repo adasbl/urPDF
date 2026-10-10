@@ -3,6 +3,7 @@
 #include "MainWindow.g.h"
 #include "pch.h"
 #include "PdfPageLayout.h"
+#include "PdfRenderScale.h"
 
 extern "C" {
 #include <mupdf/fitz.h>
@@ -49,6 +50,7 @@ namespace winrt::urPDF::implementation
         std::uint64_t generation{ 0 };
         double zoom{ 1.0 };
         double renderScale{ 0.0 };
+        int renderScaleBucket{ 0 };
         int rotation{ 0 };
         bool bitmapCreated{ false };
         int32_t pixelWidth{ 0 };
@@ -67,20 +69,18 @@ namespace winrt::urPDF::implementation
         PageRenderState state{ PageRenderState::unloaded };
         std::optional<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> bitmap;
         std::uint64_t generation{ 0 };
-        int zoomBucket{ 0 };
-        double renderScale{ 0.0 };
+        int renderScaleBucket{ 0 };
 
         std::optional<PageRenderMetrics> lastRenderMetrics;
 
         bool requestInFlight{ false };
         std::uint64_t requestGeneration{ 0 };
-        int requestZoomBucket{ 0 };
+        int requestRenderScaleBucket{ 0 };
         int requestRotation{ 0 };
-        double requestRenderScale{ 0.0 };
 
-        bool IsRequestInFlight(std::uint64_t generation, int zoomBucketValue, int rotation, double scale) const noexcept
+        bool IsRequestInFlight(std::uint64_t generationValue, int scaleBucket, int rotation) const noexcept
         {
-            return requestInFlight && requestGeneration == generation && requestZoomBucket == zoomBucketValue && requestRotation == rotation && requestRenderScale == scale;
+            return requestInFlight && requestGeneration == generationValue && requestRenderScaleBucket == scaleBucket && requestRotation == rotation;
         }
     };
 
@@ -115,33 +115,12 @@ namespace winrt::urPDF::implementation
         int32_t firstPage{ 0 };
         int32_t lastPage{ -1 };
         int rotation{ 0 };
-        int zoomBucket{ 0 };
+        std::vector<int> renderScaleBuckets;
     };
 
 
-    struct PageBitmapCacheKey
-    {
-        std::uint64_t documentId{ 0 };
-        int pageIndex{ 0 };
-        int rotation{ 0 };
-        int zoomBucket{ 0 };
-        double renderScale{ 0.0 };
-
-        bool operator== (PageBitmapCacheKey const& other) const noexcept
-        {
-            if (documentId == other.documentId && pageIndex == other.pageIndex && rotation == other.rotation && zoomBucket == other.zoomBucket && renderScale == other.renderScale)
-            {
-                return true;
-            }
-            return false;
-        }
-    };
-
-
-    struct PageBitmapCacheKeyHash
-    {
-        std::size_t operator()(PageBitmapCacheKey const& key) const noexcept;
-    };
+    using urpdf::PageBitmapCacheKey;
+    using urpdf::PageBitmapCacheKeyHash;
 
 
     struct PageBitmapCacheMetrics
@@ -331,8 +310,8 @@ namespace winrt::urPDF::implementation
         void ReleaseSlotsOutsideRange(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t keepFirst, int32_t keepLast);
         void RestoreSlotsFromCache(std::shared_ptr<PdfTabInfo> const& PdfTab);
         double GetRasterizationScale();
-        double GetPageRenderScale(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t pageIndex);
-        bool ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap, int zoomBucket, double renderScale);
+        int GetPageRenderScaleBucket(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t pageIndex);
+        bool ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap, int renderScaleBucket);
         void RecordPageRenderMetrics(std::shared_ptr<PdfTabInfo> const& PdfTab, PageRenderMetrics const& metrics) noexcept;
     };
 }

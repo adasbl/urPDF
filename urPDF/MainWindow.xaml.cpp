@@ -72,17 +72,6 @@ namespace
         return urpdf::DipPerPdfPoint * zoom * dpiScale * urpdf::RenderSupersampling;
     }
 
-    int ZoomBucket(double zoom) noexcept
-    {
-        if (!std::isfinite(zoom) || zoom <= 0.0)
-        {
-            return 0;
-        }
-
-        constexpr double bucketSize = 0.1;
-        return static_cast<int>(std::lround(zoom / bucketSize));
-    }
-
     int NormalizeRotation(int rotation) noexcept
     {
         rotation %= 360;
@@ -165,8 +154,10 @@ namespace
         return pix;
     }
 
-    SoftwareBitmap RenderPageToSoftwareBitmap(fz_context* baseCtx, fz_document* doc, int pageIndex, fz_rect pageBounds, double renderScale, int rotation)
+    SoftwareBitmap RenderPageToSoftwareBitmap(fz_context* baseCtx, fz_document* doc, int pageIndex, fz_rect pageBounds, int renderScaleBucket, int rotation)
     {
+        const double renderScale = urpdf::RenderScaleForBucket(renderScaleBucket);
+        if (renderScale <= 0.0) { return nullptr; }
         fz_context* ctx = fz_clone_context(baseCtx);
         if (!ctx)
         {
@@ -326,22 +317,6 @@ namespace winrt::urPDF::implementation
 
 
     // CASHE
-    std::size_t PageBitmapCacheKeyHash::operator() (PageBitmapCacheKey const& key) const noexcept
-    {
-        std::size_t hash = std::hash<std::uint64_t>{}(key.documentId);
-
-        const auto combine = [&hash](std::size_t value)
-        {
-            hash ^= value + static_cast<std::size_t>(0x9e3779b9) + (hash << 6) + (hash >> 2);
-        };
-
-        combine(std::hash<int>{}(key.pageIndex));
-        combine(std::hash<int>{}(key.rotation));
-        combine(std::hash<int>{}(key.zoomBucket));
-        combine(std::hash<double>{}(key.renderScale));
-        return hash;
-    }
-
     PageBitmapCache::PageBitmapCache(std::size_t budgetBytes)
         : m_budgetBytes(budgetBytes)
     {
@@ -446,17 +421,21 @@ namespace winrt::urPDF::implementation
         for (auto entry = m_lru.rbegin(); entry != m_lru.rend(); ++entry)
         {
             const PageBitmapCacheKey& key = *entry;
+            const bool isRetained = key.pageIndex >= m_viewContext.firstPage && key.pageIndex <= m_viewContext.lastPage;
+            const auto scaleIndex = static_cast<std::size_t>(key.pageIndex - m_viewContext.firstPage);
+            const bool matchesScale = isRetained && scaleIndex < m_viewContext.renderScaleBuckets.size()
+                && key.renderScaleBucket == m_viewContext.renderScaleBuckets[scaleIndex];
 
             if (!m_hasViewContext
                 || key.documentId != m_viewContext.documentId
                 || key.rotation != m_viewContext.rotation
-                || key.zoomBucket != m_viewContext.zoomBucket)
+                || (isRetained && !matchesScale))
             {
                 EvictEntry(key);
                 return true;
             }
 
-            if (key.pageIndex >= m_viewContext.firstPage && key.pageIndex <= m_viewContext.lastPage)
+            if (isRetained)
             {
                 continue;
             }
@@ -952,8 +931,10 @@ namespace winrt::urPDF::implementation
     {
         const double pageZoom = PdfTab->m_renderZoom;
         const int pageRotation = PdfTab->m_currentRotation;
-        const double layoutRenderScale = GetPageRenderScale(PdfTab, 0);
-        const double renderScale = layoutRenderScale > 0.0 ? layoutRenderScale : PdfRenderScale(pageZoom, GetRasterizationScale());
+        const int layoutBucket = GetPageRenderScaleBucket(PdfTab, 0);
+        const int renderScaleBucket = layoutBucket > 0 ? layoutBucket : urpdf::RenderScaleBucket(PdfRenderScale(pageZoom, GetRasterizationScale()));
+        if (renderScaleBucket == 0) { co_return; }
+        const double renderScale = urpdf::RenderScaleForBucket(renderScaleBucket);
         const std::uint64_t generation = PdfTab->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
         fz_context* renderCtx = fz_clone_context(m_ctx);
         if (!renderCtx)
@@ -1015,7 +996,14 @@ namespace winrt::urPDF::implementation
 
         co_await resume_foreground(DispatcherQueue());
 
-        if (PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
+        const auto selectedTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        const auto selectedEntry = m_openedTabs.find(selectedTab);
+        const int currentLayoutBucket = GetPageRenderScaleBucket(PdfTab, 0);
+        const int currentBucket = currentLayoutBucket > 0 ? currentLayoutBucket : urpdf::RenderScaleBucket(PdfRenderScale(PdfTab->m_renderZoom, GetRasterizationScale()));
+        if (m_isClosed || PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation
+            || selectedEntry == m_openedTabs.end() || selectedEntry->second != PdfTab
+            || NormalizeRotation(PdfTab->m_currentRotation) != NormalizeRotation(pageRotation)
+            || currentBucket != renderScaleBucket)
         {
             co_return;
         }
@@ -1024,19 +1012,16 @@ namespace winrt::urPDF::implementation
         bitmap.CopyToBuffer(current_writeable_bitmap.PixelBuffer());
         current_writeable_bitmap.Invalidate();
 
-        m_pageBitmapCache.StoreBitmap(PageBitmapCacheKey{ PdfTab->m_documentId, 0, NormalizeRotation(pageRotation), ZoomBucket(pageZoom), renderScale }, current_writeable_bitmap);
+        m_pageBitmapCache.StoreBitmap(PageBitmapCacheKey{ PdfTab->m_documentId, 0, NormalizeRotation(pageRotation), renderScaleBucket }, current_writeable_bitmap);
 
         PageSlot singlePageSlot;
         singlePageSlot.pdfBounds = pdfBounds;
         singlePageSlot.state = PageRenderState::ready;
         singlePageSlot.bitmap = current_writeable_bitmap;
         singlePageSlot.generation = generation;
-        singlePageSlot.zoomBucket = ZoomBucket(pageZoom);
-        singlePageSlot.renderScale = renderScale;
+        singlePageSlot.renderScaleBucket = renderScaleBucket;
 
-        std::vector<PageSlot> singlePage{
-            std::move(singlePageSlot)
-        };
+        std::vector<PageSlot> singlePage{ std::move(singlePageSlot) };
         PdfTab->m_pagecount = pagecount;
         PdfTab->m_pageBounds = std::move(pageBounds);
         PdfTab->m_renderedPages = singlePage;
@@ -1130,18 +1115,20 @@ namespace winrt::urPDF::implementation
 
         const double pageZoom = PdfTab->m_renderZoom;
         const int pageRotation = PdfTab->m_currentRotation;
-        std::vector<double> renderScales(pagecount, PdfRenderScale(pageZoom, GetRasterizationScale()));
+        std::vector<int> renderScaleBuckets(pagecount, urpdf::RenderScaleBucket(PdfRenderScale(pageZoom, GetRasterizationScale())));
         for (int i = 0; i < pagecount; ++i)
         {
-            const double scale = GetPageRenderScale(PdfTab, i);
-            if (scale > 0.0) { renderScales[i] = scale; }
+            const int bucket = GetPageRenderScaleBucket(PdfTab, i);
+            if (bucket > 0) { renderScaleBuckets[i] = bucket; }
         }
 
         co_await winrt::resume_background();
 
         for (int i = 0; i < pagecount; i++)
         {
-            const double renderScale = renderScales[i];
+            const int renderScaleBucket = renderScaleBuckets[i];
+            if (renderScaleBucket == 0) { continue; }
+            const double renderScale = urpdf::RenderScaleForBucket(renderScaleBucket);
             const fz_matrix transform = fz_concat(fz_scale(renderScale, renderScale), fz_rotate(pageRotation));
             if (PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
             {
@@ -1182,7 +1169,9 @@ namespace winrt::urPDF::implementation
                 
             co_await resume_foreground(DispatcherQueue());
 
-            if (PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
+            if (m_isClosed || PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation
+                || NormalizeRotation(PdfTab->m_currentRotation) != NormalizeRotation(pageRotation)
+                || GetPageRenderScaleBucket(PdfTab, i) != renderScaleBucket)
             {
                 fz_drop_context(renderCtx);
                 co_return;
@@ -1192,12 +1181,11 @@ namespace winrt::urPDF::implementation
             bitmap.CopyToBuffer(current_writeable_bitmap.PixelBuffer());
             current_writeable_bitmap.Invalidate();
 
-            m_pageBitmapCache.StoreBitmap(PageBitmapCacheKey{ PdfTab->m_documentId, i, NormalizeRotation(pageRotation), ZoomBucket(pageZoom), renderScale }, current_writeable_bitmap);
+            m_pageBitmapCache.StoreBitmap(PageBitmapCacheKey{ PdfTab->m_documentId, i, NormalizeRotation(pageRotation), renderScaleBucket }, current_writeable_bitmap);
 
             renderedPages[i].bitmap = std::move(current_writeable_bitmap);
             renderedPages[i].state = PageRenderState::ready;
-            renderedPages[i].zoomBucket = ZoomBucket(pageZoom);
-            renderedPages[i].renderScale = renderScale;
+            renderedPages[i].renderScaleBucket = renderScaleBucket;
             PdfTab->m_renderedPages[i] = renderedPages[i];
 
             auto selectedTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
@@ -1353,8 +1341,7 @@ namespace winrt::urPDF::implementation
 
             slot.bitmap.reset();
             slot.state = PageRenderState::unloaded;
-            slot.zoomBucket = 0;
-            slot.renderScale = 0.0;
+            slot.renderScaleBucket = 0;
 
             if (isCurrentTab)
             {
@@ -1372,25 +1359,24 @@ namespace winrt::urPDF::implementation
         const int32_t first = (std::max)(0, PdfTab->m_retainedPageFirst);
         const int32_t last = (std::min)(slotCount - 1, PdfTab->m_retainedPageLast);
         const int rotation = NormalizeRotation(PdfTab->m_currentRotation);
-        const int zoomBucket = ZoomBucket(PdfTab->m_renderZoom);
 
         for (int32_t i = first; i <= last; ++i)
         {
-            const double renderScale = GetPageRenderScale(PdfTab, i);
-            if (renderScale <= 0.0) { continue; }
+            const int renderScaleBucket = GetPageRenderScaleBucket(PdfTab, i);
+            if (renderScaleBucket == 0) { continue; }
             auto& slot = PdfTab->m_renderedPages[i];
             if (slot.bitmap)
             {
-                if (slot.state == PageRenderState::ready && slot.zoomBucket == zoomBucket && slot.renderScale == renderScale)
+                if (slot.state == PageRenderState::ready && slot.renderScaleBucket == renderScaleBucket)
                 {
                     ++PdfTab->m_slotBitmapReuses;
                 }
                 continue;
             }
 
-            if (auto cachedBitmap = m_pageBitmapCache.TryGetBitmap(PageBitmapCacheKey{ PdfTab->m_documentId, i, rotation, zoomBucket, renderScale }))
+            if (auto cachedBitmap = m_pageBitmapCache.TryGetBitmap(PageBitmapCacheKey{ PdfTab->m_documentId, i, rotation, renderScaleBucket }))
             {
-                ApplyPageBitmap(PdfTab, i, *cachedBitmap, zoomBucket, renderScale);
+                ApplyPageBitmap(PdfTab, i, *cachedBitmap, renderScaleBucket);
             }
         }
     }
@@ -1452,24 +1438,28 @@ namespace winrt::urPDF::implementation
         return std::isfinite(scale) && scale > 0.0 ? scale : 1.0;
     }
 
-    double MainWindow::GetPageRenderScale(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t pageIndex)
+    int MainWindow::GetPageRenderScaleBucket(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t pageIndex)
     {
         auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
         auto openedTab = m_openedTabs.find(currentTab);
         if (openedTab == m_openedTabs.end() || openedTab->second != pdfTab || m_layoutRotation != NormalizeRotation(pdfTab->m_currentRotation) || pageIndex < 0 || static_cast<std::size_t>(pageIndex) >= pdfTab->m_renderedPages.size())
         {
-            return 0.0;
+            return 0;
         }
 
         auto const& rects = winrt::get_self<winrt::urPDF::implementation::PdfPageLayout>(PagesLayout())->PageRects();
-        if (static_cast<std::size_t>(pageIndex) >= rects.size()) { return 0.0; }
+        if (static_cast<std::size_t>(pageIndex) >= rects.size()) { return 0; }
         auto const& rect = rects[pageIndex];
         auto const& bounds = pdfTab->m_renderedPages[pageIndex].pdfBounds;
-        return urpdf::PageRenderScale(std::abs(static_cast<double>(bounds.x1) - bounds.x0), std::abs(static_cast<double>(bounds.y1) - bounds.y0), pdfTab->m_currentRotation, rect.Width, rect.Height, pdfTab->m_renderZoom, GetRasterizationScale());
+        return urpdf::RenderScaleBucket(urpdf::PageRenderScale(std::abs(static_cast<double>(bounds.x1) - bounds.x0), std::abs(static_cast<double>(bounds.y1) - bounds.y0), pdfTab->m_currentRotation, rect.Width, rect.Height, pdfTab->m_renderZoom, GetRasterizationScale()));
     }
 
-    bool MainWindow::ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, WriteableBitmap const& bitmap, int zoomBucket, double renderScale)
+    bool MainWindow::ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, WriteableBitmap const& bitmap, int renderScaleBucket)
     {
+        if (m_isClosed || renderScaleBucket <= 0 || GetPageRenderScaleBucket(PdfTab, pageIndex) != renderScaleBucket)
+        {
+            return false;
+        }
         if (pageIndex < 0 || static_cast<std::size_t>(pageIndex) >= PdfTab->m_renderedPages.size())
         {
             return false;
@@ -1490,8 +1480,7 @@ namespace winrt::urPDF::implementation
         auto& slot = PdfTab->m_renderedPages[pageIndex];
         slot.bitmap = bitmap;
         slot.state = PageRenderState::ready;
-        slot.zoomBucket = zoomBucket;
-        slot.renderScale = renderScale;
+        slot.renderScaleBucket = renderScaleBucket;
         slot.generation = PdfTab->m_renderGeneration.load(std::memory_order_acquire);
 
         if (auto element = PagesRepeater().TryGetElement(pageIndex))
@@ -1549,7 +1538,7 @@ namespace winrt::urPDF::implementation
                 if (inFlightPage >= 0 && static_cast<std::size_t>(inFlightPage) < inFlightTab->m_renderedPages.size())
                 {
                     auto& slot = inFlightTab->m_renderedPages[inFlightPage];
-                    if (slot.IsRequestInFlight(inFlightMetrics->generation, ZoomBucket(inFlightMetrics->zoom), inFlightMetrics->rotation, inFlightMetrics->renderScale))
+                    if (slot.IsRequestInFlight(inFlightMetrics->generation, inFlightMetrics->renderScaleBucket, inFlightMetrics->rotation))
                     {
                         slot.requestInFlight = false;
                     }
@@ -1584,14 +1573,18 @@ namespace winrt::urPDF::implementation
                 const std::uint64_t generation = pdfTab->m_renderGeneration.load(std::memory_order_acquire);
                 const double pageZoom = pdfTab->m_renderZoom;
                 const int pageRotation = NormalizeRotation(pdfTab->m_currentRotation);
-                const int zoomBucket = ZoomBucket(pageZoom);
                 PageViewRange viewRange;
                 const std::vector<PageRenderRequest> renderQueue = BuildRenderQueue(pdfTab->m_pagecount, viewRange);
 
                 pdfTab->m_retainedPageFirst = viewRange.keepFirst;
                 pdfTab->m_retainedPageLast = viewRange.keepLast;
                 ReleaseSlotsOutsideRange(pdfTab, viewRange.keepFirst, viewRange.keepLast);
-                m_pageBitmapCache.SetViewContext(PageBitmapCacheViewContext{ pdfTab->m_documentId, viewRange.keepFirst, viewRange.keepLast, pageRotation, zoomBucket });
+                PageBitmapCacheViewContext viewContext{ pdfTab->m_documentId, viewRange.keepFirst, viewRange.keepLast, pageRotation, {} };
+                for (int32_t i = viewRange.keepFirst; i <= viewRange.keepLast; ++i)
+                {
+                    viewContext.renderScaleBuckets.push_back(GetPageRenderScaleBucket(pdfTab, i));
+                }
+                m_pageBitmapCache.SetViewContext(viewContext);
                 m_pageBitmapCache.TrimToBudget();
 
                 for (const PageRenderRequest& request : renderQueue)
@@ -1602,10 +1595,17 @@ namespace winrt::urPDF::implementation
                         break;
                     }
 
-                    const double renderScale = GetPageRenderScale(pdfTab, pageIndex);
-                    if (renderScale <= 0.0) { continue; }
+                    const int renderScaleBucket = GetPageRenderScaleBucket(pdfTab, pageIndex);
+                    if (renderScaleBucket == 0) { continue; }
+                    if (renderScaleBucket != viewContext.renderScaleBuckets.at(pageIndex - viewRange.keepFirst))
+                    {
+                        m_visibleRenderRequested = true;
+                        break;
+                    }
+                    const double renderScale = urpdf::RenderScaleForBucket(renderScaleBucket);
                     auto& slot = pdfTab->m_renderedPages[pageIndex];
-                    const bool isUpToDate = slot.zoomBucket == zoomBucket && slot.renderScale == renderScale && ((slot.state == PageRenderState::ready && slot.bitmap) || slot.state == PageRenderState::error);
+                    const bool isUpToDate = slot.generation == generation && slot.renderScaleBucket == renderScaleBucket
+                        && ((slot.state == PageRenderState::ready && slot.bitmap) || slot.state == PageRenderState::error);
                     if (isUpToDate)
                     {
                         if (slot.state == PageRenderState::ready && slot.bitmap)
@@ -1615,14 +1615,14 @@ namespace winrt::urPDF::implementation
                         continue;
                     }
 
-                    const PageBitmapCacheKey cacheKey{ pdfTab->m_documentId, pageIndex, pageRotation, zoomBucket, renderScale };
+                    const PageBitmapCacheKey cacheKey{ pdfTab->m_documentId, pageIndex, pageRotation, renderScaleBucket };
                     if (auto cachedBitmap = m_pageBitmapCache.TryGetBitmap(cacheKey))
                     {
-                        ApplyPageBitmap(pdfTab, pageIndex, *cachedBitmap, zoomBucket, renderScale);
+                        ApplyPageBitmap(pdfTab, pageIndex, *cachedBitmap, renderScaleBucket);
                         continue;
                     }
 
-                    if (slot.IsRequestInFlight(generation, zoomBucket, pageRotation, renderScale))
+                    if (slot.IsRequestInFlight(generation, renderScaleBucket, pageRotation))
                     {
                         continue;
                     }
@@ -1633,9 +1633,8 @@ namespace winrt::urPDF::implementation
                     }
                     slot.requestInFlight = true;
                     slot.requestGeneration = generation;
-                    slot.requestZoomBucket = zoomBucket;
+                    slot.requestRenderScaleBucket = renderScaleBucket;
                     slot.requestRotation = pageRotation;
-                    slot.requestRenderScale = renderScale;
                     inFlightTab = pdfTab;
                     inFlightPage = pageIndex;
                     inFlightMetrics.emplace();
@@ -1645,6 +1644,7 @@ namespace winrt::urPDF::implementation
                     renderMetrics.generation = generation;
                     renderMetrics.zoom = pageZoom;
                     renderMetrics.renderScale = renderScale;
+                    renderMetrics.renderScaleBucket = renderScaleBucket;
                     renderMetrics.rotation = pageRotation;
                     const fz_rect pageBounds = slot.pdfBounds;
 
@@ -1654,7 +1654,7 @@ namespace winrt::urPDF::implementation
                     std::exception_ptr renderError;
                     try
                     {
-                        pageBitmap = RenderPageToSoftwareBitmap(m_ctx, pdfTab->m_doc, pageIndex, pageBounds, renderScale, pageRotation);
+                        pageBitmap = RenderPageToSoftwareBitmap(m_ctx, pdfTab->m_doc, pageIndex, pageBounds, renderScaleBucket, pageRotation);
                         renderMetrics.elapsedMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - renderStart).count();
                         renderMetrics.bitmapCreated = static_cast<bool>(pageBitmap);
                         if (pageBitmap)
@@ -1694,8 +1694,8 @@ namespace winrt::urPDF::implementation
                         m_pageBitmapCache.StoreBitmap(cacheKey, *writeableBitmap);
                     }
 
-                    if (NormalizeRotation(pdfTab->m_currentRotation) != pageRotation || ZoomBucket(pdfTab->m_renderZoom) != zoomBucket
-                        || GetPageRenderScale(pdfTab, pageIndex) != renderScale)
+                    if (NormalizeRotation(pdfTab->m_currentRotation) != pageRotation
+                        || GetPageRenderScaleBucket(pdfTab, pageIndex) != renderScaleBucket)
                     {
                         m_visibleRenderRequested = true;
                         finishRender(PageRenderOutcome::discarded);
@@ -1707,15 +1707,15 @@ namespace winrt::urPDF::implementation
                         auto& failedSlot = pdfTab->m_renderedPages[pageIndex];
                         if (!failedSlot.bitmap)
                         {
-                            failedSlot.zoomBucket = zoomBucket;
-                            failedSlot.renderScale = renderScale;
+                            failedSlot.generation = generation;
+                            failedSlot.renderScaleBucket = renderScaleBucket;
                             failedSlot.state = PageRenderState::error;
                         }
                         finishRender(PageRenderOutcome::error);
                         continue;
                     }
 
-                    const bool applied = ApplyPageBitmap(pdfTab, pageIndex, *writeableBitmap, zoomBucket, renderScale);
+                    const bool applied = ApplyPageBitmap(pdfTab, pageIndex, *writeableBitmap, renderScaleBucket);
                     finishRender(applied ? PageRenderOutcome::applied : PageRenderOutcome::discarded);
                 }
             } while (m_visibleRenderRequested);
