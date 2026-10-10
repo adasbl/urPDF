@@ -55,6 +55,7 @@ namespace
     constexpr int PrefetchPageCount = 2;
     constexpr int SlotRetainMarginPages = 3;
     constexpr auto ZoomRenderDebounce = std::chrono::milliseconds(200);
+    constexpr auto DpiRenderDebounce = std::chrono::milliseconds(200);
 
     void LockMuPdf(void* user, int lock)
     {
@@ -216,6 +217,7 @@ namespace winrt::urPDF::implementation
     // MAINWINDOW
     MainWindow::~MainWindow()
     {
+        DetachDpiObserver();
         CancelPendingZoomRender();
         for (auto const& tabEntry : m_openedTabs)
         {
@@ -244,10 +246,39 @@ namespace winrt::urPDF::implementation
             }
         });
 
+        m_dpiRenderTimer = DispatcherQueue().CreateTimer();
+        m_dpiRenderTimer.IsRepeating(false);
+        m_dpiRenderTimer.Interval(DpiRenderDebounce);
+        m_dpiRenderTimer.Tick([weakThis = get_weak()](auto const&, auto const&)
+        {
+            if (auto self = weakThis.get())
+            {
+                self->ApplyPendingDpiRefresh();
+            }
+        });
+
+        PdfScrollViewer().Loaded([weakThis = get_weak()](auto const&, auto const&)
+        {
+            if (auto self = weakThis.get())
+            {
+                self->AttachDpiObserver();
+            }
+        });
+
+        PdfScrollViewer().Unloaded([weakThis = get_weak()](auto const&, auto const&)
+        {
+            if (auto self = weakThis.get())
+            {
+                self->DetachDpiObserver();
+            }
+        });
+
         Closed([weakThis = get_weak()](auto const&, auto const&)
         {
             if (auto self = weakThis.get())
             {
+                self->m_isClosed = true;
+                self->DetachDpiObserver();
                 self->CancelPendingZoomRender();
             }
         });
@@ -664,7 +695,11 @@ namespace winrt::urPDF::implementation
         auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
 
         m_isRestoringTabView = true;
-        auto restoreViewState = wil::scope_exit([this] { m_isRestoringTabView = false; });
+        auto restoreViewState = wil::scope_exit([this]
+        {
+            m_isRestoringTabView = false;
+            if (m_dpiRefreshPending) { RequestDpiRefresh(); }
+        });
 
         for (auto const& removedItem : args.RemovedItems())
         {
@@ -1360,6 +1395,56 @@ namespace winrt::urPDF::implementation
         }
     }
 
+    void MainWindow::AttachDpiObserver()
+    {
+        if (m_isClosed) { return; }
+        auto root = PdfScrollViewer().XamlRoot();
+        if (!root || root == m_observedXamlRoot) { return; }
+
+        DetachDpiObserver();
+        m_observedXamlRoot = root;
+        m_lastRasterizationScale = GetRasterizationScale();
+        m_xamlRootChangedRevoker = root.Changed(winrt::auto_revoke, [weakThis = get_weak()](auto const& sender, auto const&)
+            {
+                if (auto self = weakThis.get())
+                {
+                    if (self->m_isClosed || sender != self->m_observedXamlRoot) { return; }
+                    const double scale = sender.RasterizationScale();
+                    if (!std::isfinite(scale) || scale <= 0.0 || scale == self->m_lastRasterizationScale) { return; }
+                    self->m_lastRasterizationScale = scale;
+                    self->RequestDpiRefresh();
+                }
+            });
+
+        RequestDpiRefresh();
+    }
+
+    void MainWindow::DetachDpiObserver()
+    {
+        m_xamlRootChangedRevoker.revoke();
+        m_observedXamlRoot = nullptr;
+        if (m_dpiRenderTimer) { m_dpiRenderTimer.Stop(); }
+        m_dpiRefreshPending = false;
+    }
+
+    void MainWindow::RequestDpiRefresh()
+    {
+        if (m_isClosed || !m_observedXamlRoot) { return; }
+        m_dpiRefreshPending = true;
+        m_dpiRenderTimer.Stop();
+        m_dpiRenderTimer.Start();
+    }
+
+    void MainWindow::ApplyPendingDpiRefresh()
+    {
+        if (m_isClosed || !m_observedXamlRoot || !m_dpiRefreshPending) { return; }
+        if (m_isRendering || m_isRestoringTabView) { return; }
+
+        m_dpiRefreshPending = false;
+        PdfScrollViewer().UpdateLayout();
+        RenderVisiblePagesAsync();
+    }
+
     double MainWindow::GetRasterizationScale()
     {
         auto root = PdfScrollViewer().XamlRoot();
@@ -1442,6 +1527,7 @@ namespace winrt::urPDF::implementation
 
     winrt::fire_and_forget MainWindow::RenderVisiblePagesAsync()
     {
+        if (m_isClosed) { co_return; }
         if (m_isVisibleRenderRunning)
         {
             m_visibleRenderRequested = true;
@@ -1479,6 +1565,7 @@ namespace winrt::urPDF::implementation
         {
             do
             {
+                if (m_isClosed) { break; }
                 m_visibleRenderRequested = false;
 
                 auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
@@ -1591,7 +1678,7 @@ namespace winrt::urPDF::implementation
                         std::rethrow_exception(renderError);
                     }
 
-                    if (pdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation || static_cast<std::size_t>(pageIndex) >= pdfTab->m_renderedPages.size())
+                    if (m_isClosed || pdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation || static_cast<std::size_t>(pageIndex) >= pdfTab->m_renderedPages.size())
                     {
                         finishRender(PageRenderOutcome::discarded);
                         break;
@@ -1669,6 +1756,7 @@ namespace winrt::urPDF::implementation
         ZoomInButton().IsEnabled(true);
         ZoomOutButton().IsEnabled(true);
         RotateButton().IsEnabled(true);
+        if (m_dpiRefreshPending) { RequestDpiRefresh(); }
     }
 
     void MainWindow::RebuildPagesContainer(std::vector<PageSlot> const& pages)

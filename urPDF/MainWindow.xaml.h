@@ -300,6 +300,12 @@ namespace winrt::urPDF::implementation
         bool m_bookViewMode{ false };
         bool m_isVisibleRenderRunning{ false };
         bool m_visibleRenderRequested{ false };
+        bool m_isClosed{ false };
+        winrt::Microsoft::UI::Xaml::XamlRoot m_observedXamlRoot{ nullptr };
+        winrt::Microsoft::UI::Xaml::XamlRoot::Changed_revoker m_xamlRootChangedRevoker;
+        winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_dpiRenderTimer{ nullptr };
+        double m_lastRasterizationScale{ 1.0 };
+        bool m_dpiRefreshPending{ false };
         winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_zoomRenderTimer{ nullptr };
         std::weak_ptr<PdfTabInfo> m_pendingZoomTab;
         bool m_zoomIsIntermediate{ false };
@@ -314,6 +320,10 @@ namespace winrt::urPDF::implementation
         void UpdateRenderZoom(std::shared_ptr<PdfTabInfo> const& pdfTab, double zoom, bool isIntermediate);
         void ApplyPendingRenderZoom();
         void CancelPendingZoomRender();
+        void AttachDpiObserver();
+        void DetachDpiObserver();
+        void RequestDpiRefresh();
+        void ApplyPendingDpiRefresh();
         void RebuildPagesContainer(std::vector<PageSlot> const& pages);
         void ConfigurePageElement(winrt::Microsoft::UI::Xaml::UIElement const& element, std::size_t pageIndex);
         void TryRecordFirstVisiblePage(std::shared_ptr<PdfTabInfo> const& PdfTab);
