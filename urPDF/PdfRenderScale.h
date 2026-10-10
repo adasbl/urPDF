@@ -6,6 +6,7 @@
 namespace urpdf
 {
     constexpr double DipPerPdfPoint = 96.0 / 72.0;
+    constexpr double RenderSupersampling = 1.25;
 
     inline double PageRenderScale(double pdfWidth, double pdfHeight, int rotation, double layoutWidth, double layoutHeight, double zoom, double dpiScale, double borderThickness = 1.0) noexcept
     {
@@ -28,7 +29,7 @@ namespace urpdf
         }
 
         const double layoutScale = (std::min)(imageWidth / (pdfWidth * DipPerPdfPoint), imageHeight / (pdfHeight * DipPerPdfPoint));
-        const double scale = DipPerPdfPoint * layoutScale * zoom * dpiScale;
+        const double scale = DipPerPdfPoint * layoutScale * zoom * dpiScale * RenderSupersampling;
         return std::isfinite(scale) && scale > 0.0 ? scale : 0.0;
     }
 }

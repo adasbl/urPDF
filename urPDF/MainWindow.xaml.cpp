@@ -68,7 +68,7 @@ namespace
 
     constexpr double PdfRenderScale(double zoom, double dpiScale) noexcept
     {
-        return urpdf::DipPerPdfPoint * zoom * dpiScale;
+        return urpdf::DipPerPdfPoint * zoom * dpiScale * urpdf::RenderSupersampling;
     }
 
     int ZoomBucket(double zoom) noexcept
