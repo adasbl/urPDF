@@ -2,14 +2,24 @@
 
 #include "MainWindow.g.h"
 #include "pch.h"
+#include "PdfPageLayout.h"
+#include "PdfRenderScale.h"
 
 extern "C" {
 #include <mupdf/fitz.h>
 }
 
+#include <atomic>
+#include <chrono>
 #include <map>
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <list>
 #include <mutex>
+#include <optional>
+#include <unordered_map>
 #include <vector>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
@@ -17,6 +27,167 @@ extern "C" {
 
 namespace winrt::urPDF::implementation
 {
+    enum class PageRenderState
+    {
+        ready,
+        unloaded,
+        loading,
+        error
+    };
+
+
+    enum class PageRenderOutcome
+    {
+        applied,
+        discarded,
+        error
+    };
+
+
+    struct PageRenderMetrics
+    {
+        double elapsedMs{ 0.0 };
+        std::uint64_t generation{ 0 };
+        double zoom{ 1.0 };
+        double renderScale{ 0.0 };
+        int renderScaleBucket{ 0 };
+        int rotation{ 0 };
+        bool bitmapCreated{ false };
+        int32_t pixelWidth{ 0 };
+        int32_t pixelHeight{ 0 };
+        std::uint64_t pixelCount{ 0 };
+        std::uint64_t estimatedBufferBytes{ 0 };
+        std::uint64_t documentId{ 0 };
+        int32_t pageNumber{ 0 };
+        PageRenderOutcome status{ PageRenderOutcome::discarded };
+    };
+
+
+    struct PageSlot
+    {
+        fz_rect pdfBounds{};
+        PageRenderState state{ PageRenderState::unloaded };
+        std::optional<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> bitmap;
+        std::uint64_t generation{ 0 };
+        int renderScaleBucket{ 0 };
+
+        std::optional<PageRenderMetrics> lastRenderMetrics;
+
+        bool requestInFlight{ false };
+        std::uint64_t requestGeneration{ 0 };
+        int requestRenderScaleBucket{ 0 };
+        int requestRotation{ 0 };
+
+        bool IsRequestInFlight(std::uint64_t generationValue, int scaleBucket, int rotation) const noexcept
+        {
+            return requestInFlight && requestGeneration == generationValue && requestRenderScaleBucket == scaleBucket && requestRotation == rotation;
+        }
+    };
+
+
+    enum class PageRenderPriority
+    {
+        visible = 0,
+        prefetch = 1
+    };
+
+
+    struct PageRenderRequest
+    {
+        int32_t pageIndex{ 0 };
+        PageRenderPriority priority{ PageRenderPriority::visible };
+        int32_t distance{ 0 };
+    };
+
+
+    struct PageViewRange
+    {
+        int32_t firstVisible{ 0 };
+        int32_t lastVisible{ -1 };
+        int32_t keepFirst{ 0 };
+        int32_t keepLast{ -1 };
+    };
+
+
+    struct PageBitmapCacheViewContext
+    {
+        std::uint64_t documentId{ 0 };
+        int32_t firstPage{ 0 };
+        int32_t lastPage{ -1 };
+        int rotation{ 0 };
+        std::vector<int> renderScaleBuckets;
+    };
+
+
+    using urpdf::PageBitmapCacheKey;
+    using urpdf::PageBitmapCacheKeyHash;
+
+
+    struct PageBitmapCacheMetrics
+    {
+        std::uint64_t hits{ 0 };
+        std::uint64_t misses{ 0 };
+
+        std::optional<double> HitRate() const noexcept
+        {
+            if (hits == 0 && misses == 0)
+            {
+                return std::nullopt;
+            }
+
+            return static_cast<double>(hits) / (static_cast<double>(hits) + static_cast<double>(misses));
+        }
+    };
+
+
+    class PageBitmapCache
+    {
+        struct CacheEntry
+        {
+            winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap bitmap{ nullptr };
+            std::size_t memoryBytes{ 0 };
+            std::list<PageBitmapCacheKey>::iterator lruPosition;
+        };
+
+        void MarkAsRecentlyUsed(std::unordered_map<PageBitmapCacheKey, CacheEntry, PageBitmapCacheKeyHash>::iterator cacheEntry);
+        bool TryEvictOneEntry();
+        void EvictEntry(PageBitmapCacheKey const& key);
+
+        std::size_t m_budgetBytes{ 0 };
+        std::size_t m_usedBytes{ 0 };
+        PageBitmapCacheMetrics m_metrics;
+        bool m_hasViewContext{ false };
+        PageBitmapCacheViewContext m_viewContext;
+        std::list<PageBitmapCacheKey> m_lru;
+        std::unordered_map<PageBitmapCacheKey, CacheEntry, PageBitmapCacheKeyHash> m_entries;
+
+    public:
+        explicit PageBitmapCache(std::size_t budgetBytes);
+
+        std::optional<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> TryGetBitmap(PageBitmapCacheKey const& key);
+        void StoreBitmap(PageBitmapCacheKey const& key, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap);
+        void ClearDocumentEntries(std::uint64_t documentId);
+
+        PageBitmapCacheMetrics GetMetrics() const noexcept { return m_metrics; }
+
+        void SetViewContext(PageBitmapCacheViewContext const& context);
+        void TrimToBudget();
+    };
+
+
+    struct DocumentRenderMetrics
+    {
+        std::optional<std::chrono::steady_clock::time_point> openStartedAt;
+        std::optional<double> firstPageAttachedMs;
+        std::optional<int32_t> firstVisiblePageIndex;
+        std::optional<PageRenderMetrics> lastRenderAttempt;
+        double totalRenderMs{ 0.0 };
+        std::uint64_t appliedRenderCount{ 0 };
+        std::uint64_t discardedRenderCount{ 0 };
+        std::uint64_t failedRenderCount{ 0 };
+    };
+
+
     class PdfTabInfo
     {
     public:
@@ -25,14 +196,23 @@ namespace winrt::urPDF::implementation
 
         winrt::hstring m_openedFilePath;
         winrt::hstring m_fileName = L"unknown";
-        std::vector<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> m_renderedPages;
+        std::vector<PageSlot> m_renderedPages;
         int32_t m_currentPageIndex = { 1 };
-        double m_currentPageZoom = { 1.0 };
+        double m_uiZoom{ 1.0 };
+        double m_renderZoom{ 1.0 };
         int m_currentRotation = { 0 };
+        std::atomic<std::uint64_t> m_renderGeneration{ 0 };
         
         fz_context* m_ctx{ nullptr };
         fz_document* m_doc{ nullptr };
         int m_pagecount{ 0 };
+        std::vector<fz_rect> m_pageBounds;
+        std::uint64_t m_documentId{ 0 };
+        std::uint64_t m_slotBitmapReuses{ 0 };
+        DocumentRenderMetrics m_renderMetrics;
+
+        int32_t m_retainedPageFirst{ 0 };
+        int32_t m_retainedPageLast{ -1 };
     };
 
 
@@ -61,7 +241,11 @@ namespace winrt::urPDF::implementation
         winrt::fire_and_forget EmptyTab_Drop(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::DragEventArgs const& args);
         winrt::Windows::Foundation::IAsyncAction RenderSinglePageAsync(std::shared_ptr<PdfTabInfo> PdfTabInfo);
         winrt::Windows::Foundation::IAsyncAction RenderMultiPageAsync(std::shared_ptr<PdfTabInfo> PdfTab);
+        winrt::Windows::Foundation::IAsyncAction LoadDocumentLayoutAsync(std::shared_ptr<PdfTabInfo> PdfTab);
+        winrt::fire_and_forget RenderVisiblePagesAsync();
         winrt::fire_and_forget PdfScrollViewer_ViewChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args);
+        void PagesRepeater_ElementPrepared(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ItemsRepeaterElementPreparedEventArgs const& args);
+        void PagesRepeater_ElementClearing(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ItemsRepeaterElementClearingEventArgs const& args);
         void SettingsButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
         winrt::fire_and_forget RotateButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
         void PageNumberBox_ValueChanged(winrt::Microsoft::UI::Xaml::Controls::NumberBox const& sender, winrt::Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const& args);
@@ -90,13 +274,45 @@ namespace winrt::urPDF::implementation
         winrt::Microsoft::UI::Xaml::Printing::PrintDocument m_printDocument{ nullptr };
         winrt::event_token m_printTaskRequestedToken{};
         bool m_isRendering{ false };
-        bool m_isNormalizingZoom{ false };
+        bool m_isRestoringTabView{ false };
         bool m_zoomWasEnabled{ false };
         bool m_bookViewMode{ false };
+        bool m_isVisibleRenderRunning{ false };
+        bool m_visibleRenderRequested{ false };
+        bool m_isClosed{ false };
+        winrt::Microsoft::UI::Xaml::XamlRoot m_observedXamlRoot{ nullptr };
+        winrt::Microsoft::UI::Xaml::XamlRoot::Changed_revoker m_xamlRootChangedRevoker;
+        winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_dpiRenderTimer{ nullptr };
+        double m_lastRasterizationScale{ 1.0 };
+        bool m_dpiRefreshPending{ false };
+        winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_zoomRenderTimer{ nullptr };
+        std::weak_ptr<PdfTabInfo> m_pendingZoomTab;
+        bool m_zoomIsIntermediate{ false };
+        bool m_zoomDebounceElapsed{ false };
+        int m_layoutRotation{ 0 };
+        std::uint64_t m_nextDocumentId{ 1 };
+        PageBitmapCache m_pageBitmapCache{ 256ull * 1024ull * 1024ull };
+        winrt::Windows::Foundation::Collections::IObservableVector<winrt::Windows::Foundation::IInspectable> m_pageRepeaterItems{ nullptr };
 
         bool TryAcquireRenderingLock();
         void ReleaseRenderingLock();
-        void RebuildPagesContainer(std::vector<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> const& pages);
+        void UpdateRenderZoom(std::shared_ptr<PdfTabInfo> const& pdfTab, double zoom, bool isIntermediate);
+        void ApplyPendingRenderZoom();
+        void CancelPendingZoomRender();
+        void AttachDpiObserver();
+        void DetachDpiObserver();
+        void RequestDpiRefresh();
+        void ApplyPendingDpiRefresh();
+        void RebuildPagesContainer(std::vector<PageSlot> const& pages);
+        void ConfigurePageElement(winrt::Microsoft::UI::Xaml::UIElement const& element, std::size_t pageIndex);
+        void TryRecordFirstVisiblePage(std::shared_ptr<PdfTabInfo> const& PdfTab);
+        std::vector<PageRenderRequest> BuildRenderQueue(int32_t pageCount, PageViewRange& viewRange);
+        void ReleaseSlotsOutsideRange(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t keepFirst, int32_t keepLast);
+        void RestoreSlotsFromCache(std::shared_ptr<PdfTabInfo> const& PdfTab);
+        double GetRasterizationScale();
+        int GetPageRenderScaleBucket(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t pageIndex);
+        bool ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap, int renderScaleBucket);
+        void RecordPageRenderMetrics(std::shared_ptr<PdfTabInfo> const& PdfTab, PageRenderMetrics const& metrics) noexcept;
     };
 }
 

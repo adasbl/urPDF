@@ -3,6 +3,7 @@
     x:Class="urPDF.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:urPDF"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
@@ -225,7 +226,29 @@
                             VerticalScrollBarVisibility="Auto"
                             ViewChanged="PdfScrollViewer_ViewChanged">
                             
-                            <StackPanel x:Name="PagesContainer" HorizontalAlignment="Center" Spacing="10" Margin="20"/>
+                            <ItemsRepeater x:Name="PagesRepeater"
+                                           HorizontalAlignment="Center"
+                                           Margin="0,20"
+                                           ElementPrepared="PagesRepeater_ElementPrepared"
+                                           ElementClearing="PagesRepeater_ElementClearing">
+                                
+                                <ItemsRepeater.Layout>
+                                    <local:PdfPageLayout x:Name="PagesLayout" Spacing="10"/>
+                                </ItemsRepeater.Layout>
+                                
+                                <ItemsRepeater.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                BorderThickness="1">
+                                            <Image Stretch="Uniform"
+                                                   HorizontalAlignment="Stretch"
+                                                   VerticalAlignment="Stretch"/>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsRepeater.ItemTemplate>
+                                
+                            </ItemsRepeater>
                             
                         </ScrollViewer>
 
