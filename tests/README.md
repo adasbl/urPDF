@@ -5,6 +5,10 @@ Native Unit Test Framework included with Visual Studio's Desktop development
 with C++ workload.
 
 The current tests run without starting the WinUI application or loading MuPDF.
+They require Visual Studio 2026's C++ toolset `v145` and Windows SDK
+`10.0.26100.0`, and use C++20, matching the application project. vcpkg integration
+is explicitly disabled for this project, so local vcpkg installations do not
+affect the tests.
 
 ## Visual Studio
 

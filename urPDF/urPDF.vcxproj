@@ -39,6 +39,8 @@
     <EnableMsixTooling>true</EnableMsixTooling>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg">
+    <!-- This project imports vcpkg explicitly; skip the user-wide integration. -->
+    <VCPkgLocalAppDataDisabled>true</VCPkgLocalAppDataDisabled>
     <VcpkgEnabled>true</VcpkgEnabled>
     <VcpkgEnableManifest>true</VcpkgEnableManifest>
     <VcpkgManifestInstall>true</VcpkgManifestInstall>
