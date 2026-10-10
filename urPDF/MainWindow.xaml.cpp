@@ -120,8 +120,52 @@ namespace
         return pageBounds;
     }
 
-    fz_pixmap* RenderPagePixmap(fz_context* ctx, fz_document* doc, int pageIndex, fz_rect pageBounds, fz_matrix transform)
+    bool ValidPageBounds(fz_rect bounds) noexcept
     {
+        return std::isfinite(bounds.x0) && std::isfinite(bounds.y0) && std::isfinite(bounds.x1) && std::isfinite(bounds.y1) && bounds.x1 > bounds.x0 && bounds.y1 > bounds.y0 && !fz_is_infinite_rect(bounds);
+    }
+
+    bool TryPageRasterBounds(fz_rect pageBounds, int rotation, int bucket, fz_matrix& transform, fz_irect& bbox, bool allowEmpty = false)
+    {
+        if (!ValidPageBounds(pageBounds)) { return false; }
+        const double scale = urpdf::RenderScaleForBucket(bucket);
+        if (scale <= 0.0 || scale > (std::numeric_limits<float>::max)()) { return false; }
+        const float rasterScale = static_cast<float>(scale);
+        if (rasterScale == 0.0f) { return allowEmpty; }
+        transform = fz_concat(fz_scale(rasterScale, rasterScale), fz_rotate(NormalizeRotation(rotation)));
+        const fz_rect rect = fz_transform_rect(pageBounds, transform);
+        for (float coordinate : { rect.x0, rect.y0, rect.x1, rect.y1 })
+        {
+            if (!std::isfinite(coordinate) || coordinate <= static_cast<float>(FZ_MIN_INF_RECT) || coordinate >= static_cast<float>(FZ_MAX_INF_RECT)) { return false; }
+        }
+        bbox = fz_round_rect(rect);
+        if (bbox.x1 == bbox.x0) { ++bbox.x1; }
+        if (bbox.y1 == bbox.y0) { ++bbox.y1; }
+        const std::int64_t width = static_cast<std::int64_t>(bbox.x1) - bbox.x0;
+        const std::int64_t height = static_cast<std::int64_t>(bbox.y1) - bbox.y0;
+        std::size_t bufferBytes = 0;
+        return urpdf::TryBitmapBufferSize(width, height, bufferBytes);
+    }
+
+    int LimitedPageRenderScaleBucket(fz_rect pageBounds, int rotation, double requestedScale)
+    {
+        if (!ValidPageBounds(pageBounds)) { return 0; }
+        const int bucket = urpdf::SelectLimitedRenderScaleBucket(urpdf::RenderScaleBucket(requestedScale), [&](int candidate)
+            {
+                fz_matrix transform;
+                fz_irect bbox;
+                return TryPageRasterBounds(pageBounds, rotation, candidate, transform, bbox, true);
+            });
+        fz_matrix transform;
+        fz_irect bbox;
+        return TryPageRasterBounds(pageBounds, rotation, bucket, transform, bbox) ? bucket : 0;
+    }
+
+    fz_pixmap* RenderPagePixmap(fz_context* ctx, fz_document* doc, int pageIndex, fz_rect pageBounds, int bucket, int rotation)
+    {
+        fz_matrix transform;
+        fz_irect bbox;
+        if (!TryPageRasterBounds(pageBounds, rotation, bucket, transform, bbox)) { return nullptr; }
         fz_page* page = nullptr;
         fz_device* dev = nullptr;
         fz_pixmap* pix = nullptr;
@@ -133,7 +177,6 @@ namespace
         fz_try(ctx)
         {
             page = fz_load_page(ctx, doc, pageIndex);
-            const fz_irect bbox = fz_round_rect(fz_transform_rect(pageBounds, transform));
             pix = fz_new_pixmap_with_bbox(ctx, fz_device_bgr(ctx), bbox, nullptr, 1);
             fz_clear_pixmap_with_value(ctx, pix, 255);
             dev = fz_new_draw_device(ctx, fz_identity, pix);
@@ -164,10 +207,8 @@ namespace
             return nullptr;
         }
 
-        const fz_matrix transform = fz_concat(fz_scale(renderScale, renderScale), fz_rotate(rotation));
-
         SoftwareBitmap bitmap{ nullptr };
-        fz_pixmap* pix = RenderPagePixmap(ctx, doc, pageIndex, pageBounds, transform);
+        fz_pixmap* pix = RenderPagePixmap(ctx, doc, pageIndex, pageBounds, renderScaleBucket, rotation);
         if (pix)
         {
             const int width = fz_pixmap_width(ctx, pix);
@@ -932,9 +973,8 @@ namespace winrt::urPDF::implementation
         const double pageZoom = PdfTab->m_renderZoom;
         const int pageRotation = PdfTab->m_currentRotation;
         const int layoutBucket = GetPageRenderScaleBucket(PdfTab, 0);
-        const int renderScaleBucket = layoutBucket > 0 ? layoutBucket : urpdf::RenderScaleBucket(PdfRenderScale(pageZoom, GetRasterizationScale()));
-        if (renderScaleBucket == 0) { co_return; }
-        const double renderScale = urpdf::RenderScaleForBucket(renderScaleBucket);
+        const int requestedBucket = layoutBucket > 0 ? layoutBucket : urpdf::RenderScaleBucket(PdfRenderScale(pageZoom, GetRasterizationScale()));
+        if (requestedBucket == 0) { co_return; }
         const std::uint64_t generation = PdfTab->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
         fz_context* renderCtx = fz_clone_context(m_ctx);
         if (!renderCtx)
@@ -959,47 +999,22 @@ namespace winrt::urPDF::implementation
             co_return;
         }
 
-        fz_page* page = fz_load_page(renderCtx, PdfTab->m_doc, 0);
-
-        fz_matrix transform = fz_scale(renderScale, renderScale);
-        transform = fz_concat(transform, fz_rotate(pageRotation));
-
-        fz_rect pdfBounds = pageBounds[0];
-        fz_rect rect = pdfBounds;
-        rect = fz_transform_rect(rect, transform);
-        fz_irect bbox = fz_round_rect(rect);
-
-        fz_pixmap* pix = fz_new_pixmap_with_bbox(renderCtx, fz_device_bgr(renderCtx), bbox, NULL, 1);
-        fz_clear_pixmap_with_value(renderCtx, pix, 255);
-
-        fz_device* dev = fz_new_draw_device(renderCtx, fz_identity, pix);
-        fz_run_page(renderCtx, page, dev, transform, NULL);
-        fz_close_device(renderCtx, dev);
-
-        int width = fz_pixmap_width(renderCtx, pix);
-        int height = fz_pixmap_height(renderCtx, pix);
-
-        SoftwareBitmap bitmap(BitmapPixelFormat::Bgra8, width, height, BitmapAlphaMode::Premultiplied);
-        {
-            BitmapBuffer buffer = bitmap.LockBuffer(BitmapBufferAccessMode::Write);
-            winrt::Windows::Foundation::IMemoryBufferReference reference = buffer.CreateReference();
-
-            uint8_t* data = reference.data();
-
-            memcpy(data, fz_pixmap_samples(renderCtx, pix), width * height * 4);
-        }
-
-        fz_drop_device(renderCtx, dev);
-        fz_drop_pixmap(renderCtx, pix);
-        fz_drop_page(renderCtx, page);
         fz_drop_context(renderCtx);
+        if (pageBounds.empty()) { co_return; }
+        const fz_rect pdfBounds = pageBounds[0];
+        const int renderScaleBucket = LimitedPageRenderScaleBucket(pdfBounds, pageRotation, urpdf::RenderScaleForBucket(requestedBucket));
+        if (renderScaleBucket == 0) { co_return; }
+        SoftwareBitmap bitmap = RenderPageToSoftwareBitmap(m_ctx, PdfTab->m_doc, 0, pdfBounds, renderScaleBucket, pageRotation);
+        if (!bitmap) { co_return; }
+        const int width = bitmap.PixelWidth();
+        const int height = bitmap.PixelHeight();
 
         co_await resume_foreground(DispatcherQueue());
 
         const auto selectedTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
         const auto selectedEntry = m_openedTabs.find(selectedTab);
         const int currentLayoutBucket = GetPageRenderScaleBucket(PdfTab, 0);
-        const int currentBucket = currentLayoutBucket > 0 ? currentLayoutBucket : urpdf::RenderScaleBucket(PdfRenderScale(PdfTab->m_renderZoom, GetRasterizationScale()));
+        const int currentBucket = currentLayoutBucket > 0 ? currentLayoutBucket: LimitedPageRenderScaleBucket(pdfBounds, PdfTab->m_currentRotation, PdfRenderScale(PdfTab->m_renderZoom, GetRasterizationScale()));
         if (m_isClosed || PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation
             || selectedEntry == m_openedTabs.end() || selectedEntry->second != PdfTab
             || NormalizeRotation(PdfTab->m_currentRotation) != NormalizeRotation(pageRotation)
@@ -1115,11 +1130,11 @@ namespace winrt::urPDF::implementation
 
         const double pageZoom = PdfTab->m_renderZoom;
         const int pageRotation = PdfTab->m_currentRotation;
-        std::vector<int> renderScaleBuckets(pagecount, urpdf::RenderScaleBucket(PdfRenderScale(pageZoom, GetRasterizationScale())));
+        std::vector<int> renderScaleBuckets(pagecount);
         for (int i = 0; i < pagecount; ++i)
         {
             const int bucket = GetPageRenderScaleBucket(PdfTab, i);
-            if (bucket > 0) { renderScaleBuckets[i] = bucket; }
+            renderScaleBuckets[i] = bucket > 0 ? bucket : LimitedPageRenderScaleBucket(pageBounds[i], pageRotation, PdfRenderScale(pageZoom, GetRasterizationScale()));
         }
 
         co_await winrt::resume_background();
@@ -1128,8 +1143,6 @@ namespace winrt::urPDF::implementation
         {
             const int renderScaleBucket = renderScaleBuckets[i];
             if (renderScaleBucket == 0) { continue; }
-            const double renderScale = urpdf::RenderScaleForBucket(renderScaleBucket);
-            const fz_matrix transform = fz_concat(fz_scale(renderScale, renderScale), fz_rotate(pageRotation));
             if (PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
             {
                 fz_drop_context(renderCtx);
@@ -1137,41 +1150,14 @@ namespace winrt::urPDF::implementation
             }
 
             renderedPages[i].state = PageRenderState::loading;
-            fz_page* page = fz_load_page(renderCtx, PdfTab->m_doc, i);
-
-            fz_rect rect = renderedPages[i].pdfBounds;
-            rect = fz_transform_rect(rect, transform);
-            fz_irect bbox = fz_round_rect(rect);
-
-            fz_pixmap* pix = fz_new_pixmap_with_bbox(renderCtx, fz_device_bgr(renderCtx), bbox, NULL, 1);
-            fz_clear_pixmap_with_value(renderCtx, pix, 255);
-
-            fz_device* dev = fz_new_draw_device(renderCtx, fz_identity, pix);
-            fz_run_page(renderCtx, page, dev, transform, NULL);
-            fz_close_device(renderCtx, dev);
-                    
-            int width = fz_pixmap_width(renderCtx, pix);
-            int height = fz_pixmap_height(renderCtx, pix);
-
-            SoftwareBitmap bitmap(BitmapPixelFormat::Bgra8, width, height, BitmapAlphaMode::Premultiplied);
-            {
-                BitmapBuffer buffer = bitmap.LockBuffer(BitmapBufferAccessMode::Write);
-                winrt::Windows::Foundation::IMemoryBufferReference reference = buffer.CreateReference();
-
-                uint8_t* data = reference.data();
-
-                memcpy(data, fz_pixmap_samples(renderCtx, pix), width * height * 4);
-            }
-
-            fz_drop_device(renderCtx, dev);
-            fz_drop_pixmap(renderCtx, pix);
-            fz_drop_page(renderCtx, page);
+            SoftwareBitmap bitmap = RenderPageToSoftwareBitmap(m_ctx, PdfTab->m_doc, i, renderedPages[i].pdfBounds, renderScaleBucket, pageRotation);
+            if (!bitmap) { continue; }
+            const int width = bitmap.PixelWidth();
+            const int height = bitmap.PixelHeight();
                 
             co_await resume_foreground(DispatcherQueue());
 
-            if (m_isClosed || PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation
-                || NormalizeRotation(PdfTab->m_currentRotation) != NormalizeRotation(pageRotation)
-                || GetPageRenderScaleBucket(PdfTab, i) != renderScaleBucket)
+            if (m_isClosed || PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation || NormalizeRotation(PdfTab->m_currentRotation) != NormalizeRotation(pageRotation) || GetPageRenderScaleBucket(PdfTab, i) != renderScaleBucket)
             {
                 fz_drop_context(renderCtx);
                 co_return;
@@ -1451,7 +1437,7 @@ namespace winrt::urPDF::implementation
         if (static_cast<std::size_t>(pageIndex) >= rects.size()) { return 0; }
         auto const& rect = rects[pageIndex];
         auto const& bounds = pdfTab->m_renderedPages[pageIndex].pdfBounds;
-        return urpdf::RenderScaleBucket(urpdf::PageRenderScale(std::abs(static_cast<double>(bounds.x1) - bounds.x0), std::abs(static_cast<double>(bounds.y1) - bounds.y0), pdfTab->m_currentRotation, rect.Width, rect.Height, pdfTab->m_renderZoom, GetRasterizationScale()));
+        return LimitedPageRenderScaleBucket(bounds, pdfTab->m_currentRotation, urpdf::PageRenderScale(std::abs(static_cast<double>(bounds.x1) - bounds.x0), std::abs(static_cast<double>(bounds.y1) - bounds.y0), pdfTab->m_currentRotation, rect.Width, rect.Height, pdfTab->m_renderZoom, GetRasterizationScale()));
     }
 
     bool MainWindow::ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, WriteableBitmap const& bitmap, int renderScaleBucket)

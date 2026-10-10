@@ -42,8 +42,6 @@ namespace urpdf
     constexpr double DipPerPdfPoint = 96.0 / 72.0;
     constexpr double RenderSupersampling = 1.25;
 
-    // Sixteen evenly spaced levels per power-of-two interval. Binary steps give
-    // exact representative scales and at most 6.25% extra raster resolution.
     constexpr int RenderScaleLevels = 16;
     constexpr int MinRenderScaleExponent = std::numeric_limits<double>::min_exponent
         - std::numeric_limits<double>::digits + 1;
@@ -72,6 +70,53 @@ namespace urpdf
         const int bucket = (exponent - MinRenderScaleExponent) * RenderScaleLevels
             + level - RenderScaleLevels + 1;
         return RenderScaleForBucket(bucket) > 0.0 ? bucket : 0;
+    }
+
+    constexpr std::uint64_t MaxBitmapDimension = 8192;
+    constexpr std::uint64_t MaxBitmapPixels = 16ull * 1024 * 1024;
+    constexpr std::uint64_t MaxBitmapBufferBytes = 64ull * 1024 * 1024;
+    constexpr std::uint64_t BitmapBytesPerPixel = 4;
+
+    inline bool TryBitmapBufferSize(std::int64_t width, std::int64_t height, std::size_t& bytes) noexcept
+    {
+        bytes = 0;
+        if (width <= 0 || height <= 0) { return false; }
+        const auto w = static_cast<std::uint64_t>(width);
+        const auto h = static_cast<std::uint64_t>(height);
+        if (w > MaxBitmapDimension || h > MaxBitmapDimension || w > MaxBitmapPixels / h)
+        {
+            return false;
+        }
+        const std::uint64_t pixels = w * h;
+        const std::uint64_t byteLimit = (std::min)(MaxBitmapBufferBytes,
+            static_cast<std::uint64_t>((std::numeric_limits<std::size_t>::max)()));
+        if (pixels > byteLimit / BitmapBytesPerPixel) { return false; }
+        bytes = static_cast<std::size_t>(pixels * BitmapBytesPerPixel);
+        return true;
+    }
+
+    template<typename Fits>
+    int SelectLimitedRenderScaleBucket(int requestedBucket, Fits fits)
+    {
+        if (requestedBucket <= 0 || RenderScaleForBucket(requestedBucket) <= 0.0) { return 0; }
+        if (fits(requestedBucket)) { return requestedBucket; }
+        int low = 1;
+        int high = requestedBucket - 1;
+        int selected = 0;
+        while (low <= high)
+        {
+            const int candidate = low + (high - low) / 2;
+            if (fits(candidate))
+            {
+                selected = candidate;
+                low = candidate + 1;
+            }
+            else
+            {
+                high = candidate - 1;
+            }
+        }
+        return selected;
     }
 
     inline double PageRenderScale(double pdfWidth, double pdfHeight, int rotation, double layoutWidth, double layoutHeight, double zoom, double dpiScale, double borderThickness = 1.0) noexcept

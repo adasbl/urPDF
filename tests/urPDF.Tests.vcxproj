@@ -50,6 +50,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="PdfRenderScaleTests.cpp" />
+    <ClCompile Include="PdfBitmapLimitsTests.cpp" />
     <ClInclude Include="..\urPDF\PdfRenderScale.h" />
     <None Include="README.md" />
   </ItemGroup>
