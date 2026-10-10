@@ -48,6 +48,7 @@ namespace winrt::urPDF::implementation
         double elapsedMs{ 0.0 };
         std::uint64_t generation{ 0 };
         double zoom{ 1.0 };
+        double renderScale{ 0.0 };
         int rotation{ 0 };
         bool bitmapCreated{ false };
         int32_t pixelWidth{ 0 };
@@ -67,6 +68,7 @@ namespace winrt::urPDF::implementation
         std::optional<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> bitmap;
         std::uint64_t generation{ 0 };
         int zoomBucket{ 0 };
+        double renderScale{ 0.0 };
 
         std::optional<PageRenderMetrics> lastRenderMetrics;
 
@@ -74,10 +76,11 @@ namespace winrt::urPDF::implementation
         std::uint64_t requestGeneration{ 0 };
         int requestZoomBucket{ 0 };
         int requestRotation{ 0 };
+        double requestRenderScale{ 0.0 };
 
-        bool IsRequestInFlight(std::uint64_t generation, int zoomBucketValue, int rotation) const noexcept
+        bool IsRequestInFlight(std::uint64_t generation, int zoomBucketValue, int rotation, double scale) const noexcept
         {
-            return requestInFlight && requestGeneration == generation && requestZoomBucket == zoomBucketValue && requestRotation == rotation;
+            return requestInFlight && requestGeneration == generation && requestZoomBucket == zoomBucketValue && requestRotation == rotation && requestRenderScale == scale;
         }
     };
 
@@ -122,10 +125,11 @@ namespace winrt::urPDF::implementation
         int pageIndex{ 0 };
         int rotation{ 0 };
         int zoomBucket{ 0 };
+        double renderScale{ 0.0 };
 
         bool operator== (PageBitmapCacheKey const& other) const noexcept
         {
-            if (documentId == other.documentId && pageIndex == other.pageIndex && rotation == other.rotation && zoomBucket == other.zoomBucket)
+            if (documentId == other.documentId && pageIndex == other.pageIndex && rotation == other.rotation && zoomBucket == other.zoomBucket && renderScale == other.renderScale)
             {
                 return true;
             }
@@ -316,7 +320,9 @@ namespace winrt::urPDF::implementation
         std::vector<PageRenderRequest> BuildRenderQueue(int32_t pageCount, PageViewRange& viewRange);
         void ReleaseSlotsOutsideRange(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t keepFirst, int32_t keepLast);
         void RestoreSlotsFromCache(std::shared_ptr<PdfTabInfo> const& PdfTab);
-        bool ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap, int zoomBucket);
+        double GetRasterizationScale();
+        double GetPageRenderScale(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t pageIndex);
+        bool ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap, int zoomBucket, double renderScale);
         void RecordPageRenderMetrics(std::shared_ptr<PdfTabInfo> const& PdfTab, PageRenderMetrics const& metrics) noexcept;
     };
 }
