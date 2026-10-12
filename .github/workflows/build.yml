@@ -102,15 +102,25 @@ jobs:
           nuget restore urPDF/packages.config -PackagesDirectory packages -NonInteractive
           if ($LASTEXITCODE -ne 0) { throw 'NuGet package restore failed.' }
 
-      - name: Build urPDF
+      - name: Build urPDF for Microsoft Store
         run: |
           & $env:MSBUILD_PATH urPDF/urPDF.vcxproj /m /nologo /verbosity:minimal `
               /p:Configuration=Release /p:Platform=x64 `
               "/p:VcpkgRoot=$env:VCPKG_ROOT" /p:VcpkgTriplet=x64-windows `
               /p:VcpkgManifestInstall=false /p:AppxPackageSigningEnabled=false `
               /p:GenerateAppxPackageOnBuild=false `
-              /bl:out/ci/logs/urPDF.binlog
-          if ($LASTEXITCODE -ne 0) { throw 'urPDF build failed.' }
+              /bl:out/ci/logs/urPDF-store.binlog
+          if ($LASTEXITCODE -ne 0) { throw 'urPDF Store build failed.' }
+
+      - name: Build unpackaged urPDF for MSI
+        run: |
+          & $env:MSBUILD_PATH urPDF/urPDF.vcxproj /m /nologo /verbosity:minimal `
+              /p:Configuration=Release /p:Platform=x64 `
+              "/p:VcpkgRoot=$env:VCPKG_ROOT" /p:VcpkgTriplet=x64-windows `
+              /p:VcpkgManifestInstall=false /p:AppxPackage=false `
+              /p:WindowsPackageType=None /p:GenerateAppxPackageOnBuild=false `
+              /bl:out/ci/logs/urPDF-msi.binlog
+          if ($LASTEXITCODE -ne 0) { throw 'urPDF unpackaged build failed.' }
 
       - name: Build unit tests
         run: |

@@ -30,6 +30,7 @@
     <MinimumVisualStudioVersion>16.0</MinimumVisualStudioVersion>
     <AppContainerApplication>false</AppContainerApplication>
     <AppxPackage>true</AppxPackage>
+    <WindowsPackageType Condition="'$(WindowsPackageType)' == ''">MSIX</WindowsPackageType>
     <ApplicationType>Windows Store</ApplicationType>
     <ApplicationTypeRevision>10.0</ApplicationTypeRevision>
     <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
@@ -93,6 +94,15 @@
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup Label="BuildOutputs">
+    <_UrPDFBuildVariant>store</_UrPDFBuildVariant>
+    <_UrPDFBuildVariant Condition="'$(WindowsPackageType)' == 'None'">msi</_UrPDFBuildVariant>
+    <_UrPDFBuildRoot>$(MSBuildProjectDirectory)\..\out\$(_UrPDFBuildVariant)\$(Platform)\$(Configuration)\</_UrPDFBuildRoot>
+    <OutDir>$(_UrPDFBuildRoot)bin\</OutDir>
+    <IntDir>$(_UrPDFBuildRoot)obj\</IntDir>
+    <GeneratedFilesDir>$(IntDir)Generated Files\</GeneratedFilesDir>
+    <AppxPackageDir>$(_UrPDFBuildRoot)packages\</AppxPackageDir>
+  </PropertyGroup>
   <ImportGroup Label="ExtensionSettings">
   </ImportGroup>
   <ImportGroup Label="PropertySheets">
@@ -101,6 +111,10 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <ItemDefinitionGroup>
+    <Midl>
+      <!-- C++/WinRT props are imported before IntDir is assigned. -->
+      <MetadataFileName>$(IntDir)Unmerged\%(Filename).winmd</MetadataFileName>
+    </Midl>
     <ClCompile>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
