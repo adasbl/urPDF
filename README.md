@@ -1,7 +1,6 @@
 # urPDF
 
-Minimalist PDF viewer for Windows, built with native C++ and WinUI 3. PDF
-documents are rendered locally using the [MuPDF](https://mupdf.com/) engine.
+Minimalist, high-performance PDF reader for Windows 11 build on MuPDF engine.
 
 > **Project status:** urPDF is under active development. Some features, including
 > printing, may still be experimental.

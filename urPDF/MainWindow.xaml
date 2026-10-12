@@ -329,7 +329,7 @@
                 VerticalAlignment="Center"
                 Padding="24"
                 CornerRadius="12"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                 BorderThickness="1">
                 <Grid>
