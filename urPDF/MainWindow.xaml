@@ -9,15 +9,16 @@
     mc:Ignorable="d"
     Title="urPDF">
 
-    <Window.SystemBackdrop>
-        <MicaBackdrop Kind="BaseAlt"/>
-    </Window.SystemBackdrop>
-
     <Grid Background="Transparent">
         <Grid.RowDefinitions>
             <RowDefinition Height="40"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
+
+        <Border x:Name="SolidBackgroundLayer"
+                Grid.Row="0"
+                Grid.RowSpan="2"
+                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"/>
 
         <Grid x:Name="MainWindowUI" Grid.Row="0" Grid.RowSpan="2">
             <Grid.RowDefinitions>
@@ -48,12 +49,20 @@
                              Loaded="TabView_Loaded"  
                              SelectionChanged="TabView_SelectionChanged">
                         <TabView.Resources>
-                            <StaticResource x:Key="TabViewItemHeaderBackgroundSelected" 
-                            ResourceKey="LayerFillColorDefaultBrush" />
-                            <StaticResource x:Key="TabViewItemHeaderBackgroundPointerOverSelected" 
-                            ResourceKey="LayerFillColorDefaultBrush" />
-                            <StaticResource x:Key="TabViewItemHeaderBackgroundPressedSelected" 
-                            ResourceKey="LayerFillColorDefaultBrush" />
+                            <ResourceDictionary>
+                                <ResourceDictionary.ThemeDictionaries>
+                                    <ResourceDictionary x:Key="Default">
+                                        <StaticResource x:Key="TabViewItemHeaderBackgroundSelected" ResourceKey="LayerFillColorDefaultBrush" />
+                                        <StaticResource x:Key="TabViewItemHeaderBackgroundPointerOverSelected" ResourceKey="LayerFillColorDefaultBrush" />
+                                        <StaticResource x:Key="TabViewItemHeaderBackgroundPressedSelected" ResourceKey="LayerFillColorDefaultBrush" />
+                                    </ResourceDictionary>
+                                    <ResourceDictionary x:Key="Light">
+                                        <StaticResource x:Key="TabViewItemHeaderBackgroundSelected" ResourceKey="LayerFillColorDefaultBrush" />
+                                        <StaticResource x:Key="TabViewItemHeaderBackgroundPointerOverSelected" ResourceKey="LayerFillColorDefaultBrush" />
+                                        <StaticResource x:Key="TabViewItemHeaderBackgroundPressedSelected" ResourceKey="LayerFillColorDefaultBrush" />
+                                    </ResourceDictionary>
+                                </ResourceDictionary.ThemeDictionaries>
+                            </ResourceDictionary>
                         </TabView.Resources>
                     </TabView>
                 </Grid>
@@ -329,7 +338,7 @@
                 VerticalAlignment="Center"
                 Padding="24"
                 CornerRadius="12"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                 BorderThickness="1">
                 <Grid>
