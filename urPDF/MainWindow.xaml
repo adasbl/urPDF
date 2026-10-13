@@ -49,12 +49,20 @@
                              Loaded="TabView_Loaded"  
                              SelectionChanged="TabView_SelectionChanged">
                         <TabView.Resources>
-                            <StaticResource x:Key="TabViewItemHeaderBackgroundSelected" 
-                            ResourceKey="LayerFillColorDefaultBrush" />
-                            <StaticResource x:Key="TabViewItemHeaderBackgroundPointerOverSelected" 
-                            ResourceKey="LayerFillColorDefaultBrush" />
-                            <StaticResource x:Key="TabViewItemHeaderBackgroundPressedSelected" 
-                            ResourceKey="LayerFillColorDefaultBrush" />
+                            <ResourceDictionary>
+                                <ResourceDictionary.ThemeDictionaries>
+                                    <ResourceDictionary x:Key="Default">
+                                        <StaticResource x:Key="TabViewItemHeaderBackgroundSelected" ResourceKey="LayerFillColorDefaultBrush" />
+                                        <StaticResource x:Key="TabViewItemHeaderBackgroundPointerOverSelected" ResourceKey="LayerFillColorDefaultBrush" />
+                                        <StaticResource x:Key="TabViewItemHeaderBackgroundPressedSelected" ResourceKey="LayerFillColorDefaultBrush" />
+                                    </ResourceDictionary>
+                                    <ResourceDictionary x:Key="Light">
+                                        <StaticResource x:Key="TabViewItemHeaderBackgroundSelected" ResourceKey="LayerFillColorDefaultBrush" />
+                                        <StaticResource x:Key="TabViewItemHeaderBackgroundPointerOverSelected" ResourceKey="LayerFillColorDefaultBrush" />
+                                        <StaticResource x:Key="TabViewItemHeaderBackgroundPressedSelected" ResourceKey="LayerFillColorDefaultBrush" />
+                                    </ResourceDictionary>
+                                </ResourceDictionary.ThemeDictionaries>
+                            </ResourceDictionary>
                         </TabView.Resources>
                     </TabView>
                 </Grid>
