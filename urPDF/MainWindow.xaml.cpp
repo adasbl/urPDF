@@ -668,6 +668,18 @@ namespace winrt::urPDF::implementation
         {
             rootElement.RequestedTheme(theme);
         }
+
+        using winrt::Microsoft::UI::Windowing::TitleBarTheme;
+        TitleBarTheme titleBarTheme = TitleBarTheme::UseDefaultAppMode;
+        if (theme == ElementTheme::Light)
+        {
+            titleBarTheme = TitleBarTheme::Light;
+        }
+        else if (theme == ElementTheme::Dark)
+        {
+            titleBarTheme = TitleBarTheme::Dark;
+        }
+        AppWindow().TitleBar().PreferredTheme(titleBarTheme);
     }
 
 
