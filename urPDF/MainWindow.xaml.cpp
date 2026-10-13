@@ -626,20 +626,24 @@ namespace winrt::urPDF::implementation
             auto mica = winrt::Microsoft::UI::Xaml::Media::MicaBackdrop();
             mica.Kind(winrt::Microsoft::UI::Composition::SystemBackdrops::MicaKind::Base);
             this->SystemBackdrop(mica);
+            SolidBackgroundLayer().Visibility(Visibility::Collapsed);
         }
         else if (transparencyValue == L"MicaAlt")
         {
             winrt::Microsoft::UI::Xaml::Media::MicaBackdrop backdrop;
             backdrop.Kind(winrt::Microsoft::UI::Composition::SystemBackdrops::MicaKind::BaseAlt);
             SystemBackdrop(backdrop);
+            SolidBackgroundLayer().Visibility(Visibility::Collapsed);
         }
         else if (transparencyValue == L"None")
         {
             this->SystemBackdrop(nullptr);
+            SolidBackgroundLayer().Visibility(Visibility::Visible);
         }
         else
         {
             this->SystemBackdrop(nullptr);
+            SolidBackgroundLayer().Visibility(Visibility::Visible);
         }
     }
 
