@@ -1,10 +1,22 @@
 #pragma once
 
+// Generated
 #include "PdfPageLayout.g.h"
+
+// Standard C++
+#include <cstdint>
 #include <vector>
+
+// Windows SDK / WinRT
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Microsoft.UI.Xaml.Controls.h>
 
 namespace winrt::urPDF::implementation
 {
+    namespace controls   = winrt::Microsoft::UI::Xaml::Controls;
+    namespace foundation = winrt::Windows::Foundation;
+
     struct PdfPageLayout : PdfPageLayoutT<PdfPageLayout>
     {
         PdfPageLayout() = default;
@@ -15,24 +27,24 @@ namespace winrt::urPDF::implementation
         double Spacing();
         void Spacing(double value);
 
-        winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Foundation::Size> PageSizes();
-        void PageSizes(winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Foundation::Size> const& value);
+        foundation::Collections::IVectorView<foundation::Size> PageSizes();
+        void PageSizes(foundation::Collections::IVectorView<foundation::Size> const& value);
 
-        std::vector<winrt::Windows::Foundation::Rect> const& PageRects() const noexcept { return m_pageRects; }
+        std::vector<foundation::Rect> const& PageRects() const noexcept { return m_pageRects; }
 
-        winrt::Windows::Foundation::Size MeasureOverride(winrt::Microsoft::UI::Xaml::Controls::VirtualizingLayoutContext const& context, winrt::Windows::Foundation::Size const& availableSize);
-        winrt::Windows::Foundation::Size ArrangeOverride(winrt::Microsoft::UI::Xaml::Controls::VirtualizingLayoutContext const& context, winrt::Windows::Foundation::Size const& finalSize);
+        foundation::Size MeasureOverride(controls::VirtualizingLayoutContext const& context, foundation::Size const& availableSize);
+        foundation::Size ArrangeOverride(controls::VirtualizingLayoutContext const& context, foundation::Size const& finalSize);
 
     private:
-        std::vector<winrt::Windows::Foundation::Rect> CalculatePageRects(winrt::Windows::Foundation::Size const& availableSize);
+        std::vector<foundation::Rect> CalculatePageRects(foundation::Size const& availableSize);
 
-        static bool IntersectsRealizationRect(winrt::Windows::Foundation::Rect const& pageRect, winrt::Windows::Foundation::Rect const& realizationRect);
+        static bool IntersectsRealizationRect(foundation::Rect const& pageRect, foundation::Rect const& realizationRect);
 
         int32_t m_columnCount{ 1 };
         double m_spacing{ 10.0 };
         double m_contentWidth{ 0.0 };
-        winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Foundation::Size> m_pageSizes{ nullptr };
-        std::vector<winrt::Windows::Foundation::Rect> m_pageRects;
+        foundation::Collections::IVectorView<foundation::Size> m_pageSizes{ nullptr };
+        std::vector<foundation::Rect> m_pageRects;
     };
 }
 

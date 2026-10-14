@@ -1,14 +1,26 @@
 #include "pch.h"
+
+// This cpp
 #include "PdfPageLayout.h"
+
+// Generated
 #include "PdfPageLayout.g.cpp"
 
+// Standard C++
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <vector>
 
-using namespace winrt;
-using namespace winrt::Windows::Foundation;
-using namespace winrt::Microsoft::UI::Xaml::Controls;
+// Windows SDK / WinRT
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Microsoft.UI.Xaml.h>
+#include <winrt/Microsoft.UI.Xaml.Controls.h>
+
+namespace controls   = winrt::Microsoft::UI::Xaml::Controls;
+namespace foundation = winrt::Windows::Foundation;
 
 namespace winrt::urPDF::implementation
 {
@@ -46,21 +58,21 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    Windows::Foundation::Collections::IVectorView<Size> PdfPageLayout::PageSizes()
+    foundation::Collections::IVectorView<foundation::Size> PdfPageLayout::PageSizes()
     {
         return m_pageSizes;
     }
 
     void PdfPageLayout::PageSizes(
-        Windows::Foundation::Collections::IVectorView<Size> const& value)
+        foundation::Collections::IVectorView<foundation::Size> const& value)
     {
         m_pageSizes = value;
         InvalidateMeasure();
     }
 
-    std::vector<Rect> PdfPageLayout::CalculatePageRects(Size const& availableSize)
+    std::vector<foundation::Rect> PdfPageLayout::CalculatePageRects(foundation::Size const& availableSize)
     {
-        std::vector<Rect> pageRects;
+        std::vector<foundation::Rect> pageRects;
         if (!m_pageSizes)
         {
             m_contentWidth = 0.0;
@@ -133,7 +145,7 @@ namespace winrt::urPDF::implementation
             double x = isPagePair ? (contentWidth / 2.0) - (safeSpacing / 2.0) - widths[0] : (contentWidth - widths[0]) / 2.0;
             for (uint32_t column = 0; rowStart + column < rowEnd; ++column)
             {
-                pageRects[rowStart + column] = Rect{
+                pageRects[rowStart + column] = foundation::Rect{
                     static_cast<float>(x),
                     static_cast<float>(y),
                     static_cast<float>(widths[column]),
@@ -149,7 +161,7 @@ namespace winrt::urPDF::implementation
         return pageRects;
     }
 
-    bool PdfPageLayout::IntersectsRealizationRect(Rect const& pageRect, Rect const& realizationRect)
+    bool PdfPageLayout::IntersectsRealizationRect(foundation::Rect const& pageRect, foundation::Rect const& realizationRect)
     {
         if (!std::isfinite(realizationRect.Y) || !std::isfinite(realizationRect.Height) || realizationRect.Height <= 0.0)
         {
@@ -161,10 +173,10 @@ namespace winrt::urPDF::implementation
         return pageBottom >= realizationRect.Y && pageRect.Y <= realizationBottom;
     }
 
-    Size PdfPageLayout::MeasureOverride(VirtualizingLayoutContext const& context, Size const& availableSize)
+    foundation::Size PdfPageLayout::MeasureOverride(controls::VirtualizingLayoutContext const& context, foundation::Size const& availableSize)
     {
         m_pageRects = CalculatePageRects(availableSize);
-        const Rect realizationRect = context.RealizationRect();
+        const foundation::Rect realizationRect = context.RealizationRect();
         const uint32_t itemCount = (std::min)(static_cast<uint32_t>(context.ItemCount()), static_cast<uint32_t>(m_pageRects.size()));
 
         for (uint32_t index = 0; index < itemCount; ++index)
@@ -176,25 +188,25 @@ namespace winrt::urPDF::implementation
             }
 
             auto element = context.GetOrCreateElementAt(index);
-            element.Measure(Size{ pageRect.Width, pageRect.Height });
+            element.Measure(foundation::Size{ pageRect.Width, pageRect.Height });
         }
 
         const float extentHeight = m_pageRects.empty() ? 0.0f : m_pageRects.back().Y + m_pageRects.back().Height;
         const float extentWidth = static_cast<float>(m_contentWidth);
 
-        return Size{ extentWidth, extentHeight };
+        return foundation::Size{ extentWidth, extentHeight };
     }
 
-    Size PdfPageLayout::ArrangeOverride(VirtualizingLayoutContext const& context, Size const& finalSize)
+    foundation::Size PdfPageLayout::ArrangeOverride(controls::VirtualizingLayoutContext const& context, foundation::Size const& finalSize)
     {
-        Size layoutSize = finalSize;
+        foundation::Size layoutSize = finalSize;
         if (m_contentWidth > 0.0 && (!std::isfinite(layoutSize.Width) || layoutSize.Width < m_contentWidth))
         {
             layoutSize.Width = static_cast<float>(m_contentWidth);
         }
 
         m_pageRects = CalculatePageRects(layoutSize);
-        const Rect realizationRect = context.RealizationRect();
+        const foundation::Rect realizationRect = context.RealizationRect();
         const uint32_t itemCount = (std::min)(static_cast<uint32_t>(context.ItemCount()), static_cast<uint32_t>(m_pageRects.size()));
 
         for (uint32_t index = 0; index < itemCount; ++index)
@@ -210,6 +222,6 @@ namespace winrt::urPDF::implementation
         }
 
         const float extentHeight = m_pageRects.empty() ? 0.0f : m_pageRects.back().Y + m_pageRects.back().Height;
-        return Size{ layoutSize.Width, extentHeight };
+        return foundation::Size{ layoutSize.Width, extentHeight };
     }
 }
