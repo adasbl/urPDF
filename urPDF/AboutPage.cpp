@@ -1,41 +1,54 @@
 ﻿#include "pch.h"
+
+// Corresponding
 #include "AboutPage.h"
+
+// Generated
 #if __has_include("AboutPage.g.cpp")
 #include "AboutPage.g.cpp"
 #endif
-#include <winrt/Microsoft.UI.Xaml.Media.h>
+
+// Standard C++
+#include <cstdint>
+
+// Windows SDK / WinRT
+#include <winrt/base.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Microsoft.UI.Xaml.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
+#include <winrt/Microsoft.UI.Xaml.Media.h>
 
-using namespace winrt;
-using namespace winrt::Microsoft::UI::Xaml;
-
+namespace xaml       = winrt::Microsoft::UI::Xaml;
+namespace controls   = winrt::Microsoft::UI::Xaml::Controls;
+namespace media      = winrt::Microsoft::UI::Xaml::Media;
+namespace foundation = winrt::Windows::Foundation;
 
 namespace winrt::urPDF::implementation
 {
     int32_t AboutPage::MyProperty()
     {
-        throw hresult_not_implemented();
+        throw winrt::hresult_not_implemented();
     }
 
     void AboutPage::MyProperty(int32_t /* value */)
     {
-        throw hresult_not_implemented();
+        throw winrt::hresult_not_implemented();
     }
 
-    void AboutPage::BackButton_Click(winrt::Windows::Foundation::IInspectable const& /* sender */, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /* e */)
+    void AboutPage::BackButton_Click(foundation::IInspectable const& /* sender */, xaml::RoutedEventArgs const& /* e */)
     {
         auto frame = this->Frame();
         if (!frame) return;
 
         frame.Content(nullptr);
-        frame.Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+        frame.Visibility(xaml::Visibility::Collapsed);
 
-        auto parent = winrt::Microsoft::UI::Xaml::Media::VisualTreeHelper::GetParent(frame);
-        if (auto rootGrid = parent.try_as<winrt::Microsoft::UI::Xaml::Controls::Grid>())
+        auto parent = media::VisualTreeHelper::GetParent(frame);
+        if (auto rootGrid = parent.try_as<controls::Grid>())
         {
-            if (auto mainWindowUI = rootGrid.FindName(L"MainWindowUI").try_as<winrt::Microsoft::UI::Xaml::UIElement>())
+            if (auto mainWindowUI = rootGrid.FindName(L"MainWindowUI").try_as<xaml::UIElement>())
             {
-                mainWindowUI.Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
+                mainWindowUI.Visibility(xaml::Visibility::Visible);
             }
         }
     }

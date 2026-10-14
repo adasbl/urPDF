@@ -1,9 +1,20 @@
 ﻿#pragma once
 
+// Generated
 #include "AboutPage.g.h"
+
+// Standard C++
+#include <cstdint>
+
+// Windows SDK / WinRT
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Microsoft.UI.Xaml.h>
 
 namespace winrt::urPDF::implementation
 {
+    namespace xaml       = winrt::Microsoft::UI::Xaml;
+    namespace foundation = winrt::Windows::Foundation;
+
     struct AboutPage : AboutPageT<AboutPage>
     {
         AboutPage() 
@@ -15,8 +26,8 @@ namespace winrt::urPDF::implementation
         int32_t MyProperty();
         void MyProperty(int32_t value);
 
-        void ClickHandler(Windows::Foundation::IInspectable const& sender, Microsoft::UI::Xaml::RoutedEventArgs const& /* args */);
-        void BackButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
+        void ClickHandler(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& /* args */);
+        void BackButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
     };
 }
 
