@@ -1,14 +1,18 @@
 #pragma once
 
+// Generated
 #include "MainWindow.g.h"
-#include "pch.h"
+
+// Project
 #include "PdfPageLayout.h"
 #include "PdfRenderScale.h"
 
+// External libraries
 extern "C" {
 #include <mupdf/fitz.h>
 }
 
+// Standard C++
 #include <atomic>
 #include <chrono>
 #include <map>
@@ -17,11 +21,22 @@ extern "C" {
 #include <cstdint>
 #include <functional>
 #include <list>
+#include <memory>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <vector>
+
+// Windows SDK / WinRT
+#include <winrt/base.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Storage.h>
+#include <winrt/Microsoft.UI.Dispatching.h>
+#include <winrt/Microsoft.UI.Xaml.h>
+#include <winrt/Microsoft.UI.Xaml.Controls.h>
+#include <winrt/Microsoft.UI.Xaml.Data.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <winrt/Microsoft.UI.Xaml.Printing.h>
 
