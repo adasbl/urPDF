@@ -1,24 +1,39 @@
 ﻿#include "pch.h"
+
+// Corresponding
 #include "SettingsPage.h"
+
+// Generated
 #if __has_include("SettingsPage.g.cpp")
 #include "SettingsPage.g.cpp"
 #endif
 
-#include <winrt/Windows.Storage.h>
+// Standard C++
+#include <cstdint>
 
-using namespace winrt;
-using namespace Microsoft::UI::Xaml;
+// Windows SDK / WinRT
+#include <winrt/base.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Storage.h>
+#include <winrt/Microsoft.UI.Xaml.h>
+#include <winrt/Microsoft.UI.Xaml.Controls.h>
+
+namespace xaml       = winrt::Microsoft::UI::Xaml;
+namespace controls   = xaml::Controls;
+namespace foundation = winrt::Windows::Foundation;
+namespace storage    = winrt::Windows::Storage;
 
 namespace winrt::urPDF::implementation
 {
     int32_t SettingsPage::MyProperty()
     {
-        throw hresult_not_implemented();
+        throw winrt::hresult_not_implemented();
     }
 
     void SettingsPage::MyProperty(int32_t /* value */)
     {
-        throw hresult_not_implemented();
+        throw winrt::hresult_not_implemented();
     }
 
     SettingsPage::SettingsPage()
@@ -28,19 +43,19 @@ namespace winrt::urPDF::implementation
         m_isInitializing = false;
     }
 
-    void SettingsPage::ClickHandler(IInspectable const&, RoutedEventArgs const&)
+    void SettingsPage::ClickHandler(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
     {
-        Button().Content(box_value(L"Clicked"));
+        Button().Content(winrt::box_value(L"Clicked"));
     }
 
-    void SettingsPage::BackButton_Click(winrt::Windows::Foundation::IInspectable const& /* sender */, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /* e */)
+    void SettingsPage::BackButton_Click(foundation::IInspectable const& /* sender */, xaml::RoutedEventArgs const& /* e */)
     {
         m_backRequestedEvent(*this, nullptr);
     }
 
-    void SettingsPage::ToggleSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args)
+    void SettingsPage::ToggleSwitch_Toggled(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args)
     {
-        auto toggleSwitch = sender.as<winrt::Microsoft::UI::Xaml::Controls::ToggleSwitch>();
+        auto toggleSwitch = sender.as<controls::ToggleSwitch>();
 
         if (toggleSwitch.IsOn())
         {
@@ -52,12 +67,12 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    void SettingsPage::ThemeSelection_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& e)
+    void SettingsPage::ThemeSelection_SelectionChanged(foundation::IInspectable const& sender, controls::SelectionChangedEventArgs const& e)
     {
         if (m_isInitializing == true) { return; }
 
-        auto comboBox = sender.as<winrt::Microsoft::UI::Xaml::Controls::ComboBox>();
-        if (auto selectedItem = comboBox.SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::ComboBoxItem>())
+        auto comboBox = sender.as<controls::ComboBox>();
+        if (auto selectedItem = comboBox.SelectedItem().try_as<controls::ComboBoxItem>())
         {
             winrt::hstring themeTag = winrt::unbox_value<winrt::hstring>(selectedItem.Tag());
 
@@ -66,12 +81,12 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    void SettingsPage::TransparencySelection_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& e)
+    void SettingsPage::TransparencySelection_SelectionChanged(foundation::IInspectable const& sender, controls::SelectionChangedEventArgs const& e)
     {
         if (m_isInitializing == true) { return; }
 
-        auto comboBox = sender.as<winrt::Microsoft::UI::Xaml::Controls::ComboBox>();
-        if (auto selectedItem = comboBox.SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::ComboBoxItem>())
+        auto comboBox = sender.as<controls::ComboBox>();
+        if (auto selectedItem = comboBox.SelectedItem().try_as<controls::ComboBoxItem>())
         {
             winrt::hstring transparencyTag = winrt::unbox_value<winrt::hstring>(selectedItem.Tag());
 
@@ -82,17 +97,17 @@ namespace winrt::urPDF::implementation
 
     void SettingsPage::SaveSettings(winrt::hstring const& themeName)
     {
-        auto localSettings = winrt::Windows::Storage::ApplicationData::Current().LocalSettings();
+        auto localSettings = storage::ApplicationData::Current().LocalSettings();
         localSettings.Values().Insert(L"AppTheme", winrt::box_value(themeName));
     }
 
     void SettingsPage::SaveBackdropSettings(winrt::hstring const& transparencyValue)
     {
-        auto localSettings = winrt::Windows::Storage::ApplicationData::Current().LocalSettings();
+        auto localSettings = storage::ApplicationData::Current().LocalSettings();
         localSettings.Values().Insert(L"Transparency", winrt::box_value(transparencyValue));
     }
 
-    winrt::event_token SettingsPage::ThemeChanged(winrt::Windows::Foundation::EventHandler<winrt::hstring> const& handler)
+    winrt::event_token SettingsPage::ThemeChanged(foundation::EventHandler<winrt::hstring> const& handler)
     {
         return m_themeChangedEvent.add(handler);
     }
@@ -101,7 +116,7 @@ namespace winrt::urPDF::implementation
         m_themeChangedEvent.remove(token);
     }
 
-    winrt::event_token SettingsPage::BackdropChanged(winrt::Windows::Foundation::EventHandler<winrt::hstring> const& handler)
+    winrt::event_token SettingsPage::BackdropChanged(foundation::EventHandler<winrt::hstring> const& handler)
     {
         return m_backdropChangedEvent.add(handler);
     }
@@ -111,7 +126,7 @@ namespace winrt::urPDF::implementation
         m_backdropChangedEvent.remove(token);
     }
 
-    winrt::event_token SettingsPage::BackRequested(winrt::Windows::Foundation::EventHandler<winrt::Windows::Foundation::IInspectable> const& handler)
+    winrt::event_token SettingsPage::BackRequested(foundation::EventHandler<foundation::IInspectable> const& handler)
     {
         return m_backRequestedEvent.add(handler);
     }
@@ -123,7 +138,7 @@ namespace winrt::urPDF::implementation
 
     void SettingsPage::LoadSavedSettings()
     {
-        auto settings = winrt::Windows::Storage::ApplicationData::Current().LocalSettings();
+        auto settings = storage::ApplicationData::Current().LocalSettings();
 
         winrt::hstring savedTheme = L"Default";
         if (settings.Values().HasKey(L"AppTheme"))
