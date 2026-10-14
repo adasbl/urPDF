@@ -1,54 +1,66 @@
 #include "pch.h"
-#include <winrt/Windows.UI.Xaml.Interop.h>
+
+// This cpp
 #include "MainWindow.xaml.h"
-#include "PdfRenderScale.h"
-#include "SettingsPage.h"
-#include "AboutPage.h"
 #if __has_include("MainWindow.g.cpp")
 #include "MainWindow.g.cpp"
 #endif
 
+// Project
+#include "PdfRenderScale.h"
+#include "SettingsPage.h"
+#include "AboutPage.h"
+
+// External libraries
 extern "C" {
 #include <mupdf/fitz.h>
 }
 
+// Standard C++
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <coroutine>
+#include <cwctype>
+#include <exception>
+#include <limits>
+#include <map>
+#include <memory>
+#include <string>
+
+// Windows SDK / WinRT
+#include <shobjidl_core.h>
+#include <MemoryBuffer.h>
+#include <wil/resource.h>
+#include <printmanagerinterop.h>
+#include <microsoft.ui.xaml.window.h>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Windows.Storage.Pickers.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Windows.ApplicationModel.DataTransfer.h>
 #include <winrt/Windows.Graphics.Imaging.h>
-#include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
-#include <microsoft.ui.xaml.window.h>
-#include <shobjidl_core.h>
-#include <MemoryBuffer.h>
-#include <map>
-#include <winrt/Microsoft.UI.Dispatching.h>
-#include <algorithm>
-#include <chrono>
-#include <exception>
-#include <cmath>
-#include <cwctype>
-#include <limits>
-#include <string>
-#include <memory>
-#include <wil/resource.h>
-#include <coroutine>
 #include <winrt/Windows.Graphics.Printing.h>
+#include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
+#include <winrt/Microsoft.UI.Dispatching.h>
 #include <winrt/Microsoft.UI.Xaml.Printing.h>
 #include <winrt/Microsoft.Windows.AppLifecycle.h>
-#include <printmanagerinterop.h>
 #include <winrt/Microsoft.UI.Windowing.h>
+#include <winrt/Windows.UI.Xaml.Interop.h>
 
-    
-using namespace winrt;
-using namespace winrt::Windows::Storage::Pickers;
-using namespace winrt::Windows::Graphics::Imaging;
-using namespace winrt::Windows::Storage;
-using namespace winrt::Microsoft::UI::Xaml::Media::Imaging;
-using namespace winrt::Microsoft::UI::Xaml;
-using namespace winrt::Microsoft::UI::Composition::SystemBackdrops;
-using namespace winrt::Microsoft::UI::Composition;
-    
+
+namespace xaml        = winrt::Microsoft::UI::Xaml;
+namespace controls    = winrt::Microsoft::UI::Xaml::Controls;
+namespace media       = winrt::Microsoft::UI::Xaml::Media;
+namespace imaging     = winrt::Microsoft::UI::Xaml::Media::Imaging;
+namespace dispatching = winrt::Microsoft::UI::Dispatching;
+namespace backdrops   = winrt::Microsoft::UI::Composition::SystemBackdrops;
+
+namespace foundation = winrt::Windows::Foundation;
+namespace graphics   = winrt::Windows::Graphics::Imaging;
+namespace printing   = winrt::Windows::Graphics::Printing;
+namespace storage    = winrt::Windows::Storage;
+namespace pickers    = winrt::Windows::Storage::Pickers;
+
 namespace
 {
     constexpr size_t PdfStoreBudgetBytes = 256ull * 1024ull * 1024ull;
@@ -78,7 +90,7 @@ namespace
         return rotation < 0 ? rotation + 360 : rotation;
     }
 
-    void ZoomAroundViewportCenter(winrt::Microsoft::UI::Xaml::Controls::ScrollViewer const& scrollViewer, float targetZoom)
+    void ZoomAroundViewportCenter(controls::ScrollViewer const& scrollViewer, float targetZoom)
     {
         const double currentZoom = scrollViewer.ZoomFactor();
         const double halfViewportWidth = scrollViewer.ViewportWidth() / 2.0;
@@ -92,7 +104,7 @@ namespace
             targetZoom);
     }
 
-    std::size_t BitmapMemoryBytes(WriteableBitmap const& bitmap) noexcept
+    std::size_t BitmapMemoryBytes(imaging::WriteableBitmap const& bitmap) noexcept
     {
         constexpr std::uint64_t bytesPerPixel = 4;
         const std::uint64_t bytes = static_cast<std::uint64_t>(bitmap.PixelWidth()) * static_cast<std::uint64_t>(bitmap.PixelHeight()) * bytesPerPixel;
@@ -197,7 +209,7 @@ namespace
         return pix;
     }
 
-    SoftwareBitmap RenderPageToSoftwareBitmap(fz_context* baseCtx, fz_document* doc, int pageIndex, fz_rect pageBounds, int renderScaleBucket, int rotation)
+    graphics::SoftwareBitmap RenderPageToSoftwareBitmap(fz_context* baseCtx, fz_document* doc, int pageIndex, fz_rect pageBounds, int renderScaleBucket, int rotation)
     {
         const double renderScale = urpdf::RenderScaleForBucket(renderScaleBucket);
         if (renderScale <= 0.0) { return nullptr; }
@@ -207,7 +219,7 @@ namespace
             return nullptr;
         }
 
-        SoftwareBitmap bitmap{ nullptr };
+        graphics::SoftwareBitmap bitmap{ nullptr };
         fz_pixmap* pix = RenderPagePixmap(ctx, doc, pageIndex, pageBounds, renderScaleBucket, rotation);
         if (pix)
         {
@@ -218,10 +230,10 @@ namespace
 
             try
             {
-                bitmap = SoftwareBitmap(BitmapPixelFormat::Bgra8, width, height, BitmapAlphaMode::Premultiplied);
-                BitmapBuffer buffer = bitmap.LockBuffer(BitmapBufferAccessMode::Write);
-                const BitmapPlaneDescription plane = buffer.GetPlaneDescription(0);
-                winrt::Windows::Foundation::IMemoryBufferReference reference = buffer.CreateReference();
+                bitmap = graphics::SoftwareBitmap(graphics::BitmapPixelFormat::Bgra8, width, height, graphics::BitmapAlphaMode::Premultiplied);
+                graphics::BitmapBuffer buffer = bitmap.LockBuffer(graphics::BitmapBufferAccessMode::Write);
+                const graphics::BitmapPlaneDescription plane = buffer.GetPlaneDescription(0);
+                foundation::IMemoryBufferReference reference = buffer.CreateReference();
                 uint8_t* data = reference.data();
 
                 const std::size_t rowBytes = static_cast<std::size_t>(width) * 4;
@@ -334,18 +346,18 @@ namespace winrt::urPDF::implementation
             auto fileArgs = activationArgs.Data().try_as<winrt::Windows::ApplicationModel::Activation::IFileActivatedEventArgs>();
             if (fileArgs && fileArgs.Files().Size() > 0)
             {
-                m_pendingFile = fileArgs.Files().GetAt(0).try_as<winrt::Windows::Storage::StorageFile>();
+                m_pendingFile = fileArgs.Files().GetAt(0).try_as<storage::StorageFile>();
             }
         }
     }
 
 
     // HELPER FUNCTIONS
-    auto resume_foreground(winrt::Microsoft::UI::Dispatching::DispatcherQueue const& dispatcher)
+    auto resume_foreground(dispatching::DispatcherQueue const& dispatcher)
     {
         struct awaitable
         {
-            winrt::Microsoft::UI::Dispatching::DispatcherQueue m_dispatcher;
+            dispatching::DispatcherQueue m_dispatcher;
             bool await_ready() const noexcept { return false; }
             void await_suspend(std::coroutine_handle<> handle) const
             {
@@ -363,7 +375,7 @@ namespace winrt::urPDF::implementation
     {
     }
 
-    std::optional<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap>PageBitmapCache::TryGetBitmap(PageBitmapCacheKey const& key)
+    std::optional<imaging::WriteableBitmap>PageBitmapCache::TryGetBitmap(PageBitmapCacheKey const& key)
     {
         auto cacheEntry = m_entries.find(key);
         if (cacheEntry == m_entries.end())
@@ -377,7 +389,7 @@ namespace winrt::urPDF::implementation
         return cacheEntry->second.bitmap;
     }
 
-    void PageBitmapCache::StoreBitmap(PageBitmapCacheKey const& key, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap)
+    void PageBitmapCache::StoreBitmap(PageBitmapCacheKey const& key, imaging::WriteableBitmap const& bitmap)
     {
         const std::size_t memoryBytes = BitmapMemoryBytes(bitmap);
         if (memoryBytes > m_budgetBytes)
@@ -517,7 +529,7 @@ namespace winrt::urPDF::implementation
 
 
     // XAML DATA
-    winrt::event_token MainWindow::PropertyChanged(winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler)
+    winrt::event_token MainWindow::PropertyChanged(xaml::Data::PropertyChangedEventHandler const& handler)
     {
         return m_propertyChanged.add(handler);
     }
@@ -537,7 +549,7 @@ namespace winrt::urPDF::implementation
         if (m_pageNumber != value)
         {
             m_pageNumber = value;
-            m_propertyChanged(*this, winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventArgs{ L"DisplayPageNumber" });
+            m_propertyChanged(*this, xaml::Data::PropertyChangedEventArgs{ L"DisplayPageNumber" });
         }
     }
 
@@ -551,22 +563,22 @@ namespace winrt::urPDF::implementation
         if (m_pageCounter != value)
         {
             m_pageCounter = value;
-            m_propertyChanged(*this, winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventArgs{ L"DisplayPageCount" });
+            m_propertyChanged(*this, xaml::Data::PropertyChangedEventArgs{ L"DisplayPageCount" });
         }
     }
 
 
     // SETTINGS 
     void MainWindow::SettingsButton_Click(
-        winrt::Windows::Foundation::IInspectable const&,
-        winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
+        foundation::IInspectable const&,
+        xaml::RoutedEventArgs const&)
     {
         winrt::urPDF::SettingsPage settingsPage;
 
         settingsPage.BackRequested([this](auto const&, auto const&)
         {
             SettingsFrame().Content(nullptr);
-            SettingsOverlay().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+            SettingsOverlay().Visibility(xaml::Visibility::Collapsed);
             MainWindowUI().IsHitTestVisible(true);
         });
 
@@ -581,22 +593,22 @@ namespace winrt::urPDF::implementation
         });
 
         SettingsFrame().Content(settingsPage);
-        SettingsOverlay().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
+        SettingsOverlay().Visibility(xaml::Visibility::Visible);
         MainWindowUI().IsHitTestVisible(false);
     }
 
     void MainWindow::CloseSettings_Click(
-        winrt::Windows::Foundation::IInspectable const&,
-        winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
+        foundation::IInspectable const&,
+        xaml::RoutedEventArgs const&)
     {
         SettingsFrame().Content(nullptr);
-        SettingsOverlay().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+        SettingsOverlay().Visibility(xaml::Visibility::Collapsed);
         MainWindowUI().IsHitTestVisible(true);
     }
 
     void MainWindow::LoadSettings()
     {
-        auto localSettings = winrt::Windows::Storage::ApplicationData::Current().LocalSettings();
+        auto localSettings = storage::ApplicationData::Current().LocalSettings();
 
         if (localSettings.Values().HasKey(L"AppTheme"))
         {
@@ -623,45 +635,45 @@ namespace winrt::urPDF::implementation
     {
         if (transparencyValue == L"Mica")
         {
-            auto mica = winrt::Microsoft::UI::Xaml::Media::MicaBackdrop();
-            mica.Kind(winrt::Microsoft::UI::Composition::SystemBackdrops::MicaKind::Base);
+            auto mica = media::MicaBackdrop();
+            mica.Kind(backdrops::MicaKind::Base);
             this->SystemBackdrop(mica);
-            SolidBackgroundLayer().Visibility(Visibility::Collapsed);
+            SolidBackgroundLayer().Visibility(xaml::Visibility::Collapsed);
         }
         else if (transparencyValue == L"MicaAlt")
         {
-            winrt::Microsoft::UI::Xaml::Media::MicaBackdrop backdrop;
-            backdrop.Kind(winrt::Microsoft::UI::Composition::SystemBackdrops::MicaKind::BaseAlt);
+            media::MicaBackdrop backdrop;
+            backdrop.Kind(backdrops::MicaKind::BaseAlt);
             SystemBackdrop(backdrop);
-            SolidBackgroundLayer().Visibility(Visibility::Collapsed);
+            SolidBackgroundLayer().Visibility(xaml::Visibility::Collapsed);
         }
         else if (transparencyValue == L"None")
         {
             this->SystemBackdrop(nullptr);
-            SolidBackgroundLayer().Visibility(Visibility::Visible);
+            SolidBackgroundLayer().Visibility(xaml::Visibility::Visible);
         }
         else
         {
             this->SystemBackdrop(nullptr);
-            SolidBackgroundLayer().Visibility(Visibility::Visible);
+            SolidBackgroundLayer().Visibility(xaml::Visibility::Visible);
         }
     }
 
     void MainWindow::ApplyTheme(winrt::hstring const& themeName)
     {
-        ElementTheme theme = ElementTheme::Default;
+        xaml::ElementTheme theme = xaml::ElementTheme::Default;
 
         if (themeName == L"Light")
         {
-            theme = ElementTheme::Light;
+            theme = xaml::ElementTheme::Light;
         }
         else if (themeName == L"Dark")
         {
-            theme = ElementTheme::Dark;
+            theme = xaml::ElementTheme::Dark;
         }
         else
         {
-            theme = ElementTheme::Default;
+            theme = xaml::ElementTheme::Default;
         }
 
         if (auto rootElement = Content().try_as<FrameworkElement>())
@@ -671,11 +683,11 @@ namespace winrt::urPDF::implementation
 
         using winrt::Microsoft::UI::Windowing::TitleBarTheme;
         TitleBarTheme titleBarTheme = TitleBarTheme::UseDefaultAppMode;
-        if (theme == ElementTheme::Light)
+        if (theme == xaml::ElementTheme::Light)
         {
             titleBarTheme = TitleBarTheme::Light;
         }
-        else if (theme == ElementTheme::Dark)
+        else if (theme == xaml::ElementTheme::Dark)
         {
             titleBarTheme = TitleBarTheme::Dark;
         }
@@ -684,21 +696,21 @@ namespace winrt::urPDF::implementation
 
 
     // ABOUT
-    void winrt::urPDF::implementation::MainWindow::AboutButton_Click(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
+    void winrt::urPDF::implementation::MainWindow::AboutButton_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
     {
-        MainWindowUI().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+        MainWindowUI().Visibility(xaml::Visibility::Collapsed);
 
-        RootFrame().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
+        RootFrame().Visibility(xaml::Visibility::Visible);
         RootFrame().Navigate(winrt::xaml_typename<winrt::urPDF::AboutPage>());
     }
 
 
     // TABVIEW
     void MainWindow::TabView_Loaded(
-        winrt::Windows::Foundation::IInspectable const& sender,
-        winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
+        foundation::IInspectable const& sender,
+        xaml::RoutedEventArgs const&)
     {
-        auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
+        auto tabView = sender.as<controls::TabView>();
         TabView_AddButtonClick(tabView, nullptr);
 
         if (m_pendingFile)
@@ -709,15 +721,15 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    void MainWindow::TabView_AddButtonClick(winrt::Windows::Foundation::IInspectable const& sender, winrt::Windows::Foundation::IInspectable const&)
+    void MainWindow::TabView_AddButtonClick(foundation::IInspectable const& sender, foundation::IInspectable const&)
     {
-        auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
+        auto tabView = sender.as<controls::TabView>();
 
-        winrt::Microsoft::UI::Xaml::Controls::TabViewItem newTab;
+        controls::TabViewItem newTab;
 
         newTab.Header(winrt::box_value(L"New document"));
-        winrt::Microsoft::UI::Xaml::Controls::SymbolIconSource tabIcon;
-        tabIcon.Symbol(winrt::Microsoft::UI::Xaml::Controls::Symbol::Document);
+        controls::SymbolIconSource tabIcon;
+        tabIcon.Symbol(controls::Symbol::Document);
         newTab.IconSource(tabIcon);
 
         tabView.TabItems().Append(newTab);
@@ -725,10 +737,10 @@ namespace winrt::urPDF::implementation
         tabView.SelectedItem(newTab);
     }
 
-    void MainWindow::TabView_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& args)
+    void MainWindow::TabView_SelectionChanged(foundation::IInspectable const& sender, controls::SelectionChangedEventArgs const& args)
     {
         CancelPendingZoomRender();
-        auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
+        auto tabView = sender.as<controls::TabView>();
 
         m_isRestoringTabView = true;
         auto restoreViewState = wil::scope_exit([this]
@@ -739,7 +751,7 @@ namespace winrt::urPDF::implementation
 
         for (auto const& removedItem : args.RemovedItems())
         {
-            auto removedTab = removedItem.try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+            auto removedTab = removedItem.try_as<controls::TabViewItem>();
             if (!removedTab)
             {
                 continue;
@@ -751,7 +763,7 @@ namespace winrt::urPDF::implementation
                 ReleaseSlotsOutsideRange(removedEntry->second, 0, -1);
             }
         }
-        auto currentTab = tabView.SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = tabView.SelectedItem().try_as<controls::TabViewItem>();
 
         if (currentTab)
         {
@@ -760,7 +772,7 @@ namespace winrt::urPDF::implementation
 
             if (m_openedTabs.find(currentTab) != m_openedTabs.end())
             {
-                EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+                EmptyTabDropZone().Visibility(xaml::Visibility::Collapsed);
 
                 auto pdfInfo = m_openedTabs[currentTab];
 
@@ -775,21 +787,21 @@ namespace winrt::urPDF::implementation
             }
             else
             {
-                EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
+                EmptyTabDropZone().Visibility(xaml::Visibility::Visible);
                 PdfScrollViewer().ChangeView(nullptr, nullptr, 1.0f, true);
             }
         }
         else
         {
-            EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+            EmptyTabDropZone().Visibility(xaml::Visibility::Collapsed);
             DisplayPageNumber(0);
             DisplayPageCount(0);
         }
     }
 
-    void MainWindow::TabView_TabCloseRequested(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::TabViewTabCloseRequestedEventArgs const& args)
+    void MainWindow::TabView_TabCloseRequested(foundation::IInspectable const& sender, controls::TabViewTabCloseRequestedEventArgs const& args)
     {
-        auto tabView = sender.as<winrt::Microsoft::UI::Xaml::Controls::TabView>();
+        auto tabView = sender.as<controls::TabView>();
 
         auto openedTab = m_openedTabs.find(args.Tab());
         if (openedTab != m_openedTabs.end())
@@ -810,12 +822,12 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    void MainWindow::EmptyTab_DragOver(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::DragEventArgs const& args)
+    void MainWindow::EmptyTab_DragOver(foundation::IInspectable const&, xaml::DragEventArgs const& args)
     {
         if (args.DataView().Contains(winrt::Windows::ApplicationModel::DataTransfer::StandardDataFormats::StorageItems()))
         {
             args.AcceptedOperation(winrt::Windows::ApplicationModel::DataTransfer::DataPackageOperation::Copy);
-            EmptyTabDropHint().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Visible);
+            EmptyTabDropHint().Visibility(xaml::Visibility::Visible);
         }
         else
         {
@@ -823,21 +835,21 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    void MainWindow::EmptyTab_DragLeave(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::DragEventArgs const&)
+    void MainWindow::EmptyTab_DragLeave(foundation::IInspectable const&, xaml::DragEventArgs const&)
     {
-        EmptyTabDropHint().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+        EmptyTabDropHint().Visibility(xaml::Visibility::Collapsed);
     }
 
-    winrt::fire_and_forget MainWindow::EmptyTab_Drop(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::DragEventArgs const& args)
+    winrt::fire_and_forget MainWindow::EmptyTab_Drop(foundation::IInspectable const&, xaml::DragEventArgs const& args)
     {
         auto deferral = args.GetDeferral();
         auto storageItems = co_await args.DataView().GetStorageItemsAsync();
 
-        EmptyTabDropHint().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+        EmptyTabDropHint().Visibility(xaml::Visibility::Collapsed);
 
         for (auto const& item : storageItems)
         {
-            auto file = item.try_as<winrt::Windows::Storage::StorageFile>();
+            auto file = item.try_as<storage::StorageFile>();
             if (file)
             {
                 auto fileType = file.FileType();
@@ -858,11 +870,11 @@ namespace winrt::urPDF::implementation
 
 
     // FILE OPENING 
-    winrt::fire_and_forget MainWindow::OpenPdfFileAsync(IInspectable const&, RoutedEventArgs const&)
+    winrt::fire_and_forget MainWindow::OpenPdfFileAsync(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
     {
         // TODO: add check if empty tab is opened
         // TODO: check if file is already opened (+ option to turn off in settings)
-        FileOpenPicker filePicker;
+        pickers::FileOpenPicker filePicker;
         filePicker.FileTypeFilter().Append(L".pdf");
 
         HWND hwnd;
@@ -875,7 +887,7 @@ namespace winrt::urPDF::implementation
         OpenPdfFileAsync(file);
     }
 
-    winrt::fire_and_forget MainWindow::OpenPdfFileAsync(winrt::Windows::Storage::StorageFile const& file)
+    winrt::fire_and_forget MainWindow::OpenPdfFileAsync(storage::StorageFile const& file)
     {
         if (!TryAcquireRenderingLock())
         {
@@ -893,9 +905,9 @@ namespace winrt::urPDF::implementation
             PdfInfo->m_documentId = m_nextDocumentId++;
             PdfInfo->m_fileName = fileName;
 
-            winrt::Microsoft::UI::Xaml::Controls::TabViewItem targetTab;
+            controls::TabViewItem targetTab;
 
-            auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+            auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
 
             bool isCurrentTabEmpty = currentTab && !m_openedTabs.contains(currentTab);
 
@@ -906,18 +918,18 @@ namespace winrt::urPDF::implementation
             }
             else
             {
-                targetTab = winrt::Microsoft::UI::Xaml::Controls::TabViewItem();
+                targetTab = controls::TabViewItem();
 
                 MainTabView().TabItems().Append(targetTab);
                 MainTabView().SelectedItem(targetTab);
             }
             PagesRepeater().ItemsSource(nullptr);
             m_pageRepeaterItems = nullptr;
-            EmptyTabDropZone().Visibility(winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+            EmptyTabDropZone().Visibility(xaml::Visibility::Collapsed);
             targetTab.Header(winrt::box_value(fileName));
 
-            winrt::Microsoft::UI::Xaml::Controls::SymbolIconSource tabIcon;
-            tabIcon.Symbol(winrt::Microsoft::UI::Xaml::Controls::Symbol::Document);
+            controls::SymbolIconSource tabIcon;
+            tabIcon.Symbol(controls::Symbol::Document);
             targetTab.IconSource(tabIcon);
 
             m_openedTabs[targetTab] = PdfInfo;
@@ -932,7 +944,7 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    winrt::Windows::Foundation::IAsyncAction MainWindow::LoadDocumentLayoutAsync(std::shared_ptr<PdfTabInfo> PdfTab)
+    foundation::IAsyncAction MainWindow::LoadDocumentLayoutAsync(std::shared_ptr<PdfTabInfo> PdfTab)
     {
         auto strongThis = get_strong();
         auto dispatcher = DispatcherQueue();
@@ -968,7 +980,7 @@ namespace winrt::urPDF::implementation
         PdfTab->m_pageBounds = std::move(pageBounds);
         PdfTab->m_renderedPages = std::move(pageSlots);
 
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         if (currentTab)
         {
             auto openedTab = m_openedTabs.find(currentTab);
@@ -984,7 +996,7 @@ namespace winrt::urPDF::implementation
 
 
     // PAGE RENDERING
-    winrt::Windows::Foundation::IAsyncAction MainWindow::RenderSinglePageAsync(std::shared_ptr<PdfTabInfo> PdfTab)
+    foundation::IAsyncAction MainWindow::RenderSinglePageAsync(std::shared_ptr<PdfTabInfo> PdfTab)
     {
         const double pageZoom = PdfTab->m_renderZoom;
         const int pageRotation = PdfTab->m_currentRotation;
@@ -1020,14 +1032,14 @@ namespace winrt::urPDF::implementation
         const fz_rect pdfBounds = pageBounds[0];
         const int renderScaleBucket = LimitedPageRenderScaleBucket(pdfBounds, pageRotation, urpdf::RenderScaleForBucket(requestedBucket));
         if (renderScaleBucket == 0) { co_return; }
-        SoftwareBitmap bitmap = RenderPageToSoftwareBitmap(m_ctx, PdfTab->m_doc, 0, pdfBounds, renderScaleBucket, pageRotation);
+        graphics::SoftwareBitmap bitmap = RenderPageToSoftwareBitmap(m_ctx, PdfTab->m_doc, 0, pdfBounds, renderScaleBucket, pageRotation);
         if (!bitmap) { co_return; }
         const int width = bitmap.PixelWidth();
         const int height = bitmap.PixelHeight();
 
         co_await resume_foreground(DispatcherQueue());
 
-        const auto selectedTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        const auto selectedTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         const auto selectedEntry = m_openedTabs.find(selectedTab);
         const int currentLayoutBucket = GetPageRenderScaleBucket(PdfTab, 0);
         const int currentBucket = currentLayoutBucket > 0 ? currentLayoutBucket: LimitedPageRenderScaleBucket(pdfBounds, PdfTab->m_currentRotation, PdfRenderScale(PdfTab->m_renderZoom, GetRasterizationScale()));
@@ -1039,7 +1051,7 @@ namespace winrt::urPDF::implementation
             co_return;
         }
 
-        winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap current_writeable_bitmap(width, height);
+        imaging::WriteableBitmap current_writeable_bitmap(width, height);
         bitmap.CopyToBuffer(current_writeable_bitmap.PixelBuffer());
         current_writeable_bitmap.Invalidate();
 
@@ -1058,7 +1070,7 @@ namespace winrt::urPDF::implementation
         PdfTab->m_renderedPages = singlePage;
         RebuildPagesContainer(singlePage);
 
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         if (currentTab)
         {
             currentTab.Tag(current_writeable_bitmap);
@@ -1068,7 +1080,7 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    winrt::Windows::Foundation::IAsyncAction MainWindow::RenderMultiPageAsync(std::shared_ptr<PdfTabInfo> PdfTab)
+    foundation::IAsyncAction MainWindow::RenderMultiPageAsync(std::shared_ptr<PdfTabInfo> PdfTab)
     {
         const std::uint64_t generation = PdfTab->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
         std::vector<PageSlot> renderedPages;
@@ -1105,7 +1117,7 @@ namespace winrt::urPDF::implementation
             co_return;
         }
 
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         bool isCurrentTab = false;
         if (currentTab)
         {
@@ -1166,7 +1178,7 @@ namespace winrt::urPDF::implementation
             }
 
             renderedPages[i].state = PageRenderState::loading;
-            SoftwareBitmap bitmap = RenderPageToSoftwareBitmap(m_ctx, PdfTab->m_doc, i, renderedPages[i].pdfBounds, renderScaleBucket, pageRotation);
+            graphics::SoftwareBitmap bitmap = RenderPageToSoftwareBitmap(m_ctx, PdfTab->m_doc, i, renderedPages[i].pdfBounds, renderScaleBucket, pageRotation);
             if (!bitmap) { continue; }
             const int width = bitmap.PixelWidth();
             const int height = bitmap.PixelHeight();
@@ -1179,7 +1191,7 @@ namespace winrt::urPDF::implementation
                 co_return;
             }
 
-            winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap current_writeable_bitmap(width, height);
+            imaging::WriteableBitmap current_writeable_bitmap(width, height);
             bitmap.CopyToBuffer(current_writeable_bitmap.PixelBuffer());
             current_writeable_bitmap.Invalidate();
 
@@ -1190,7 +1202,7 @@ namespace winrt::urPDF::implementation
             renderedPages[i].renderScaleBucket = renderScaleBucket;
             PdfTab->m_renderedPages[i] = renderedPages[i];
 
-            auto selectedTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+            auto selectedTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
             if (selectedTab)
             {
                 auto openedTab = m_openedTabs.find(selectedTab);
@@ -1218,7 +1230,7 @@ namespace winrt::urPDF::implementation
             co_return;
         }
 
-        auto finalTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto finalTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         if (finalTab)
         {
             auto openedTab = m_openedTabs.find(finalTab);
@@ -1321,7 +1333,7 @@ namespace winrt::urPDF::implementation
     void MainWindow::ReleaseSlotsOutsideRange(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t keepFirst, int32_t keepLast)
     {
         bool isCurrentTab = false;
-        if (auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>())
+        if (auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>())
         {
             auto openedTab = m_openedTabs.find(currentTab);
             isCurrentTab = openedTab != m_openedTabs.end() && openedTab->second == PdfTab;
@@ -1442,7 +1454,7 @@ namespace winrt::urPDF::implementation
 
     int MainWindow::GetPageRenderScaleBucket(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t pageIndex)
     {
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         auto openedTab = m_openedTabs.find(currentTab);
         if (openedTab == m_openedTabs.end() || openedTab->second != pdfTab || m_layoutRotation != NormalizeRotation(pdfTab->m_currentRotation) || pageIndex < 0 || static_cast<std::size_t>(pageIndex) >= pdfTab->m_renderedPages.size())
         {
@@ -1456,7 +1468,7 @@ namespace winrt::urPDF::implementation
         return LimitedPageRenderScaleBucket(bounds, pdfTab->m_currentRotation, urpdf::PageRenderScale(std::abs(static_cast<double>(bounds.x1) - bounds.x0), std::abs(static_cast<double>(bounds.y1) - bounds.y0), pdfTab->m_currentRotation, rect.Width, rect.Height, pdfTab->m_renderZoom, GetRasterizationScale()));
     }
 
-    bool MainWindow::ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, WriteableBitmap const& bitmap, int renderScaleBucket)
+    bool MainWindow::ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, imaging::WriteableBitmap const& bitmap, int renderScaleBucket)
     {
         if (m_isClosed || renderScaleBucket <= 0 || GetPageRenderScaleBucket(PdfTab, pageIndex) != renderScaleBucket)
         {
@@ -1467,7 +1479,7 @@ namespace winrt::urPDF::implementation
             return false;
         }
 
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         if (!currentTab)
         {
             return false;
@@ -1559,7 +1571,7 @@ namespace winrt::urPDF::implementation
                 if (m_isClosed) { break; }
                 m_visibleRenderRequested = false;
 
-                auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+                auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
                 if (!currentTab)
                 {
                     break;
@@ -1652,7 +1664,7 @@ namespace winrt::urPDF::implementation
 
                     co_await winrt::resume_background();
                     const auto renderStart = std::chrono::steady_clock::now();
-                    SoftwareBitmap pageBitmap{ nullptr };
+                    graphics::SoftwareBitmap pageBitmap{ nullptr };
                     std::exception_ptr renderError;
                     try
                     {
@@ -1686,7 +1698,7 @@ namespace winrt::urPDF::implementation
                         break;
                     }
 
-                    std::optional<WriteableBitmap> writeableBitmap;
+                    std::optional<imaging::WriteableBitmap> writeableBitmap;
                     if (pageBitmap)
                     {
                         writeableBitmap.emplace(pageBitmap.PixelWidth(), pageBitmap.PixelHeight());
@@ -1739,8 +1751,8 @@ namespace winrt::urPDF::implementation
 
         CancelPendingZoomRender();
         m_isRendering = true;
-        m_zoomWasEnabled = PdfScrollViewer().ZoomMode() == winrt::Microsoft::UI::Xaml::Controls::ZoomMode::Enabled;
-        PdfScrollViewer().ZoomMode(winrt::Microsoft::UI::Xaml::Controls::ZoomMode::Disabled);
+        m_zoomWasEnabled = PdfScrollViewer().ZoomMode() == controls::ZoomMode::Enabled;
+        PdfScrollViewer().ZoomMode(controls::ZoomMode::Disabled);
         ZoomInButton().IsEnabled(false);
         ZoomOutButton().IsEnabled(false);
         RotateButton().IsEnabled(false);
@@ -1751,7 +1763,7 @@ namespace winrt::urPDF::implementation
     {
         if (m_zoomWasEnabled)
         {
-            PdfScrollViewer().ZoomMode(winrt::Microsoft::UI::Xaml::Controls::ZoomMode::Enabled);
+            PdfScrollViewer().ZoomMode(controls::ZoomMode::Enabled);
         }
         m_zoomWasEnabled = false;
         m_isRendering = false;
@@ -1764,7 +1776,7 @@ namespace winrt::urPDF::implementation
     void MainWindow::RebuildPagesContainer(std::vector<PageSlot> const& pages)
     {
         int currentRotation = 0;
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         if (currentTab)
         {
             auto openedTab = m_openedTabs.find(currentTab);
@@ -1774,7 +1786,7 @@ namespace winrt::urPDF::implementation
             }
         }
 
-        auto pageSizes = winrt::single_threaded_vector<winrt::Windows::Foundation::Size>();
+        auto pageSizes = winrt::single_threaded_vector<foundation::Size>();
 
         const bool swapDimensions = NormalizeRotation(currentRotation) == 90 || NormalizeRotation(currentRotation) == 270;
         constexpr double dipPerPdfPoint = 96.0 / 72.0;
@@ -1785,14 +1797,14 @@ namespace winrt::urPDF::implementation
             const double pdfHeight = std::abs(static_cast<double>(page.pdfBounds.y1 - page.pdfBounds.y0));
             const double width = (swapDimensions ? pdfHeight : pdfWidth) * dipPerPdfPoint;
             const double height = (swapDimensions ? pdfWidth : pdfHeight) * dipPerPdfPoint;
-            pageSizes.Append(winrt::Windows::Foundation::Size{static_cast<float>((std::max)(1.0, width)), static_cast<float>((std::max)(1.0, height))});
+            pageSizes.Append(foundation::Size{static_cast<float>((std::max)(1.0, width)), static_cast<float>((std::max)(1.0, height))});
         }
 
         m_layoutRotation = NormalizeRotation(currentRotation);
         PagesLayout().ColumnCount(m_bookViewMode ? 2 : 1);
         PagesLayout().PageSizes(pageSizes.GetView());
 
-        m_pageRepeaterItems = winrt::single_threaded_observable_vector<winrt::Windows::Foundation::IInspectable>();
+        m_pageRepeaterItems = winrt::single_threaded_observable_vector<foundation::IInspectable>();
         for (size_t i = 0; i < pages.size(); ++i)
         {
             m_pageRepeaterItems.Append(winrt::box_value(static_cast<int32_t>(i)));
@@ -1810,15 +1822,15 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    void MainWindow::ConfigurePageElement(winrt::Microsoft::UI::Xaml::UIElement const& element, std::size_t pageIndex)
+    void MainWindow::ConfigurePageElement(xaml::UIElement const& element, std::size_t pageIndex)
     {
-        auto border = element.try_as<winrt::Microsoft::UI::Xaml::Controls::Border>();
+        auto border = element.try_as<controls::Border>();
         if (!border)
         {
             return;
         }
 
-        auto image = border.Child().try_as<winrt::Microsoft::UI::Xaml::Controls::Image>();
+        auto image = border.Child().try_as<controls::Image>();
         if (!image)
         {
             return;
@@ -1830,7 +1842,7 @@ namespace winrt::urPDF::implementation
             border.Opacity(0.65);
         };
 
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         if (!currentTab)
         {
             clearImage();
@@ -1853,10 +1865,10 @@ namespace winrt::urPDF::implementation
 
         if (image.Source() != *page.bitmap)
         {
-            winrt::Microsoft::UI::Xaml::Controls::Image freshImage;
-            freshImage.Stretch(winrt::Microsoft::UI::Xaml::Media::Stretch::Uniform);
-            freshImage.HorizontalAlignment(winrt::Microsoft::UI::Xaml::HorizontalAlignment::Stretch);
-            freshImage.VerticalAlignment(winrt::Microsoft::UI::Xaml::VerticalAlignment::Stretch);
+            controls::Image freshImage;
+            freshImage.Stretch(media::Stretch::Uniform);
+            freshImage.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+            freshImage.VerticalAlignment(xaml::VerticalAlignment::Stretch);
             freshImage.Source(*page.bitmap);
             image.Source(nullptr);
             border.Child(freshImage);
@@ -1871,7 +1883,7 @@ namespace winrt::urPDF::implementation
         auto& metrics = PdfTab->m_renderMetrics;
         if (!metrics.openStartedAt || metrics.firstPageAttachedMs) { return; }
 
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         auto openedTab = m_openedTabs.find(currentTab);
         if (openedTab == m_openedTabs.end() || openedTab->second != PdfTab) { return; }
 
@@ -1899,8 +1911,8 @@ namespace winrt::urPDF::implementation
             if (slot.state != PageRenderState::ready || !slot.bitmap || !*slot.bitmap || slot.generation != PdfTab->m_renderGeneration.load(std::memory_order_acquire)) { continue; }
 
             auto element = PagesRepeater().TryGetElement(static_cast<int32_t>(i));
-            auto border = element ? element.try_as<winrt::Microsoft::UI::Xaml::Controls::Border>() : nullptr;
-            auto image = border ? border.Child().try_as<winrt::Microsoft::UI::Xaml::Controls::Image>() : nullptr;
+            auto border = element ? element.try_as<controls::Border>() : nullptr;
+            auto image = border ? border.Child().try_as<controls::Image>() : nullptr;
 
             if (!image || image.Source() != *slot.bitmap) { continue; }
 
@@ -1910,20 +1922,20 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    void MainWindow::PagesRepeater_ElementPrepared(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::Controls::ItemsRepeaterElementPreparedEventArgs const& args)
+    void MainWindow::PagesRepeater_ElementPrepared(foundation::IInspectable const&, controls::ItemsRepeaterElementPreparedEventArgs const& args)
     {
         ConfigurePageElement(args.Element(), static_cast<std::size_t>(args.Index()));
     }
 
-    void MainWindow::PagesRepeater_ElementClearing(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::Controls::ItemsRepeaterElementClearingEventArgs const& args)
+    void MainWindow::PagesRepeater_ElementClearing(foundation::IInspectable const&, controls::ItemsRepeaterElementClearingEventArgs const& args)
     {
-        auto border = args.Element().try_as<winrt::Microsoft::UI::Xaml::Controls::Border>();
+        auto border = args.Element().try_as<controls::Border>();
         if (!border)
         {
             return;
         }
 
-        auto image = border.Child().try_as<winrt::Microsoft::UI::Xaml::Controls::Image>();
+        auto image = border.Child().try_as<controls::Image>();
         if (image)
         {
             image.Source(nullptr);
@@ -1934,7 +1946,7 @@ namespace winrt::urPDF::implementation
 
 
     // NAVIGATION
-    void MainWindow::PageNumberBox_ValueChanged(winrt::Microsoft::UI::Xaml::Controls::NumberBox const& sender, winrt::Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const& args)
+    void MainWindow::PageNumberBox_ValueChanged(controls::NumberBox const& sender, controls::NumberBoxValueChangedEventArgs const& args)
     {
         if (std::isnan(args.NewValue())) return;
 
@@ -1942,7 +1954,7 @@ namespace winrt::urPDF::implementation
 
         if (newPage == m_pageNumber) return;
 
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
 
         if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
         {
@@ -1964,12 +1976,12 @@ namespace winrt::urPDF::implementation
         }
     }
         
-    void MainWindow::NextPageButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+    void MainWindow::NextPageButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e)
     {
-        auto button = sender.as<winrt::Microsoft::UI::Xaml::Controls::Button>();
+        auto button = sender.as<controls::Button>();
         button.IsEnabled(false);
 
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
 
         if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
         {
@@ -1993,12 +2005,12 @@ namespace winrt::urPDF::implementation
         button.IsEnabled(true);
     }
 
-    void MainWindow::PreviousPageButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+    void MainWindow::PreviousPageButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e)
     {
-        auto button = sender.as<winrt::Microsoft::UI::Xaml::Controls::Button>();
+        auto button = sender.as<controls::Button>();
         button.IsEnabled(false);
 
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
 
         if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
         {
@@ -2056,7 +2068,7 @@ namespace winrt::urPDF::implementation
         if (!m_zoomDebounceElapsed || m_zoomIsIntermediate) { return; }
 
         auto pdfTab = m_pendingZoomTab.lock();
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         auto openedTab = m_openedTabs.find(currentTab);
         CancelPendingZoomRender();
         if (m_isRendering || !pdfTab || openedTab == m_openedTabs.end() || openedTab->second != pdfTab) { return; }
@@ -2076,16 +2088,16 @@ namespace winrt::urPDF::implementation
         m_zoomDebounceElapsed = false;
     }
 
-    winrt::fire_and_forget MainWindow::PdfScrollViewer_ViewChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args)
+    winrt::fire_and_forget MainWindow::PdfScrollViewer_ViewChanged(foundation::IInspectable const& sender, controls::ScrollViewerViewChangedEventArgs const& args)
     {
         if (m_isRestoringTabView) { co_return; }
-        auto scrollViewer = sender.as<winrt::Microsoft::UI::Xaml::Controls::ScrollViewer>();
+        auto scrollViewer = sender.as<controls::ScrollViewer>();
 
         double scrollOffset = scrollViewer.VerticalOffset();
         double totalHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
         const double currentZoom = scrollViewer.ZoomFactor();
 
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
 
         if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
         {
@@ -2120,9 +2132,9 @@ namespace winrt::urPDF::implementation
 
 
     // VIEW
-    winrt::fire_and_forget MainWindow::RotateButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+    winrt::fire_and_forget MainWindow::RotateButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e)
     {
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end() && !m_isRendering)
         {
             auto pdfInfo = m_openedTabs[currentTab];
@@ -2147,9 +2159,9 @@ namespace winrt::urPDF::implementation
         co_return;
     }
 
-    winrt::fire_and_forget MainWindow::ZoomInButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+    winrt::fire_and_forget MainWindow::ZoomInButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e)
     {
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         if (!currentTab || m_openedTabs.find(currentTab) == m_openedTabs.end())
         {
             co_return;
@@ -2168,9 +2180,9 @@ namespace winrt::urPDF::implementation
         ZoomAroundViewportCenter(PdfScrollViewer(), targetZoom);
     }
 
-    winrt::fire_and_forget MainWindow::ZoomOutButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+    winrt::fire_and_forget MainWindow::ZoomOutButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e)
     {
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         if (!currentTab || m_openedTabs.find(currentTab) == m_openedTabs.end())
         {
             co_return;
@@ -2189,9 +2201,9 @@ namespace winrt::urPDF::implementation
         ZoomAroundViewportCenter(PdfScrollViewer(), targetZoom);
     }
 
-    void MainWindow::BookViewButton_Click(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
+    void MainWindow::BookViewButton_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
     {
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         std::shared_ptr<PdfTabInfo> pdfInfo;
         int currentPage = 1;
 
@@ -2232,9 +2244,9 @@ namespace winrt::urPDF::implementation
     }
 
     // PRINT
-    winrt::fire_and_forget MainWindow::PrintButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+    winrt::fire_and_forget MainWindow::PrintButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e)
     {
-        auto currentTab = MainTabView().SelectedItem().try_as<winrt::Microsoft::UI::Xaml::Controls::TabViewItem>();
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         if (!currentTab || m_openedTabs.find(currentTab) == m_openedTabs.end())
         {
             co_return;
@@ -2244,44 +2256,44 @@ namespace winrt::urPDF::implementation
         HWND hwnd;
         this->try_as<::IWindowNative>()->get_WindowHandle(&hwnd);
 
-        auto printInterop = winrt::get_activation_factory<winrt::Windows::Graphics::Printing::PrintManager, IPrintManagerInterop>();
-        winrt::Windows::Graphics::Printing::PrintManager printManager{ nullptr };
+        auto printInterop = winrt::get_activation_factory<printing::PrintManager, IPrintManagerInterop>();
+        printing::PrintManager printManager{ nullptr };
         winrt::check_hresult(printInterop->GetForWindow(hwnd, winrt::guid_of<decltype(printManager)>(), winrt::put_abi(printManager)));
 
-        m_printDocument = winrt::Microsoft::UI::Xaml::Printing::PrintDocument();
+        m_printDocument = xaml::Printing::PrintDocument();
         auto printDocumentSource = m_printDocument.DocumentSource();
 
-        auto printSize = std::make_shared<winrt::Windows::Foundation::Size>(0.0f, 0.0f);
+        auto printSize = std::make_shared<foundation::Size>(0.0f, 0.0f);
 
-        m_printDocument.Paginate([pdfInfo, printSize](auto const& sender, winrt::Microsoft::UI::Xaml::Printing::PaginateEventArgs const& args)
+        m_printDocument.Paginate([pdfInfo, printSize](auto const& sender, xaml::Printing::PaginateEventArgs const& args)
             {
-                auto senderDoc = sender.template as<winrt::Microsoft::UI::Xaml::Printing::PrintDocument>();
+                auto senderDoc = sender.template as<xaml::Printing::PrintDocument>();
 
                 auto pageDesc = args.PrintTaskOptions().GetPageDescription(1);
                 printSize->Width = pageDesc.ImageableRect.Width;
                 printSize->Height = pageDesc.ImageableRect.Height;
 
-                senderDoc.SetPreviewPageCount(pdfInfo->m_pagecount, winrt::Microsoft::UI::Xaml::Printing::PreviewPageCountType::Final);
+                senderDoc.SetPreviewPageCount(pdfInfo->m_pagecount, xaml::Printing::PreviewPageCountType::Final);
             });
 
-        m_printDocument.GetPreviewPage([pdfInfo, printSize](auto const& sender, winrt::Microsoft::UI::Xaml::Printing::GetPreviewPageEventArgs const& args)
+        m_printDocument.GetPreviewPage([pdfInfo, printSize](auto const& sender, xaml::Printing::GetPreviewPageEventArgs const& args)
             {
-                auto senderDoc = sender.template as<winrt::Microsoft::UI::Xaml::Printing::PrintDocument>();
+                auto senderDoc = sender.template as<xaml::Printing::PrintDocument>();
                 if (args.PageNumber() > 0 && args.PageNumber() <= pdfInfo->m_pagecount)
                 {
-                    winrt::Microsoft::UI::Xaml::Controls::Grid pageContainer;
+                    controls::Grid pageContainer;
                     pageContainer.Width(printSize->Width);
                     pageContainer.Height(printSize->Height);
 
-                    winrt::Microsoft::UI::Xaml::Controls::Image pageImage;
+                    controls::Image pageImage;
                     auto const& pageSlot = pdfInfo->m_renderedPages[args.PageNumber() - 1];
                     if (pageSlot.bitmap && pageSlot.state == PageRenderState::ready)
                     {
                         pageImage.Source(*pageSlot.bitmap);
                     }
-                    pageImage.Stretch(winrt::Microsoft::UI::Xaml::Media::Stretch::Uniform);
-                    pageImage.HorizontalAlignment(winrt::Microsoft::UI::Xaml::HorizontalAlignment::Center);
-                    pageImage.VerticalAlignment(winrt::Microsoft::UI::Xaml::VerticalAlignment::Center);
+                    pageImage.Stretch(media::Stretch::Uniform);
+                    pageImage.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+                    pageImage.VerticalAlignment(xaml::VerticalAlignment::Center);
 
                     pageContainer.Children().Append(pageImage);
 
@@ -2289,24 +2301,24 @@ namespace winrt::urPDF::implementation
                 }
             });
 
-        m_printDocument.AddPages([pdfInfo, printSize](auto const& sender, winrt::Microsoft::UI::Xaml::Printing::AddPagesEventArgs const& args)
+        m_printDocument.AddPages([pdfInfo, printSize](auto const& sender, xaml::Printing::AddPagesEventArgs const& args)
             {
-                auto senderDoc = sender.template as<winrt::Microsoft::UI::Xaml::Printing::PrintDocument>();
+                auto senderDoc = sender.template as<xaml::Printing::PrintDocument>();
                 for (int i = 0; i < pdfInfo->m_pagecount; ++i)
                 {
-                    winrt::Microsoft::UI::Xaml::Controls::Grid pageContainer;
+                    controls::Grid pageContainer;
                     pageContainer.Width(printSize->Width);
                     pageContainer.Height(printSize->Height);
 
-                    winrt::Microsoft::UI::Xaml::Controls::Image pageImage;
+                    controls::Image pageImage;
                     auto const& pageSlot = pdfInfo->m_renderedPages[i];
                     if (pageSlot.bitmap && pageSlot.state == PageRenderState::ready)
                     {
                         pageImage.Source(*pageSlot.bitmap);
                     }
-                    pageImage.Stretch(winrt::Microsoft::UI::Xaml::Media::Stretch::Uniform);
-                    pageImage.HorizontalAlignment(winrt::Microsoft::UI::Xaml::HorizontalAlignment::Center);
-                    pageImage.VerticalAlignment(winrt::Microsoft::UI::Xaml::VerticalAlignment::Center);
+                    pageImage.Stretch(media::Stretch::Uniform);
+                    pageImage.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+                    pageImage.VerticalAlignment(xaml::VerticalAlignment::Center);
 
                     pageContainer.Children().Append(pageImage);
 
@@ -2321,11 +2333,11 @@ namespace winrt::urPDF::implementation
         }
 
         m_printTaskRequestedToken = printManager.PrintTaskRequested([printDocumentSource, fileName = pdfInfo->m_fileName](
-            winrt::Windows::Graphics::Printing::PrintManager const&,
-            winrt::Windows::Graphics::Printing::PrintTaskRequestedEventArgs const& args)
+            printing::PrintManager const&,
+            printing::PrintTaskRequestedEventArgs const& args)
             {
                 auto deferral = args.Request().GetDeferral();
-                args.Request().CreatePrintTask(fileName, [printDocumentSource](winrt::Windows::Graphics::Printing::PrintTaskSourceRequestedArgs const& sourceArgs)
+                args.Request().CreatePrintTask(fileName, [printDocumentSource](printing::PrintTaskSourceRequestedArgs const& sourceArgs)
                     {
                         sourceArgs.SetSource(printDocumentSource);
                     });
@@ -2334,7 +2346,7 @@ namespace winrt::urPDF::implementation
 
         try
         {
-            winrt::Windows::Foundation::IAsyncOperation<bool> showPrintUIOp{ nullptr };
+            foundation::IAsyncOperation<bool> showPrintUIOp{ nullptr };
             winrt::check_hresult(printInterop->ShowPrintUIForWindowAsync(hwnd, winrt::guid_of<decltype(showPrintUIOp)>(), winrt::put_abi(showPrintUIOp)));
 
             co_await showPrintUIOp;

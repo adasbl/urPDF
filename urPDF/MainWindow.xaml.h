@@ -27,6 +27,13 @@ extern "C" {
 
 namespace winrt::urPDF::implementation
 {
+    namespace xaml        = winrt::Microsoft::UI::Xaml;
+    namespace controls    = winrt::Microsoft::UI::Xaml::Controls;
+    namespace imaging     = winrt::Microsoft::UI::Xaml::Media::Imaging;
+    namespace dispatching = winrt::Microsoft::UI::Dispatching;
+    namespace foundation  = winrt::Windows::Foundation;
+    namespace storage     = winrt::Windows::Storage;
+
     enum class PageRenderState
     {
         ready,
@@ -67,7 +74,7 @@ namespace winrt::urPDF::implementation
     {
         fz_rect pdfBounds{};
         PageRenderState state{ PageRenderState::unloaded };
-        std::optional<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> bitmap;
+        std::optional<imaging::WriteableBitmap> bitmap;
         std::uint64_t generation{ 0 };
         int renderScaleBucket{ 0 };
 
@@ -144,7 +151,7 @@ namespace winrt::urPDF::implementation
     {
         struct CacheEntry
         {
-            winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap bitmap{ nullptr };
+            imaging::WriteableBitmap bitmap{ nullptr };
             std::size_t memoryBytes{ 0 };
             std::list<PageBitmapCacheKey>::iterator lruPosition;
         };
@@ -164,8 +171,8 @@ namespace winrt::urPDF::implementation
     public:
         explicit PageBitmapCache(std::size_t budgetBytes);
 
-        std::optional<winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap> TryGetBitmap(PageBitmapCacheKey const& key);
-        void StoreBitmap(PageBitmapCacheKey const& key, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap);
+        std::optional<imaging::WriteableBitmap> TryGetBitmap(PageBitmapCacheKey const& key);
+        void StoreBitmap(PageBitmapCacheKey const& key, imaging::WriteableBitmap const& bitmap);
         void ClearDocumentEntries(std::uint64_t documentId);
 
         PageBitmapCacheMetrics GetMetrics() const noexcept { return m_metrics; }
@@ -230,48 +237,48 @@ namespace winrt::urPDF::implementation
         void ApplyBackdrop(winrt::hstring const& transparency);
         void LoadSettings();
 
-        winrt::fire_and_forget OpenPdfFileAsync(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
-        winrt::fire_and_forget OpenPdfFileAsync(winrt::Windows::Storage::StorageFile const& file);
-        void TabView_AddButtonClick(winrt::Windows::Foundation::IInspectable const& sender, winrt::Windows::Foundation::IInspectable const& args);
-        void TabView_TabCloseRequested(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::TabViewTabCloseRequestedEventArgs const& args);
-        void TabView_Loaded(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
-        void TabView_SelectionChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& args);
-        void EmptyTab_DragOver(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::DragEventArgs const& args);
-        void EmptyTab_DragLeave(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::DragEventArgs const& args);
-        winrt::fire_and_forget EmptyTab_Drop(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::DragEventArgs const& args);
-        winrt::Windows::Foundation::IAsyncAction RenderSinglePageAsync(std::shared_ptr<PdfTabInfo> PdfTabInfo);
-        winrt::Windows::Foundation::IAsyncAction RenderMultiPageAsync(std::shared_ptr<PdfTabInfo> PdfTab);
-        winrt::Windows::Foundation::IAsyncAction LoadDocumentLayoutAsync(std::shared_ptr<PdfTabInfo> PdfTab);
+        winrt::fire_and_forget OpenPdfFileAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
+        winrt::fire_and_forget OpenPdfFileAsync(storage::StorageFile const& file);
+        void TabView_AddButtonClick(foundation::IInspectable const& sender, foundation::IInspectable const& args);
+        void TabView_TabCloseRequested(foundation::IInspectable const& sender, controls::TabViewTabCloseRequestedEventArgs const& args);
+        void TabView_Loaded(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
+        void TabView_SelectionChanged(foundation::IInspectable const& sender, controls::SelectionChangedEventArgs const& args);
+        void EmptyTab_DragOver(foundation::IInspectable const& sender, xaml::DragEventArgs const& args);
+        void EmptyTab_DragLeave(foundation::IInspectable const& sender, xaml::DragEventArgs const& args);
+        winrt::fire_and_forget EmptyTab_Drop(foundation::IInspectable const& sender, xaml::DragEventArgs const& args);
+        foundation::IAsyncAction RenderSinglePageAsync(std::shared_ptr<PdfTabInfo> PdfTabInfo);
+        foundation::IAsyncAction RenderMultiPageAsync(std::shared_ptr<PdfTabInfo> PdfTab);
+        foundation::IAsyncAction LoadDocumentLayoutAsync(std::shared_ptr<PdfTabInfo> PdfTab);
         winrt::fire_and_forget RenderVisiblePagesAsync();
-        winrt::fire_and_forget PdfScrollViewer_ViewChanged(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const& args);
-        void PagesRepeater_ElementPrepared(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ItemsRepeaterElementPreparedEventArgs const& args);
-        void PagesRepeater_ElementClearing(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Controls::ItemsRepeaterElementClearingEventArgs const& args);
-        void SettingsButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
-        winrt::fire_and_forget RotateButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
-        void PageNumberBox_ValueChanged(winrt::Microsoft::UI::Xaml::Controls::NumberBox const& sender, winrt::Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const& args);
-        void NextPageButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
-        void PreviousPageButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
-        void BookViewButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
-        void AboutButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
-        winrt::fire_and_forget PrintButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
-        void CloseSettings_Click(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
-        winrt::fire_and_forget ZoomInButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
-        winrt::fire_and_forget ZoomOutButton_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
+        winrt::fire_and_forget PdfScrollViewer_ViewChanged(foundation::IInspectable const& sender, controls::ScrollViewerViewChangedEventArgs const& args);
+        void PagesRepeater_ElementPrepared(foundation::IInspectable const& sender, controls::ItemsRepeaterElementPreparedEventArgs const& args);
+        void PagesRepeater_ElementClearing(foundation::IInspectable const& sender, controls::ItemsRepeaterElementClearingEventArgs const& args);
+        void SettingsButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
+        winrt::fire_and_forget RotateButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
+        void PageNumberBox_ValueChanged(controls::NumberBox const& sender, controls::NumberBoxValueChangedEventArgs const& args);
+        void NextPageButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
+        void PreviousPageButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
+        void BookViewButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
+        void AboutButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
+        winrt::fire_and_forget PrintButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
+        void CloseSettings_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget ZoomInButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
+        winrt::fire_and_forget ZoomOutButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
 
-        winrt::event_token PropertyChanged(winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler);
+        winrt::event_token PropertyChanged(xaml::Data::PropertyChangedEventHandler const& handler);
         void PropertyChanged(winrt::event_token const& token) noexcept;
 
     private:
         std::array<std::mutex, FZ_LOCK_MAX> m_mupdfMutexes;
         fz_locks_context m_mupdfLocks{};
         fz_context* m_ctx{ nullptr };
-        std::map<winrt::Microsoft::UI::Xaml::Controls::TabViewItem, std::shared_ptr<PdfTabInfo>> m_openedTabs;
+        std::map<controls::TabViewItem, std::shared_ptr<PdfTabInfo>> m_openedTabs;
         int32_t m_pageNumber{ 0 };
         int32_t m_pageCounter{ 0 };
-        winrt::Windows::Storage::StorageFile m_pendingFile{ nullptr };
-        winrt::event<winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler> m_propertyChanged;
+        storage::StorageFile m_pendingFile{ nullptr };
+        winrt::event<xaml::Data::PropertyChangedEventHandler> m_propertyChanged;
 
-        winrt::Microsoft::UI::Xaml::Printing::PrintDocument m_printDocument{ nullptr };
+        xaml::Printing::PrintDocument m_printDocument{ nullptr };
         winrt::event_token m_printTaskRequestedToken{};
         bool m_isRendering{ false };
         bool m_isRestoringTabView{ false };
@@ -280,19 +287,19 @@ namespace winrt::urPDF::implementation
         bool m_isVisibleRenderRunning{ false };
         bool m_visibleRenderRequested{ false };
         bool m_isClosed{ false };
-        winrt::Microsoft::UI::Xaml::XamlRoot m_observedXamlRoot{ nullptr };
-        winrt::Microsoft::UI::Xaml::XamlRoot::Changed_revoker m_xamlRootChangedRevoker;
-        winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_dpiRenderTimer{ nullptr };
+        xaml::XamlRoot m_observedXamlRoot{ nullptr };
+        xaml::XamlRoot::Changed_revoker m_xamlRootChangedRevoker;
+        dispatching::DispatcherQueueTimer m_dpiRenderTimer{ nullptr };
         double m_lastRasterizationScale{ 1.0 };
         bool m_dpiRefreshPending{ false };
-        winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_zoomRenderTimer{ nullptr };
+        dispatching::DispatcherQueueTimer m_zoomRenderTimer{ nullptr };
         std::weak_ptr<PdfTabInfo> m_pendingZoomTab;
         bool m_zoomIsIntermediate{ false };
         bool m_zoomDebounceElapsed{ false };
         int m_layoutRotation{ 0 };
         std::uint64_t m_nextDocumentId{ 1 };
         PageBitmapCache m_pageBitmapCache{ 256ull * 1024ull * 1024ull };
-        winrt::Windows::Foundation::Collections::IObservableVector<winrt::Windows::Foundation::IInspectable> m_pageRepeaterItems{ nullptr };
+        foundation::Collections::IObservableVector<foundation::IInspectable> m_pageRepeaterItems{ nullptr };
 
         bool TryAcquireRenderingLock();
         void ReleaseRenderingLock();
@@ -304,14 +311,14 @@ namespace winrt::urPDF::implementation
         void RequestDpiRefresh();
         void ApplyPendingDpiRefresh();
         void RebuildPagesContainer(std::vector<PageSlot> const& pages);
-        void ConfigurePageElement(winrt::Microsoft::UI::Xaml::UIElement const& element, std::size_t pageIndex);
+        void ConfigurePageElement(xaml::UIElement const& element, std::size_t pageIndex);
         void TryRecordFirstVisiblePage(std::shared_ptr<PdfTabInfo> const& PdfTab);
         std::vector<PageRenderRequest> BuildRenderQueue(int32_t pageCount, PageViewRange& viewRange);
         void ReleaseSlotsOutsideRange(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t keepFirst, int32_t keepLast);
         void RestoreSlotsFromCache(std::shared_ptr<PdfTabInfo> const& PdfTab);
         double GetRasterizationScale();
         int GetPageRenderScaleBucket(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t pageIndex);
-        bool ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap const& bitmap, int renderScaleBucket);
+        bool ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, imaging::WriteableBitmap const& bitmap, int renderScaleBucket);
         void RecordPageRenderMetrics(std::shared_ptr<PdfTabInfo> const& PdfTab, PageRenderMetrics const& metrics) noexcept;
     };
 }
