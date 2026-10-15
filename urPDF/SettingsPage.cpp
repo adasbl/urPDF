@@ -8,21 +8,21 @@
 #include "SettingsPage.g.cpp"
 #endif
 
+// Project
+#include "AppSettings.h"
+
 // Standard C++
 #include <cstdint>
 
 // Windows SDK / WinRT
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
-#include <winrt/Windows.Foundation.Collections.h>
-#include <winrt/Windows.Storage.h>
 #include <winrt/Microsoft.UI.Xaml.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 
 namespace xaml       = winrt::Microsoft::UI::Xaml;
 namespace controls   = xaml::Controls;
 namespace foundation = winrt::Windows::Foundation;
-namespace storage    = winrt::Windows::Storage;
 
 namespace winrt::urPDF::implementation
 {
@@ -75,8 +75,10 @@ namespace winrt::urPDF::implementation
         if (auto selectedItem = comboBox.SelectedItem().try_as<controls::ComboBoxItem>())
         {
             winrt::hstring themeTag = winrt::unbox_value<winrt::hstring>(selectedItem.Tag());
+            auto theme = urpdf::ParseAppTheme(themeTag);
+            if (!theme) { return; }
 
-            SaveSettings(themeTag);
+            urpdf::AppSettings::Instance().SetTheme(*theme);
             m_themeChangedEvent(*this, themeTag);
         }
     }
@@ -89,22 +91,12 @@ namespace winrt::urPDF::implementation
         if (auto selectedItem = comboBox.SelectedItem().try_as<controls::ComboBoxItem>())
         {
             winrt::hstring transparencyTag = winrt::unbox_value<winrt::hstring>(selectedItem.Tag());
+            auto backdrop = urpdf::ParseBackdrop(transparencyTag);
+            if (!backdrop) { return; }
 
-            SaveBackdropSettings(transparencyTag);
+            urpdf::AppSettings::Instance().SetBackdrop(*backdrop);
             m_backdropChangedEvent(*this, transparencyTag);
         }
-    }
-
-    void SettingsPage::SaveSettings(winrt::hstring const& themeName)
-    {
-        auto localSettings = storage::ApplicationData::Current().LocalSettings();
-        localSettings.Values().Insert(L"AppTheme", winrt::box_value(themeName));
-    }
-
-    void SettingsPage::SaveBackdropSettings(winrt::hstring const& transparencyValue)
-    {
-        auto localSettings = storage::ApplicationData::Current().LocalSettings();
-        localSettings.Values().Insert(L"Transparency", winrt::box_value(transparencyValue));
     }
 
     winrt::event_token SettingsPage::ThemeChanged(foundation::EventHandler<winrt::hstring> const& handler)
@@ -138,29 +130,9 @@ namespace winrt::urPDF::implementation
 
     void SettingsPage::LoadSavedSettings()
     {
-        auto settings = storage::ApplicationData::Current().LocalSettings();
+        auto settings = urpdf::AppSettings::Instance().Get();
 
-        winrt::hstring savedTheme = L"Default";
-        if (settings.Values().HasKey(L"AppTheme"))
-        {
-            savedTheme = winrt::unbox_value<winrt::hstring>(settings.Values().Lookup(L"AppTheme"));
-        }
-
-        int index = 0;
-        if (savedTheme == L"Light") { index = 1; }
-        else if (savedTheme == L"Dark") { index = 2; }
-
-        ThemeComboBox().SelectedIndex(index);
-
-        winrt::hstring savedTransparency = L"None";
-        if (settings.Values().HasKey(L"Transparency"))
-        {
-            savedTransparency = winrt::unbox_value<winrt::hstring>(settings.Values().Lookup(L"Transparency"));
-        }
-        index = 0;
-        if (savedTransparency == L"Mica") { index = 1; }
-        else if (savedTransparency == L"MicaAlt") { index = 2; }
-
-        TransparencyComboBox().SelectedIndex(index);
+        ThemeComboBox().SelectedIndex(static_cast<int32_t>(settings.theme));
+        TransparencyComboBox().SelectedIndex(static_cast<int32_t>(settings.backdrop));
     }
 }

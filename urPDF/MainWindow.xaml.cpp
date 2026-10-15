@@ -7,6 +7,7 @@
 #endif
 
 // Project
+#include "AppSettings.h"
 #include "PdfRenderScale.h"
 #include "SettingsPage.h"
 #include "AboutPage.h"
@@ -479,10 +480,7 @@ namespace winrt::urPDF::implementation
             const bool matchesScale = isRetained && scaleIndex < m_viewContext.renderScaleBuckets.size()
                 && key.renderScaleBucket == m_viewContext.renderScaleBuckets[scaleIndex];
 
-            if (!m_hasViewContext
-                || key.documentId != m_viewContext.documentId
-                || key.rotation != m_viewContext.rotation
-                || (isRetained && !matchesScale))
+            if (!m_hasViewContext || key.documentId != m_viewContext.documentId || key.rotation != m_viewContext.rotation || (isRetained && !matchesScale))
             {
                 EvictEntry(key);
                 return true;
@@ -608,27 +606,10 @@ namespace winrt::urPDF::implementation
 
     void MainWindow::LoadSettings()
     {
-        auto localSettings = storage::ApplicationData::Current().LocalSettings();
+        auto settings = urpdf::AppSettings::Instance().Get();
 
-        if (localSettings.Values().HasKey(L"AppTheme"))
-        {
-            winrt::hstring theme = winrt::unbox_value<winrt::hstring>(localSettings.Values().Lookup(L"AppTheme"));
-            ApplyTheme(theme);
-        }
-        else
-        {
-            ApplyTheme(L"Default");
-        }
-
-        if (localSettings.Values().HasKey(L"Transparency"))
-        {
-            winrt::hstring transparency = winrt::unbox_value<winrt::hstring>(localSettings.Values().Lookup(L"Transparency"));
-            ApplyBackdrop(transparency);
-        }
-        else
-        {
-            ApplyBackdrop(L"None");
-        }
+        ApplyTheme(winrt::hstring{ urpdf::ToString(settings.theme) });
+        ApplyBackdrop(winrt::hstring{ urpdf::ToString(settings.backdrop) });
     }
 
     void MainWindow::ApplyBackdrop(winrt::hstring const& transparencyValue)

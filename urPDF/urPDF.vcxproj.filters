@@ -16,12 +16,16 @@
     <ClCompile Include="pch.cpp" />
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
     <ClCompile Include="PdfPageLayout.cpp" />
+    <ClCompile Include="AppSettings.cpp" />
+    <ClCompile Include="SettingsStore.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
     <ClInclude Include="PdfRenderScale.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="PdfPageLayout.h" />
+    <ClInclude Include="AppSettings.h" />
+    <ClInclude Include="SettingsStore.h" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="Assets\Wide310x150Logo.scale-200.png">
