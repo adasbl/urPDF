@@ -48,12 +48,17 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="PdfRenderScaleTests.cpp" />
     <ClCompile Include="PdfBitmapLimitsTests.cpp" />
+    <ClCompile Include="AppSettingsTests.cpp" />
+    <ClCompile Include="..\urPDF\AppSettings.cpp" />
     <ClInclude Include="..\urPDF\PdfRenderScale.h" />
+    <ClInclude Include="..\urPDF\AppSettings.h" />
+    <ClInclude Include="..\urPDF\SettingsStore.h" />
     <None Include="README.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

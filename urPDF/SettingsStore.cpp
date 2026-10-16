@@ -3,6 +3,9 @@
 // Corresponding
 #include "SettingsStore.h"
 
+// Project
+#include "AppSettings.h"
+
 // Standard C++
 #include <fstream>
 #include <iterator>
@@ -25,8 +28,6 @@ namespace urpdf
 {
     namespace
     {
-        constexpr double SettingsSchemaVersion = 1;
-
         std::filesystem::path WithSuffix(std::filesystem::path path, wchar_t const* suffix)
         {
             path += suffix;
@@ -142,12 +143,21 @@ namespace urpdf
         return GetCurrentPackageFullName(&length, nullptr) != APPMODEL_ERROR_NO_PACKAGE;
     }
 
-    std::unique_ptr<ISettingsStore> CreateSettingsStore()
+    namespace
     {
-        if (HasPackageIdentity())
+        std::unique_ptr<ISettingsStore> CreateSettingsStore()
         {
-            return std::make_unique<PackagedSettingsStore>();
+            if (HasPackageIdentity())
+            {
+                return std::make_unique<PackagedSettingsStore>();
+            }
+            return std::make_unique<FileSettingsStore>(DefaultSettingsFilePath());
         }
-        return std::make_unique<FileSettingsStore>(DefaultSettingsFilePath());
+    }
+
+    AppSettings& AppSettings::Instance()
+    {
+        static AppSettings instance{ CreateSettingsStore() };
+        return instance;
     }
 }

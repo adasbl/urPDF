@@ -4,7 +4,6 @@
 #include <filesystem>
 #include <functional>
 #include <map>
-#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -43,5 +42,4 @@ namespace urpdf
     };
 
     bool HasPackageIdentity() noexcept;
-    std::unique_ptr<ISettingsStore> CreateSettingsStore();
 }

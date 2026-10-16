@@ -6,10 +6,13 @@
 // Standard C++
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace urpdf
 {
+    inline constexpr int SettingsSchemaVersion = 1;
+
     // Enumerator order matches the ComboBox items in SettingsPage.xaml.
     enum class AppTheme { Default, Light, Dark };
     enum class Backdrop { None, Mica, MicaAlt };
@@ -39,7 +42,12 @@ namespace urpdf
         void SetTheme(AppTheme theme);
         void SetBackdrop(Backdrop backdrop);
 
+        std::wstring ExportJson() const;
+        bool ImportJson(std::wstring_view text);
+
     private:
+        void Store(SettingsData const& settings);
+
         std::unique_ptr<ISettingsStore> m_store;
         SettingsData m_cache;
     };

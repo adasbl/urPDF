@@ -1,17 +1,39 @@
-#include "pch.h"
-
 // Corresponding
 #include "AppSettings.h"
 
 // Standard C++
+#include <cmath>
 #include <utility>
+
+// Windows SDK / WinRT
+#include <winrt/base.h>
+#include <winrt/Windows.Data.Json.h>
+#include <winrt/Windows.Foundation.Collections.h>
+
+namespace json = winrt::Windows::Data::Json;
 
 namespace urpdf
 {
     namespace
     {
+        constexpr std::wstring_view SchemaVersionKey = L"schemaVersion";
         constexpr std::wstring_view ThemeKey = L"AppTheme";
         constexpr std::wstring_view BackdropKey = L"Transparency";
+
+        template<typename T, typename Parse>
+        bool TryReadImportedValue(json::JsonObject const& root, std::wstring_view key, Parse parse, T& value)
+        {
+            if (!root.HasKey(key)) { return true; }
+
+            auto entry = root.GetNamedValue(key);
+            if (entry.ValueType() != json::JsonValueType::String) { return false; }
+
+            auto parsed = parse(entry.GetString());
+            if (!parsed) { return false; }
+
+            value = *parsed;
+            return true;
+        }
     }
 
     std::wstring_view ToString(AppTheme theme) noexcept
@@ -63,12 +85,6 @@ namespace urpdf
         }
     }
 
-    AppSettings& AppSettings::Instance()
-    {
-        static AppSettings instance{ CreateSettingsStore() };
-        return instance;
-    }
-
     SettingsData AppSettings::Get() const noexcept
     {
         return m_cache;
@@ -87,5 +103,56 @@ namespace urpdf
         m_cache.backdrop = backdrop;
         try { m_store->Write(BackdropKey, ToString(backdrop)); }
         catch (...) {}
+    }
+
+    std::wstring AppSettings::ExportJson() const
+    {
+        json::JsonObject root;
+        root.SetNamedValue(SchemaVersionKey, json::JsonValue::CreateNumberValue(SettingsSchemaVersion));
+        root.SetNamedValue(ThemeKey, json::JsonValue::CreateStringValue(ToString(m_cache.theme)));
+        root.SetNamedValue(BackdropKey, json::JsonValue::CreateStringValue(ToString(m_cache.backdrop)));
+        return std::wstring{ root.Stringify() };
+    }
+
+    bool AppSettings::ImportJson(std::wstring_view text)
+    {
+        json::JsonObject root{ nullptr };
+        if (!json::JsonObject::TryParse(text, root)) { return false; }
+
+        if (!root.HasKey(SchemaVersionKey)) { return false; }
+        auto version = root.GetNamedValue(SchemaVersionKey);
+        if (version.ValueType() != json::JsonValueType::Number) { return false; }
+        const double versionNumber = version.GetNumber();
+        if (versionNumber < 1 || versionNumber > SettingsSchemaVersion || versionNumber != std::floor(versionNumber))
+        {
+            return false;
+        }
+
+        SettingsData imported = m_cache;
+        if (!TryReadImportedValue(root, ThemeKey, ParseAppTheme, imported.theme)
+            || !TryReadImportedValue(root, BackdropKey, ParseBackdrop, imported.backdrop))
+        {
+            return false;
+        }
+
+        try
+        {
+            Store(imported);
+        }
+        catch (...)
+        {
+            try { Store(m_cache); }
+            catch (...) {}
+            return false;
+        }
+
+        m_cache = imported;
+        return true;
+    }
+
+    void AppSettings::Store(SettingsData const& settings)
+    {
+        m_store->Write(ThemeKey, ToString(settings.theme));
+        m_store->Write(BackdropKey, ToString(settings.backdrop));
     }
 }
