@@ -81,15 +81,11 @@ namespace urpdf
 
     void FileSettingsStore::Load()
     {
-        std::ifstream file{ m_path, std::ios::binary };
-        if (!file) { return; }
-
-        std::string content{ std::istreambuf_iterator<char>{ file }, std::istreambuf_iterator<char>{} };
-        if (file.bad()) { return; }
-        file.close();
+        auto content = ReadTextFile(m_path);
+        if (!content) { return; }
 
         json::JsonObject root{ nullptr };
-        if (!json::JsonObject::TryParse(winrt::to_hstring(content), root))
+        if (!json::JsonObject::TryParse(winrt::to_hstring(*content), root))
         {
             MoveFileExW(m_path.c_str(), WithSuffix(m_path, L".bak").c_str(), MOVEFILE_REPLACE_EXISTING);
             return;
@@ -112,10 +108,27 @@ namespace urpdf
         {
             root.SetNamedValue(key, json::JsonValue::CreateStringValue(value));
         }
-        std::string const content = winrt::to_string(root.Stringify());
+        WriteTextFileAtomically(m_path, winrt::to_string(root.Stringify()));
+    }
 
-        std::filesystem::create_directories(m_path.parent_path());
-        auto const tempPath = WithSuffix(m_path, L".tmp");
+    std::optional<std::string> ReadTextFile(std::filesystem::path const& path)
+    {
+        std::ifstream file{ path, std::ios::binary };
+        if (!file) { return std::nullopt; }
+
+        std::string content{ std::istreambuf_iterator<char>{ file }, std::istreambuf_iterator<char>{} };
+        if (file.bad()) { return std::nullopt; }
+
+        constexpr std::string_view Utf8Bom = "\xEF\xBB\xBF";
+        if (content.starts_with(Utf8Bom)) { content.erase(0, Utf8Bom.size()); }
+        return content;
+    }
+
+    void WriteTextFileAtomically(std::filesystem::path const& path, std::string_view content)
+    {
+        if (path.has_parent_path()) { std::filesystem::create_directories(path.parent_path()); }
+
+        auto const tempPath = WithSuffix(path, L".tmp");
         {
             wil::unique_hfile file{ CreateFileW(tempPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr) };
             if (!file) { winrt::throw_last_error(); }
@@ -131,7 +144,7 @@ namespace urpdf
                 throw winrt::hresult_error{ HRESULT_FROM_WIN32(ERROR_WRITE_FAULT) };
             }
         }
-        if (!MoveFileExW(tempPath.c_str(), m_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        if (!MoveFileExW(tempPath.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
         {
             winrt::throw_last_error();
         }

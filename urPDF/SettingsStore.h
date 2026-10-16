@@ -41,5 +41,8 @@ namespace urpdf
         std::map<std::wstring, std::wstring, std::less<>> m_values;
     };
 
+    std::optional<std::string> ReadTextFile(std::filesystem::path const& path);
+    void WriteTextFileAtomically(std::filesystem::path const& path, std::string_view content);
+
     bool HasPackageIdentity() noexcept;
 }

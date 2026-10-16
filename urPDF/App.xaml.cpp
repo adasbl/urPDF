@@ -1,6 +1,9 @@
 #include "pch.h"
 #include "App.xaml.h"
 #include "MainWindow.xaml.h"
+#include "CommandLine.h"
+
+#include <cstdlib>
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -26,4 +29,22 @@ namespace winrt::urPDF::implementation
         window = make<MainWindow>();
         window.Activate();
     }
+}
+
+int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
+{
+    winrt::init_apartment(winrt::apartment_type::single_threaded);
+
+    if (auto exitCode = urpdf::RunCommandLine(__argc, __wargv))
+    {
+        return *exitCode;
+    }
+
+    Application::Start(
+        [](auto&&)
+        {
+            ::winrt::make<::winrt::urPDF::implementation::App>();
+        });
+
+    return 0;
 }

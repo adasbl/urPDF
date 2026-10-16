@@ -121,6 +121,7 @@
       <PrecompiledHeaderOutputFile>$(IntDir)pch.pch</PrecompiledHeaderOutputFile>
       <WarningLevel>Level4</WarningLevel>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <PreprocessorDefinitions>DISABLE_XAML_GENERATED_MAIN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
     </ClCompile>
   </ItemDefinitionGroup>
@@ -168,6 +169,7 @@
       <DependentUpon>SettingsPage.xaml</DependentUpon>
       <SubType>Code</SubType>
     </ClInclude>
+    <ClInclude Include="CommandLine.h" />
     <ClInclude Include="SettingsStore.h" />
   </ItemGroup>
   <ItemGroup>
@@ -205,6 +207,7 @@
       <DependentUpon>SettingsPage.xaml</DependentUpon>
       <SubType>Code</SubType>
     </ClCompile>
+    <ClCompile Include="CommandLine.cpp" />
     <ClCompile Include="SettingsStore.cpp" />
   </ItemGroup>
   <ItemGroup>
