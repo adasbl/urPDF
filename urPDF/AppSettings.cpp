@@ -74,15 +74,18 @@ namespace urpdf
         return m_cache;
     }
 
+    // A failed write keeps the new value for the current session only.
     void AppSettings::SetTheme(AppTheme theme)
     {
         m_cache.theme = theme;
-        m_store->Write(ThemeKey, ToString(theme));
+        try { m_store->Write(ThemeKey, ToString(theme)); }
+        catch (...) {}
     }
 
     void AppSettings::SetBackdrop(Backdrop backdrop)
     {
         m_cache.backdrop = backdrop;
-        m_store->Write(BackdropKey, ToString(backdrop));
+        try { m_store->Write(BackdropKey, ToString(backdrop)); }
+        catch (...) {}
     }
 }
