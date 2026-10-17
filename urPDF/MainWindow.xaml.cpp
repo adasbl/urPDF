@@ -26,6 +26,7 @@ extern "C" {
 #include <cstdlib>
 #include <cwctype>
 #include <exception>
+#include <filesystem>
 #include <limits>
 #include <map>
 #include <memory>
@@ -81,6 +82,22 @@ namespace
     void UnlockMuPdf(void* user, int lock)
     {
         static_cast<std::mutex*>(user)[lock].unlock();
+    }
+
+    std::filesystem::path ExecutableDirectory()
+    {
+        std::wstring path(MAX_PATH, L'\0');
+        while (true)
+        {
+            const DWORD length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+            if (length == 0) { winrt::throw_last_error(); }
+            if (length < path.size())
+            {
+                path.resize(length);
+                return std::filesystem::path{ path }.parent_path();
+            }
+            path.resize(path.size() * 2);
+        }
     }
 
     bool IsPdfFile(storage::StorageFile const& file)
@@ -338,7 +355,7 @@ namespace winrt::urPDF::implementation
             }
         });
 
-        AppWindow().SetIcon(L"Assets\\logo.ico");
+        AppWindow().SetIcon((ExecutableDirectory() / L"Assets" / L"logo.ico").wstring());
 
         ExtendsContentIntoTitleBar(true);
         SetTitleBar(AppTitleBar());
