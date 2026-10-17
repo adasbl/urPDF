@@ -78,4 +78,14 @@ namespace urpdf
         }
         return std::nullopt;
     }
+
+    std::optional<std::wstring> DocumentPathArgument(int argc, wchar_t const* const* argv)
+    {
+        if (argc < 2 || argv == nullptr || argv[1][0] == L'\0') { return std::nullopt; }
+
+        std::error_code error;
+        auto path = std::filesystem::absolute(argv[1], error);
+        if (error) { return std::nullopt; }
+        return path.wstring();
+    }
 }

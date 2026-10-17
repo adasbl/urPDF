@@ -254,6 +254,7 @@ namespace winrt::urPDF::implementation
 
         winrt::fire_and_forget OpenPdfFileAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         winrt::fire_and_forget OpenPdfFileAsync(storage::StorageFile const& file);
+        winrt::fire_and_forget OpenPdfPathAsync(winrt::hstring path);
         void TabView_AddButtonClick(foundation::IInspectable const& sender, foundation::IInspectable const& args);
         void TabView_TabCloseRequested(foundation::IInspectable const& sender, controls::TabViewTabCloseRequestedEventArgs const& args);
         void TabView_Loaded(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
@@ -291,6 +292,7 @@ namespace winrt::urPDF::implementation
         int32_t m_pageNumber{ 0 };
         int32_t m_pageCounter{ 0 };
         storage::StorageFile m_pendingFile{ nullptr };
+        winrt::hstring m_pendingFilePath;
         winrt::event<xaml::Data::PropertyChangedEventHandler> m_propertyChanged;
 
         xaml::Printing::PrintDocument m_printDocument{ nullptr };

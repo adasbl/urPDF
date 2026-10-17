@@ -8,6 +8,7 @@
 
 // Project
 #include "AppSettings.h"
+#include "CommandLine.h"
 #include "PdfRenderScale.h"
 #include "SettingsPage.h"
 #include "AboutPage.h"
@@ -22,12 +23,14 @@ extern "C" {
 #include <chrono>
 #include <cmath>
 #include <coroutine>
+#include <cstdlib>
 #include <cwctype>
 #include <exception>
 #include <limits>
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 
 // Windows SDK / WinRT
 #include <shobjidl_core.h>
@@ -78,6 +81,13 @@ namespace
     void UnlockMuPdf(void* user, int lock)
     {
         static_cast<std::mutex*>(user)[lock].unlock();
+    }
+
+    bool IsPdfFile(storage::StorageFile const& file)
+    {
+        std::wstring fileType{ file.FileType() };
+        std::transform(fileType.begin(), fileType.end(), fileType.begin(), [](wchar_t character) { return static_cast<wchar_t>(std::towlower(character)); });
+        return fileType == L".pdf";
     }
 
     constexpr double PdfRenderScale(double zoom, double dpiScale) noexcept
@@ -349,6 +359,10 @@ namespace winrt::urPDF::implementation
             {
                 m_pendingFile = fileArgs.Files().GetAt(0).try_as<storage::StorageFile>();
             }
+        }
+        else if (auto path = urpdf::DocumentPathArgument(__argc, __wargv))
+        {
+            m_pendingFilePath = *path;
         }
     }
 
@@ -687,9 +701,7 @@ namespace winrt::urPDF::implementation
 
 
     // TABVIEW
-    void MainWindow::TabView_Loaded(
-        foundation::IInspectable const& sender,
-        xaml::RoutedEventArgs const&)
+    void MainWindow::TabView_Loaded(foundation::IInspectable const& sender, xaml::RoutedEventArgs const&)
     {
         auto tabView = sender.as<controls::TabView>();
         TabView_AddButtonClick(tabView, nullptr);
@@ -699,6 +711,10 @@ namespace winrt::urPDF::implementation
             auto file = m_pendingFile;
             m_pendingFile = nullptr;
             OpenPdfFileAsync(file);
+        }
+        else if (!m_pendingFilePath.empty())
+        {
+            OpenPdfPathAsync(std::exchange(m_pendingFilePath, {}));
         }
     }
 
@@ -831,18 +847,11 @@ namespace winrt::urPDF::implementation
         for (auto const& item : storageItems)
         {
             auto file = item.try_as<storage::StorageFile>();
-            if (file)
+            if (file && IsPdfFile(file))
             {
-                auto fileType = file.FileType();
-                std::wstring normalizedFileType(fileType.c_str());
-                std::transform(normalizedFileType.begin(), normalizedFileType.end(), normalizedFileType.begin(), [](wchar_t character) { return static_cast<wchar_t>(std::towlower(character)); });
-
-                if (normalizedFileType == L".pdf")
-                {
-                    deferral.Complete();
-                    OpenPdfFileAsync(file);
-                    co_return;
-                }
+                deferral.Complete();
+                OpenPdfFileAsync(file);
+                co_return;
             }
         }
 
@@ -866,6 +875,26 @@ namespace winrt::urPDF::implementation
         if (!file) co_return;
 
         OpenPdfFileAsync(file);
+    }
+
+    winrt::fire_and_forget MainWindow::OpenPdfPathAsync(winrt::hstring path)
+    {
+        auto strongThis = get_strong();
+
+        storage::StorageFile file{ nullptr };
+        try
+        {
+            file = co_await storage::StorageFile::GetFileFromPathAsync(path);
+        }
+        catch (winrt::hresult_error const&)
+        {
+            co_return;
+        }
+
+        if (IsPdfFile(file))
+        {
+            OpenPdfFileAsync(file);
+        }
     }
 
     winrt::fire_and_forget MainWindow::OpenPdfFileAsync(storage::StorageFile const& file)
