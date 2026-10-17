@@ -1,0 +1,33 @@
+<Project Sdk="WixToolset.Sdk/7.0.0">
+  <PropertyGroup>
+    <OutputName>urPDF</OutputName>
+    <InstallerPlatform Condition="'$(Platform)' == 'x64' or '$(Platform)' == 'AnyCPU'">x64</InstallerPlatform>
+    <Platform Condition="'$(Platform)' == 'AnyCPU'">x64</Platform>
+
+    <!-- One version for the whole project: the same value as in vcpkg.json (set by scripts/bump-version.ps1). -->
+    <ProductVersion Condition="'$(ProductVersion)' == ''">$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)..\vcpkg.json')), '"version-string"\s*:\s*"([^"]+)"').Groups[1].Value)</ProductVersion>
+
+    <!-- Output of scripts/stage-msi-payload.ps1. -->
+    <PayloadDir Condition="'$(PayloadDir)' == ''">$(MSBuildThisFileDirectory)..\out\msi\x64\Release\payload</PayloadDir>
+
+    <DefineConstants>$(DefineConstants);ProductVersion=$(ProductVersion);PayloadDir=$(PayloadDir);IconPath=$(MSBuildThisFileDirectory)..\urPDF\Assets\logo.ico</DefineConstants>
+
+    <!--
+      Validation rules that do not fit this package:
+        ICE03  localized Windows App SDK resource DLLs carry language IDs (e.g. Odia, Quechua) missing from the MSI language list.
+        ICE38  per-user components use a file key path (the Files element creates one component per file).
+        ICE64  folders inside the user profile are not listed in RemoveFile; they are emptied and removed with their files.
+        ICE91  per-user folder does not vary with ALLUSERS; the package is per-user only.
+    -->
+    <SuppressIces>ICE03;ICE38;ICE64;ICE91</SuppressIces>
+
+    <!-- Keep installer output away from the application build folders. -->
+    <OutputPath>$(MSBuildThisFileDirectory)..\out\installer\bin\$(Configuration)\</OutputPath>
+    <IntermediateOutputPath>$(MSBuildThisFileDirectory)..\out\installer\obj\$(Configuration)\</IntermediateOutputPath>
+  </PropertyGroup>
+
+  <Target Name="CheckPayload" BeforeTargets="BeforeBuild">
+    <Error Condition="!Exists('$(PayloadDir)\urPDF.exe')"
+           Text="Payload not found in '$(PayloadDir)'. Run scripts/stage-msi-payload.ps1 first." />
+  </Target>
+</Project>
