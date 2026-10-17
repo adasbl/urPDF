@@ -254,7 +254,7 @@ namespace winrt::urPDF::implementation
 
         winrt::fire_and_forget OpenPdfFileAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         winrt::fire_and_forget OpenPdfFileAsync(storage::StorageFile const& file);
-        winrt::fire_and_forget OpenPdfPathAsync(winrt::hstring path);
+        winrt::fire_and_forget OpenPdfPathAsync(winrt::hstring path);        
         void TabView_AddButtonClick(foundation::IInspectable const& sender, foundation::IInspectable const& args);
         void TabView_TabCloseRequested(foundation::IInspectable const& sender, controls::TabViewTabCloseRequestedEventArgs const& args);
         void TabView_Loaded(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
