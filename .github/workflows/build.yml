@@ -125,6 +125,9 @@ jobs:
               /bl:out/ci/logs/urPDF-msi.binlog
           if ($LASTEXITCODE -ne 0) { throw 'urPDF unpackaged build failed.' }
 
+      - name: Check version embedded in both executables
+        run: ./scripts/check-version.ps1 -ExePath out/store/x64/Release/bin/urPDF.exe, out/msi/x64/Release/bin/urPDF.exe
+
       - name: Stage and check self-contained MSI payload
         run: ./scripts/stage-msi-payload.ps1 -Configuration Release -Platform x64
 

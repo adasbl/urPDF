@@ -13,7 +13,10 @@ the version in the files. MSIX uses four components (x.y.z.0), everything else x
 [CmdletBinding()]
 param(
     # Optional release tag (v0.2.0 or 0.2.0) that must match the version in the files.
-    [string] $Tag
+    [string] $Tag,
+
+    # Optional built urPDF.exe whose embedded file/product version must match as well.
+    [string[]] $ExePath = @()
 )
 
 Set-StrictMode -Version Latest
@@ -55,6 +58,20 @@ if ($Tag) {
     $tagVersion = $Tag -replace '\Arefs/tags/', '' -replace '\Av', ''
     if ($tagVersion -cne $reference) {
         $errors += "Tag '$Tag' does not match the application version '$reference'"
+    }
+}
+
+foreach ($exe in $ExePath) {
+    if (-not (Test-Path -LiteralPath $exe)) {
+        $errors += "${exe}: file not found"
+        continue
+    }
+    $info = (Get-Item -LiteralPath $exe).VersionInfo
+    if ($info.FileVersion -cne "$reference.0") {
+        $errors += "${exe}: FileVersion is '$($info.FileVersion)', expected '$reference.0'"
+    }
+    if ($info.ProductVersion -cne $reference) {
+        $errors += "${exe}: ProductVersion is '$($info.ProductVersion)', expected '$reference'"
     }
 }
 

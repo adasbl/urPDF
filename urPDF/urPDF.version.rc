@@ -1,0 +1,55 @@
+// Version information shown in File Explorer > Properties > Details.
+//
+// Kept apart from urPDF.rc so the Visual Studio resource editor does not rewrite it.
+// The numbers come from vcpkg.json (set by scripts/bump-version.ps1): urPDF.vcxproj
+// passes URPDF_VERSION_MAJOR/MINOR/PATCH to the resource compiler.
+#include "winres.h"
+
+#ifndef URPDF_VERSION_MAJOR
+#error URPDF_VERSION_MAJOR is not defined. Build through urPDF.vcxproj.
+#endif
+
+#define URPDF_STRINGIZE_(value) #value
+#define URPDF_STRINGIZE(value) URPDF_STRINGIZE_(value)
+
+// 0.1.0.0: the fourth part stays 0 (the Microsoft Store reserves it).
+#define URPDF_VERSION_NUMBERS URPDF_VERSION_MAJOR,URPDF_VERSION_MINOR,URPDF_VERSION_PATCH,0
+#define URPDF_VERSION_TEXT \
+    URPDF_STRINGIZE(URPDF_VERSION_MAJOR) "." \
+    URPDF_STRINGIZE(URPDF_VERSION_MINOR) "." \
+    URPDF_STRINGIZE(URPDF_VERSION_PATCH)
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION URPDF_VERSION_NUMBERS
+ PRODUCTVERSION URPDF_VERSION_NUMBERS
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+ FILEFLAGS VS_FF_DEBUG
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "adamj"
+            VALUE "FileDescription", "urPDF - simple PDF viewer"
+            VALUE "FileVersion", URPDF_VERSION_TEXT ".0"
+            VALUE "InternalName", "urPDF"
+            VALUE "LegalCopyright", "Licensed under the GNU AGPL v3"
+            VALUE "OriginalFilename", "urPDF.exe"
+            VALUE "ProductName", "urPDF"
+            VALUE "ProductVersion", URPDF_VERSION_TEXT
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
