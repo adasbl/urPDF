@@ -19,4 +19,9 @@ $script:VersionSources = @(
         Pattern      = '(?<prefix><TextBlock\b[^>]*?\bText="Version )(?<version>[0-9]+(?:\.[0-9]+){1,3})(?<suffix>")'
         Suffix       = ''
     }
+    [pscustomobject]@{
+        RelativePath = 'urPDF/SettingsPage.xaml'
+        Pattern      = '(?<prefix><TextBlock\b[^>]*?\bText="urPDF - Version )(?<version>[0-9]+(?:\.[0-9]+){1,3})(?<suffix>")'
+        Suffix       = ''
+    }
 )
