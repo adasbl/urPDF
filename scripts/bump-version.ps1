@@ -67,16 +67,14 @@ function Get-VersionChange {
     }
 }
 
+. (Join-Path $PSScriptRoot 'version-sources.ps1')
+
 $changes = @(
-    Get-VersionChange -RelativePath 'urPDF/Package.appxmanifest' `
-        -Pattern '(?s)(?<prefix><Identity\b[^>]*?\bVersion=")(?<version>[^"]+)(?<suffix>")' `
-        -NewValue $packageVersion
-    Get-VersionChange -RelativePath 'vcpkg.json' `
-        -Pattern '(?<prefix>"version-string"\s*:\s*")(?<version>[^"]+)(?<suffix>")' `
-        -NewValue $Version
-    Get-VersionChange -RelativePath 'urPDF/AboutPage.xaml' `
-        -Pattern '(?<prefix><TextBlock\b[^>]*?\bText="Version )(?<version>[0-9]+(?:\.[0-9]+){1,3})(?<suffix>")' `
-        -NewValue $Version
+    foreach ($source in $script:VersionSources) {
+        Get-VersionChange -RelativePath $source.RelativePath `
+            -Pattern $source.Pattern `
+            -NewValue ($Version + $source.Suffix)
+    }
 )
 
 $pendingChanges = @($changes | Where-Object { $_.Content -cne $_.OriginalContent })

@@ -29,6 +29,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check version consistency
+        run: ./scripts/check-version.ps1
+
       - name: Locate Visual Studio and prepare paths
         run: |
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
