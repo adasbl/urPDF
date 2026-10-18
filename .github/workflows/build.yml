@@ -12,13 +12,17 @@ permissions:
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a push to main: it may be the release build.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
     name: Release x64
     runs-on: windows-2025-vs2026
     timeout-minutes: 60
+    outputs:
+      release: ${{ steps.release.outputs.release }}
+      version: ${{ steps.release.outputs.version }}
     defaults:
       run:
         shell: pwsh
@@ -31,6 +35,27 @@ jobs:
 
       - name: Check version consistency
         run: ./scripts/check-version.ps1
+
+      # A push to main whose subject is exactly "bump: version X.Y.Z" is a release:
+      # the version in the files must equal X.Y.Z, and the release job below tags it.
+      - name: Detect release commit
+        id: release
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          $release = 'false'
+          $version = ''
+          if ($env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/main') {
+              $subject = ($env:COMMIT_MESSAGE -split "`n")[0].Trim()
+              if ($subject -match '\Abump: version (\d+\.\d+\.\d+)\z') {
+                  $version = $Matches[1]
+                  ./scripts/check-version.ps1 -Tag "v$version"
+                  $release = 'true'
+              }
+          }
+          "release=$release" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          if ($release -eq 'true') { "Release commit: urPDF $version" >> $env:GITHUB_STEP_SUMMARY }
 
       - name: Locate Visual Studio and prepare paths
         run: |
@@ -105,13 +130,15 @@ jobs:
           nuget restore urPDF/packages.config -PackagesDirectory packages -NonInteractive
           if ($LASTEXITCODE -ne 0) { throw 'NuGet package restore failed.' }
 
+      # Unsigned .msixupload for the Store: Partner Center signs it after submission.
       - name: Build urPDF for Microsoft Store
         run: |
           & $env:MSBUILD_PATH urPDF/urPDF.vcxproj /m /nologo /verbosity:minimal `
               /p:Configuration=Release /p:Platform=x64 `
               "/p:VcpkgRoot=$env:VCPKG_ROOT" /p:VcpkgTriplet=x64-windows `
               /p:VcpkgManifestInstall=false /p:AppxPackageSigningEnabled=false `
-              /p:GenerateAppxPackageOnBuild=false `
+              /p:GenerateAppxPackageOnBuild=true /p:UapAppxPackageBuildMode=StoreUpload `
+              /p:AppxBundle=Never `
               /bl:out/ci/logs/urPDF-store.binlog
           if ($LASTEXITCODE -ne 0) { throw 'urPDF Store build failed.' }
 
@@ -150,6 +177,42 @@ jobs:
               throw 'No unit tests were executed.'
           }
 
+      - name: Build MSI installer
+        env:
+          WIX_EULA_ID: ${{ vars.WIX_EULA_ID }}
+        run: |
+          if (-not $env:WIX_EULA_ID) {
+              throw 'WiX 7 requires accepting the OSMF EULA. Set the repository variable WIX_EULA_ID to wix7 after reading https://wixtoolset.org/osmf/.'
+          }
+          dotnet build installer/urPDF.wixproj -c Release -nologo -v:minimal "-p:AcceptEula=$env:WIX_EULA_ID"
+          if ($LASTEXITCODE -ne 0) { throw 'MSI build failed.' }
+
+          $version = (Get-Content -LiteralPath vcpkg.json -Raw | ConvertFrom-Json).'version-string'
+          $null = New-Item -ItemType Directory -Force -Path out/release
+          Copy-Item -LiteralPath out/installer/bin/Release/urPDF.msi -Destination "out/release/urPDF-$version-x64.msi"
+
+          $store = Get-ChildItem -LiteralPath out/store/x64/Release/packages -Filter '*.msixupload' | Select-Object -First 1
+          if (-not $store) { throw 'The Store .msixupload package was not produced.' }
+          Copy-Item -LiteralPath $store.FullName -Destination out/release/
+
+      - name: Upload MSI installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: msi-installer
+          path: out/release/*.msi
+          if-no-files-found: error
+          retention-days: 14
+
+      # Submit this file in Partner Center. Its manifest Identity must match the reserved
+      # Store name and publisher (Package.appxmanifest) before the first submission.
+      - name: Upload Microsoft Store package
+        uses: actions/upload-artifact@v7
+        with:
+          name: msix-store-upload
+          path: out/release/*.msixupload
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Summarize test results
         if: always()
         run: |
@@ -170,3 +233,55 @@ jobs:
             out/ci/test-results
           if-no-files-found: warn
           retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: needs.build.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - name: Download MSI installer
+        uses: actions/download-artifact@v8
+        with:
+          name: msi-installer
+          path: release
+
+      # The tag is created by the release itself, on the commit that was built and tested.
+      - name: Create tag and GitHub Release
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists." >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists." >&2
+            exit 1
+          fi
+
+          msi="release/urPDF-$VERSION-x64.msi"
+          sha256="$(sha256sum "$msi" | cut -d' ' -f1 | tr 'a-f' 'A-F')"
+          {
+            echo "urPDF $VERSION. Per-user MSI installer for Windows x64; no administrator rights needed."
+            echo
+            echo "SHA256: $sha256"
+            echo
+            echo "The installer is not code-signed, so Windows SmartScreen may show an unknown publisher warning."
+          } > notes.md
+
+          prerelease=()
+          if [[ "$VERSION" == 0.* ]]; then prerelease=(--prerelease); fi
+
+          gh release create "$tag" "$msi" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "urPDF $VERSION" \
+            --notes-file notes.md \
+            "${prerelease[@]}"
