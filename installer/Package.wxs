@@ -49,7 +49,7 @@
     <Component Id="PdfRegistration" Directory="INSTALLFOLDER">
       <RegistryKey Root="HKCU" Key="Software\Classes\urPDF.Document">
         <RegistryValue Type="string" Value="PDF document" />
-        <RegistryValue Key="DefaultIcon" Type="string" Value="[INSTALLFOLDER]urPDF.exe,0" />
+        <RegistryValue Key="DefaultIcon" Type="string" Value="[INSTALLFOLDER]Assets\PdfFileIcon.ico" />
         <RegistryValue Key="shell\open\command" Type="string" Value="&quot;[INSTALLFOLDER]urPDF.exe&quot; &quot;%1&quot;" />
       </RegistryKey>
 

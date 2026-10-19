@@ -185,6 +185,7 @@
     </Image>
     <Image Include="Assets\logo.ico" />
     <Image Include="Assets\logo.png" />
+    <Image Include="Assets\PdfFileIcon.ico" />
     <Image Include="Assets\PdfFileIcon.png" />
     <Image Include="Assets\PdfFileIcon.scale-100.png" />
     <Image Include="Assets\PdfFileIcon.scale-125.png" />
