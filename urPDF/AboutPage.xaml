@@ -48,7 +48,7 @@
 
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
                                 <TextBlock Text="urPDF" FontSize="28" FontWeight="SemiBold"/>
-                                <TextBlock Text="Version 0.1.1" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                <TextBlock Text="Version 0.1.2" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                                 <TextBlock Text="Minimalist, high-performance native PDF reader for Windows 11" 
                                            TextWrapping="Wrap" 
                                            Margin="0,4,0,0"
