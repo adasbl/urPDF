@@ -83,7 +83,7 @@
                                     <StaticResource x:Key="SplitButtonForegroundSecondaryPressed" ResourceKey="TextFillColorSecondaryBrush"/>
                                     <SolidColorBrush x:Key="SplitButtonBorderBrushPointerOver" Color="Transparent"/>
                                     <SolidColorBrush x:Key="SplitButtonBorderBrushPressed" Color="Transparent"/>
-                                    <SolidColorBrush x:Key="SplitButtonBorderBrushDivider" Color="Transparent"/>
+                                    <StaticResource x:Key="SplitButtonBorderBrushDivider" ResourceKey="ControlStrokeColorDefaultBrush"/>
                                 </SplitButton.Resources>
                                 <SplitButton.Flyout>
                                     <MenuFlyout Placement="BottomEdgeAlignedLeft">
