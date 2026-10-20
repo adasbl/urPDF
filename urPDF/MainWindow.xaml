@@ -66,7 +66,7 @@
                         </TabView.Resources>
 
                         <TabView.TabStripFooter>
-                            <SplitButton Height="24" Margin="0,0,0,4" Padding="0"
+                            <SplitButton x:Name="NewTabSplitButton" Height="24" Margin="0,0,0,4" Padding="0"
                                          HorizontalAlignment="Left" VerticalAlignment="Bottom"
                                          Background="Transparent" BorderBrush="Transparent" BorderThickness="0"
                                          Content="&#xE710;" FontFamily="{ThemeResource SymbolThemeFontFamily}" FontSize="12"

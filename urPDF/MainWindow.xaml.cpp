@@ -50,6 +50,7 @@ extern "C" {
 #include <winrt/Microsoft.UI.Xaml.Printing.h>
 #include <winrt/Microsoft.Windows.AppLifecycle.h>
 #include <winrt/Microsoft.UI.Windowing.h>
+#include <winrt/Microsoft.UI.Input.h>
 #include <winrt/Windows.UI.Xaml.Interop.h>
 
 
@@ -359,6 +360,14 @@ namespace winrt::urPDF::implementation
 
         ExtendsContentIntoTitleBar(true);
         SetTitleBar(AppTitleBar());
+
+        AppTitleBar().LayoutUpdated([weakThis = get_weak()](auto const&, auto const&)
+        {
+            if (auto self = weakThis.get())
+            {
+                self->UpdateNewTabInputRegion();
+            }
+        });
 
         LoadSettings();
 
@@ -718,6 +727,40 @@ namespace winrt::urPDF::implementation
 
 
     // TABVIEW
+    void MainWindow::UpdateNewTabInputRegion()
+    {
+        if (m_isClosed || !ExtendsContentIntoTitleBar()) { return; }
+        auto button = NewTabSplitButton();
+        auto root = button.XamlRoot();
+        if (!root) { return; }
+
+        winrt::Windows::Graphics::RectInt32 rect{};
+        if (MainWindowUI().Visibility() == xaml::Visibility::Visible &&
+            SettingsOverlay().Visibility() != xaml::Visibility::Visible && button.IsLoaded())
+        {
+            const auto bounds = button.TransformToVisual(nullptr).TransformBounds( { 0, 0, static_cast<float>(button.ActualWidth()), static_cast<float>(button.ActualHeight()) });
+            const double scale = root.RasterizationScale();
+            rect.X = static_cast<int32_t>(std::floor(bounds.X * scale));
+            rect.Y = static_cast<int32_t>(std::floor(bounds.Y * scale));
+            rect.Width = static_cast<int32_t>(std::ceil((bounds.X + bounds.Width) * scale)) - rect.X;
+            rect.Height = static_cast<int32_t>(std::ceil((bounds.Y + bounds.Height) * scale)) - rect.Y;
+        }
+
+        if (m_newTabInputRect && *m_newTabInputRect == rect) { return; }
+
+        const auto input = winrt::Microsoft::UI::Input::InputNonClientPointerSource::GetForWindowId(AppWindow().Id());
+        const auto region = winrt::Microsoft::UI::Input::NonClientRegionKind::Passthrough;
+        if (rect.Width > 0 && rect.Height > 0)
+        {
+            input.SetRegionRects(region, { rect });
+        }
+        else
+        {
+            input.ClearRegionRects(region);
+        }
+        m_newTabInputRect = rect;
+    }
+
     void MainWindow::TabView_Loaded(foundation::IInspectable const& sender, xaml::RoutedEventArgs const&)
     {
         auto tabView = sender.as<controls::TabView>();
@@ -1480,6 +1523,7 @@ namespace winrt::urPDF::implementation
                 if (auto self = weakThis.get())
                 {
                     if (self->m_isClosed || sender != self->m_observedXamlRoot) { return; }
+                    self->UpdateNewTabInputRegion();
                     const double scale = sender.RasterizationScale();
                     if (!std::isfinite(scale) || scale <= 0.0 || scale == self->m_lastRasterizationScale) { return; }
                     self->m_lastRasterizationScale = scale;

@@ -32,6 +32,7 @@ extern "C" {
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Graphics.h>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Microsoft.UI.Dispatching.h>
 #include <winrt/Microsoft.UI.Xaml.h>
@@ -307,6 +308,7 @@ namespace winrt::urPDF::implementation
         bool m_isVisibleRenderRunning{ false };
         bool m_visibleRenderRequested{ false };
         bool m_isClosed{ false };
+        std::optional<winrt::Windows::Graphics::RectInt32> m_newTabInputRect;
         xaml::XamlRoot m_observedXamlRoot{ nullptr };
         xaml::XamlRoot::Changed_revoker m_xamlRootChangedRevoker;
         dispatching::DispatcherQueueTimer m_dpiRenderTimer{ nullptr };
@@ -327,6 +329,7 @@ namespace winrt::urPDF::implementation
         void ApplyPendingRenderZoom();
         void CancelPendingZoomRender();
         void AttachDpiObserver();
+        void UpdateNewTabInputRegion();
         void DetachDpiObserver();
         void RequestDpiRefresh();
         void ApplyPendingDpiRefresh();
