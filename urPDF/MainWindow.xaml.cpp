@@ -735,9 +735,9 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    void MainWindow::TabView_AddButtonClick(foundation::IInspectable const& sender, foundation::IInspectable const&)
+    void MainWindow::TabView_AddButtonClick(foundation::IInspectable const&, foundation::IInspectable const&)
     {
-        auto tabView = sender.as<controls::TabView>();
+        auto tabView = MainTabView();
 
         controls::TabViewItem newTab;
 
