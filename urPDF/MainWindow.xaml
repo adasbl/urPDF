@@ -93,6 +93,11 @@
                                                 <SymbolIcon Symbol="OpenFile"/>
                                             </MenuFlyoutItem.Icon>
                                         </MenuFlyoutItem>
+                                        <MenuFlyoutItem Text="Open document in new window…" Click="OpenPdfInNewWindowAsync">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE8A7;"/>
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
 
                                     </MenuFlyout>
                                 </SplitButton.Flyout>

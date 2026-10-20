@@ -883,10 +883,8 @@ namespace winrt::urPDF::implementation
 
 
     // FILE OPENING 
-    winrt::fire_and_forget MainWindow::OpenPdfFileAsync(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    foundation::IAsyncOperation<storage::StorageFile> MainWindow::PickPdfFileAsync()
     {
-        // TODO: add check if empty tab is opened
-        // TODO: check if file is already opened (+ option to turn off in settings)
         pickers::FileOpenPicker filePicker;
         filePicker.FileTypeFilter().Append(L".pdf");
 
@@ -894,10 +892,50 @@ namespace winrt::urPDF::implementation
         this->try_as<::IWindowNative>()->get_WindowHandle(&hwnd);
         filePicker.as<::IInitializeWithWindow>()->Initialize(hwnd);
 
-        auto file = co_await filePicker.PickSingleFileAsync();
-        if (!file) co_return;
+        co_return co_await filePicker.PickSingleFileAsync();
+    }
+
+    winrt::fire_and_forget MainWindow::OpenPdfFileAsync(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        auto strongThis = get_strong();
+        auto file = co_await PickPdfFileAsync();
+        if (!file || m_isClosed) { co_return; }
 
         OpenPdfFileAsync(file);
+    }
+
+    winrt::fire_and_forget MainWindow::OpenPdfInNewWindowAsync(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        auto strongThis = get_strong();
+        winrt::hstring errorMessage;
+        try
+        {
+            auto file = co_await PickPdfFileAsync();
+            if (!file || m_isClosed) { co_return; }
+
+            const auto executablePath = ExecutableDirectory() / L"urPDF.exe";
+            std::wstring commandLine = L"\"" + executablePath.wstring() + L"\" \"" + file.Path().c_str() + L"\"";
+            STARTUPINFOW startupInfo{};
+            startupInfo.cb = sizeof(startupInfo);
+            PROCESS_INFORMATION processInfo{};
+            winrt::check_bool(CreateProcessW(executablePath.c_str(), commandLine.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startupInfo, &processInfo));
+            wil::unique_handle processHandle{ processInfo.hProcess };
+            wil::unique_handle threadHandle{ processInfo.hThread };
+        }
+        catch (winrt::hresult_error const& error)
+        {
+            errorMessage = error.message();
+        }
+
+        if (!errorMessage.empty() && !m_isClosed)
+        {
+            controls::ContentDialog dialog;
+            dialog.XamlRoot(MainWindowUI().XamlRoot());
+            dialog.Title(winrt::box_value(L"Couldn't open document in a new window"));
+            dialog.Content(winrt::box_value(errorMessage));
+            dialog.CloseButtonText(L"OK");
+            co_await dialog.ShowAsync();
+        }
     }
 
     winrt::fire_and_forget MainWindow::OpenPdfPathAsync(winrt::hstring path)

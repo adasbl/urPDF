@@ -253,6 +253,7 @@ namespace winrt::urPDF::implementation
         void LoadSettings();
 
         winrt::fire_and_forget OpenPdfFileAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
+        winrt::fire_and_forget OpenPdfInNewWindowAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         winrt::fire_and_forget OpenPdfFileAsync(storage::StorageFile const& file);
         winrt::fire_and_forget OpenPdfPathAsync(winrt::hstring path);        
         void TabView_AddButtonClick(foundation::IInspectable const& sender, foundation::IInspectable const& args);
@@ -285,6 +286,8 @@ namespace winrt::urPDF::implementation
         void PropertyChanged(winrt::event_token const& token) noexcept;
 
     private:
+        foundation::IAsyncOperation<storage::StorageFile> PickPdfFileAsync();
+
         std::array<std::mutex, FZ_LOCK_MAX> m_mupdfMutexes;
         fz_locks_context m_mupdfLocks{};
         fz_context* m_ctx{ nullptr };
