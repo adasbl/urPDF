@@ -53,13 +53,12 @@
                                 <ResourceDictionary.ThemeDictionaries>
                                     <ResourceDictionary x:Key="Default">
                                         <StaticResource x:Key="TabViewItemHeaderBackgroundSelected" ResourceKey="LayerFillColorDefaultBrush" />
-                                        <StaticResource x:Key="TabViewItemHeaderBackgroundPointerOverSelected" ResourceKey="LayerFillColorDefaultBrush" />
-                                        <StaticResource x:Key="TabViewItemHeaderBackgroundPressedSelected" ResourceKey="LayerFillColorDefaultBrush" />
                                     </ResourceDictionary>
                                     <ResourceDictionary x:Key="Light">
                                         <StaticResource x:Key="TabViewItemHeaderBackgroundSelected" ResourceKey="LayerFillColorDefaultBrush" />
-                                        <StaticResource x:Key="TabViewItemHeaderBackgroundPointerOverSelected" ResourceKey="LayerFillColorDefaultBrush" />
-                                        <StaticResource x:Key="TabViewItemHeaderBackgroundPressedSelected" ResourceKey="LayerFillColorDefaultBrush" />
+                                    </ResourceDictionary>
+                                    <ResourceDictionary x:Key="HighContrast">
+                                        <StaticResource x:Key="TabViewItemHeaderBackgroundSelected" ResourceKey="SystemColorWindowColorBrush" />
                                     </ResourceDictionary>
                                 </ResourceDictionary.ThemeDictionaries>
                             </ResourceDictionary>
@@ -74,16 +73,27 @@
                                          ToolTipService.ToolTip="New tab"
                                          Click="TabView_AddButtonClick">
                                 <SplitButton.Resources>
-                                    <x:Double x:Key="SplitButtonPrimaryButtonSize">31</x:Double>
-                                    <x:Double x:Key="SplitButtonSecondaryButtonSize">31</x:Double>
-                                    <StaticResource x:Key="SplitButtonBackground" ResourceKey="SubtleFillColorTransparentBrush"/>
-                                    <StaticResource x:Key="SplitButtonBackgroundPointerOver" ResourceKey="SubtleFillColorSecondaryBrush"/>
-                                    <StaticResource x:Key="SplitButtonBackgroundPressed" ResourceKey="SubtleFillColorTertiaryBrush"/>
-                                    <StaticResource x:Key="SplitButtonForegroundSecondary" ResourceKey="TextFillColorPrimaryBrush"/>
-                                    <StaticResource x:Key="SplitButtonForegroundSecondaryPressed" ResourceKey="TextFillColorSecondaryBrush"/>
-                                    <SolidColorBrush x:Key="SplitButtonBorderBrushPointerOver" Color="Transparent"/>
-                                    <SolidColorBrush x:Key="SplitButtonBorderBrushPressed" Color="Transparent"/>
-                                    <StaticResource x:Key="SplitButtonBorderBrushDivider" ResourceKey="ControlStrokeColorDefaultBrush"/>
+                                    <ResourceDictionary>
+                                        <ResourceDictionary.ThemeDictionaries>
+                                            <ResourceDictionary x:Key="Default">
+                                                <StaticResource x:Key="SplitButtonBackgroundPointerOver" ResourceKey="SubtleFillColorSecondaryBrush"/>
+                                                <StaticResource x:Key="SplitButtonBackgroundPressed" ResourceKey="SubtleFillColorTertiaryBrush"/>
+                                            </ResourceDictionary>
+                                            <ResourceDictionary x:Key="Light">
+                                                <StaticResource x:Key="SplitButtonBackgroundPointerOver" ResourceKey="SubtleFillColorSecondaryBrush"/>
+                                                <StaticResource x:Key="SplitButtonBackgroundPressed" ResourceKey="SubtleFillColorTertiaryBrush"/>
+                                            </ResourceDictionary>
+                                            <ResourceDictionary x:Key="HighContrast">
+                                                <StaticResource x:Key="SplitButtonBackgroundPointerOver" ResourceKey="SystemColorHighlightTextColorBrush"/>
+                                                <StaticResource x:Key="SplitButtonBackgroundPressed" ResourceKey="SystemColorHighlightTextColorBrush"/>
+                                            </ResourceDictionary>
+                                        </ResourceDictionary.ThemeDictionaries>
+                                        <x:Double x:Key="SplitButtonPrimaryButtonSize">31</x:Double>
+                                        <x:Double x:Key="SplitButtonSecondaryButtonSize">31</x:Double>
+                                        <SolidColorBrush x:Key="SplitButtonBackground" Color="Transparent"/>
+                                        <SolidColorBrush x:Key="SplitButtonBorderBrushPointerOver" Color="Transparent"/>
+                                        <SolidColorBrush x:Key="SplitButtonBorderBrushPressed" Color="Transparent"/>
+                                    </ResourceDictionary>
                                 </SplitButton.Resources>
                                 <SplitButton.Flyout>
                                     <MenuFlyout Placement="BottomEdgeAlignedLeft">
