@@ -308,7 +308,7 @@ namespace winrt::urPDF::implementation
         bool m_isVisibleRenderRunning{ false };
         bool m_visibleRenderRequested{ false };
         bool m_isClosed{ false };
-        std::optional<winrt::Windows::Graphics::RectInt32> m_newTabInputRect;
+        std::optional<std::vector<winrt::Windows::Graphics::RectInt32>> m_passthroughRects;
         xaml::XamlRoot m_observedXamlRoot{ nullptr };
         xaml::XamlRoot::Changed_revoker m_xamlRootChangedRevoker;
         dispatching::DispatcherQueueTimer m_dpiRenderTimer{ nullptr };
@@ -329,7 +329,7 @@ namespace winrt::urPDF::implementation
         void ApplyPendingRenderZoom();
         void CancelPendingZoomRender();
         void AttachDpiObserver();
-        void UpdateNewTabInputRegion();
+        void UpdateTitleBarPassthroughRegions();
         void DetachDpiObserver();
         void RequestDpiRefresh();
         void ApplyPendingDpiRefresh();

@@ -365,7 +365,7 @@ namespace winrt::urPDF::implementation
         {
             if (auto self = weakThis.get())
             {
-                self->UpdateNewTabInputRegion();
+                self->UpdateTitleBarPassthroughRegions();
             }
         });
 
@@ -727,38 +727,82 @@ namespace winrt::urPDF::implementation
 
 
     // TABVIEW
-    void MainWindow::UpdateNewTabInputRegion()
+    void MainWindow::UpdateTitleBarPassthroughRegions()
     {
         if (m_isClosed || !ExtendsContentIntoTitleBar()) { return; }
         auto button = NewTabSplitButton();
         auto root = button.XamlRoot();
         if (!root) { return; }
 
-        winrt::Windows::Graphics::RectInt32 rect{};
+        using winrt::Windows::Graphics::RectInt32;
+        std::vector<RectInt32> rects;
+
         if (MainWindowUI().Visibility() == xaml::Visibility::Visible &&
-            SettingsOverlay().Visibility() != xaml::Visibility::Visible && button.IsLoaded())
+            SettingsOverlay().Visibility() != xaml::Visibility::Visible)
         {
-            const auto bounds = button.TransformToVisual(nullptr).TransformBounds( { 0, 0, static_cast<float>(button.ActualWidth()), static_cast<float>(button.ActualHeight()) });
             const double scale = root.RasterizationScale();
-            rect.X = static_cast<int32_t>(std::floor(bounds.X * scale));
-            rect.Y = static_cast<int32_t>(std::floor(bounds.Y * scale));
-            rect.Width = static_cast<int32_t>(std::ceil((bounds.X + bounds.Width) * scale)) - rect.X;
-            rect.Height = static_cast<int32_t>(std::ceil((bounds.Y + bounds.Height) * scale)) - rect.Y;
+
+            auto toRect = [scale](xaml::FrameworkElement const& element) -> std::optional<RectInt32>
+            {
+                if (!element.IsLoaded() || element.ActualWidth() <= 0 || element.ActualHeight() <= 0) { return std::nullopt; }
+                const auto bounds = element.TransformToVisual(nullptr).TransformBounds(
+                    { 0, 0, static_cast<float>(element.ActualWidth()), static_cast<float>(element.ActualHeight()) });
+                RectInt32 rect{};
+                rect.X = static_cast<int32_t>(std::floor(bounds.X * scale));
+                rect.Y = static_cast<int32_t>(std::floor(bounds.Y * scale));
+                rect.Width = static_cast<int32_t>(std::ceil((bounds.X + bounds.Width) * scale)) - rect.X;
+                rect.Height = static_cast<int32_t>(std::ceil((bounds.Y + bounds.Height) * scale)) - rect.Y;
+                if (rect.Width <= 0 || rect.Height <= 0) { return std::nullopt; }
+                return rect;
+            };
+
+            if (auto buttonRect = toRect(button))
+            {
+                rects.push_back(*buttonRect);
+            }
+
+            const auto tabView = MainTabView();
+            const auto stripRect = toRect(tabView);
+            for (auto const& item : tabView.TabItems())
+            {
+                auto tab = item.try_as<controls::TabViewItem>();
+                if (!tab) { continue; }
+                auto tabRect = toRect(tab);
+                if (!tabRect) { continue; }
+
+                if (stripRect)
+                {
+                    const int32_t left = (std::max)(tabRect->X, stripRect->X);
+                    const int32_t right = (std::min)(tabRect->X + tabRect->Width, stripRect->X + stripRect->Width);
+                    if (right <= left) { continue; }
+                    tabRect->X = left;
+                    tabRect->Width = right - left;
+                }
+                rects.push_back(*tabRect);
+            }
         }
 
-        if (m_newTabInputRect && *m_newTabInputRect == rect) { return; }
+        auto sameRects = [](std::vector<RectInt32> const& a, std::vector<RectInt32> const& b)
+        {
+            return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(),
+                [](RectInt32 const& l, RectInt32 const& r)
+                {
+                    return l.X == r.X && l.Y == r.Y && l.Width == r.Width && l.Height == r.Height;
+                });
+        };
+        if (m_passthroughRects && sameRects(*m_passthroughRects, rects)) { return; }
 
         const auto input = winrt::Microsoft::UI::Input::InputNonClientPointerSource::GetForWindowId(AppWindow().Id());
         const auto region = winrt::Microsoft::UI::Input::NonClientRegionKind::Passthrough;
-        if (rect.Width > 0 && rect.Height > 0)
+        if (!rects.empty())
         {
-            input.SetRegionRects(region, { rect });
+            input.SetRegionRects(region, rects);
         }
         else
         {
             input.ClearRegionRects(region);
         }
-        m_newTabInputRect = rect;
+        m_passthroughRects = std::move(rects);
     }
 
     void MainWindow::TabView_Loaded(foundation::IInspectable const& sender, xaml::RoutedEventArgs const&)
@@ -1523,7 +1567,7 @@ namespace winrt::urPDF::implementation
                 if (auto self = weakThis.get())
                 {
                     if (self->m_isClosed || sender != self->m_observedXamlRoot) { return; }
-                    self->UpdateNewTabInputRegion();
+                    self->UpdateTitleBarPassthroughRegions();
                     const double scale = sender.RasterizationScale();
                     if (!std::isfinite(scale) || scale <= 0.0 || scale == self->m_lastRasterizationScale) { return; }
                     self->m_lastRasterizationScale = scale;

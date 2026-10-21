@@ -46,6 +46,9 @@
                     <TextBlock Grid.Column="0" Text="UrPDF" VerticalAlignment="Center" Margin="16,0,8,0" FontWeight="SemiBold"/>
                     <TabView x:Name="MainTabView" Grid.Column="1" HorizontalAlignment="Stretch" 
                              IsAddTabButtonVisible="False"
+                             CanReorderTabs="True"
+                             CanDragTabs="True"
+                             AllowDropTabs="True"
                              TabCloseRequested="TabView_TabCloseRequested" 
                              Loaded="TabView_Loaded"  
                              SelectionChanged="TabView_SelectionChanged">
