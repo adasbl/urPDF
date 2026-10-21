@@ -784,7 +784,7 @@ namespace winrt::urPDF::implementation
 
         controls::TabViewItem newTab;
 
-        newTab.Header(winrt::box_value(L"New document"));
+        newTab.Header(winrt::box_value(L"New tab"));
         controls::SymbolIconSource tabIcon;
         tabIcon.Symbol(controls::Symbol::Document);
         newTab.IconSource(tabIcon);

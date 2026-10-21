@@ -111,12 +111,12 @@
                                 <SplitButton.Flyout>
                                     <MenuFlyout Placement="BottomEdgeAlignedLeft">
 
-                                        <MenuFlyoutItem Text="Open PDF…" Click="OpenPdfFileAsync">
+                                        <MenuFlyoutItem Text="Open PDF" Click="OpenPdfFileAsync">
                                             <MenuFlyoutItem.Icon>
                                                 <SymbolIcon Symbol="OpenFile"/>
                                             </MenuFlyoutItem.Icon>
                                         </MenuFlyoutItem>
-                                        <MenuFlyoutItem Text="Open document in new window…" Click="OpenPdfInNewWindowAsync">
+                                        <MenuFlyoutItem Text="Open document in new window" Click="OpenPdfInNewWindowAsync">
                                             <MenuFlyoutItem.Icon>
                                                 <FontIcon Glyph="&#xE8A7;"/>
                                             </MenuFlyoutItem.Icon>
@@ -358,15 +358,14 @@
                                     HorizontalAlignment="Center"
                                     HorizontalContentAlignment="Center"
                                     Style="{StaticResource AccentButtonStyle}"
-                                    Padding="24,12"
-                                    Margin="0,8,0,0">
+                                    Padding="24,12">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE8A5;"/>
                                         <TextBlock Text="Open PDF"
                                             VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Button>
-                                <TextBlock Text="or drag and drop a PDF anywhere in this area."
+                                <TextBlock Text="or drag and drop your PDF anywhere in this area."
                                     Style="{StaticResource CaptionTextBlockStyle}"
                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                     TextWrapping="Wrap"
