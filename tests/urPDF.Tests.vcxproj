@@ -57,6 +57,7 @@
     <ClCompile Include="AppSettingsTests.cpp" />
     <ClCompile Include="..\urPDF\AppSettings.cpp" />
     <ClInclude Include="..\urPDF\PdfRenderScale.h" />
+    <ClInclude Include="..\urPDF\DocumentViewState.h" />
     <ClInclude Include="..\urPDF\AppSettings.h" />
     <ClInclude Include="..\urPDF\SettingsStore.h" />
     <None Include="README.md" />

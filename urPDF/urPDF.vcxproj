@@ -165,6 +165,7 @@
     <ClInclude Include="AppSettings.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="PdfRenderScale.h" />
+    <ClInclude Include="DocumentViewState.h" />
     <ClInclude Include="App.xaml.h">
       <DependentUpon>App.xaml</DependentUpon>
     </ClInclude>
