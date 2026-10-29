@@ -922,7 +922,6 @@ namespace winrt::urPDF::implementation
             tabView.TabItems().RemoveAt(index);
         }
 
-        // The app must always have at least one tab; closing the last one closes the app.
         if (tabView.TabItems().Size() == 0)
         {
             Close();

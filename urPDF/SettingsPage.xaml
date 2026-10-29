@@ -54,8 +54,10 @@
                     <TextBlock Text="Default behavior" Style="{StaticResource SubtitleTextBlockStyle}"/>
 
                     <ToggleSwitch
-                        OffContent="On" OnContent="Off" 
-                        Toggled="ToggleSwitch_Toggled"/>
+                        x:Name="OpenFilesInExistingWindowToggle"
+                        Header="Open files from File Explorer in an existing window"
+                        Margin="8,0,0,0"
+                        Toggled="OpenFilesInExistingWindowToggle_Toggled"/>
                     
                 </StackPanel>
 

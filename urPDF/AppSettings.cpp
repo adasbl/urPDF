@@ -19,6 +19,19 @@ namespace urpdf
         constexpr std::wstring_view SchemaVersionKey = L"schemaVersion";
         constexpr std::wstring_view ThemeKey = L"AppTheme";
         constexpr std::wstring_view BackdropKey = L"Transparency";
+        constexpr std::wstring_view OpenFilesInExistingWindowKey = L"OpenFilesInExistingWindow";
+
+        std::wstring_view ToString(bool value) noexcept
+        {
+            return value ? L"true" : L"false";
+        }
+
+        std::optional<bool> ParseBool(std::wstring_view text) noexcept
+        {
+            if (text == L"true") { return true; }
+            if (text == L"false") { return false; }
+            return std::nullopt;
+        }
 
         template<typename T, typename Parse>
         bool TryReadImportedValue(json::JsonObject const& root, std::wstring_view key, Parse parse, T& value)
@@ -32,6 +45,17 @@ namespace urpdf
             if (!parsed) { return false; }
 
             value = *parsed;
+            return true;
+        }
+
+        bool TryReadImportedBool(json::JsonObject const& root, std::wstring_view key, bool& value)
+        {
+            if (!root.HasKey(key)) { return true; }
+
+            auto entry = root.GetNamedValue(key);
+            if (entry.ValueType() != json::JsonValueType::Boolean) { return false; }
+
+            value = entry.GetBoolean();
             return true;
         }
     }
@@ -83,6 +107,10 @@ namespace urpdf
         {
             m_cache.backdrop = ParseBackdrop(*text).value_or(m_cache.backdrop);
         }
+        if (auto text = m_store->Read(OpenFilesInExistingWindowKey))
+        {
+            m_cache.openFilesInExistingWindow = ParseBool(*text).value_or(m_cache.openFilesInExistingWindow);
+        }
     }
 
     SettingsData AppSettings::Get() const noexcept
@@ -105,12 +133,20 @@ namespace urpdf
         catch (...) {}
     }
 
+    void AppSettings::SetOpenFilesInExistingWindow(bool enabled)
+    {
+        m_cache.openFilesInExistingWindow = enabled;
+        try { m_store->Write(OpenFilesInExistingWindowKey, ToString(enabled)); }
+        catch (...) {}
+    }
+
     std::wstring AppSettings::ExportJson() const
     {
         json::JsonObject root;
         root.SetNamedValue(SchemaVersionKey, json::JsonValue::CreateNumberValue(SettingsSchemaVersion));
         root.SetNamedValue(ThemeKey, json::JsonValue::CreateStringValue(ToString(m_cache.theme)));
         root.SetNamedValue(BackdropKey, json::JsonValue::CreateStringValue(ToString(m_cache.backdrop)));
+        root.SetNamedValue(OpenFilesInExistingWindowKey, json::JsonValue::CreateBooleanValue(m_cache.openFilesInExistingWindow));
         return std::wstring{ root.Stringify() };
     }
 
@@ -129,8 +165,7 @@ namespace urpdf
         }
 
         SettingsData imported = m_cache;
-        if (!TryReadImportedValue(root, ThemeKey, ParseAppTheme, imported.theme)
-            || !TryReadImportedValue(root, BackdropKey, ParseBackdrop, imported.backdrop))
+        if (!TryReadImportedValue(root, ThemeKey, ParseAppTheme, imported.theme) || !TryReadImportedValue(root, BackdropKey, ParseBackdrop, imported.backdrop) || !TryReadImportedBool(root, OpenFilesInExistingWindowKey, imported.openFilesInExistingWindow))
         {
             return false;
         }
@@ -154,5 +189,6 @@ namespace urpdf
     {
         m_store->Write(ThemeKey, ToString(settings.theme));
         m_store->Write(BackdropKey, ToString(settings.backdrop));
+        m_store->Write(OpenFilesInExistingWindowKey, ToString(settings.openFilesInExistingWindow));
     }
 }
