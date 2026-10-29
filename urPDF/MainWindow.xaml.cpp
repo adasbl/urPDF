@@ -2111,6 +2111,53 @@ namespace winrt::urPDF::implementation
 
 
     // NAVIGATION
+    std::optional<urpdf::DocumentViewState> MainWindow::CaptureViewState(std::shared_ptr<PdfTabInfo> const& pdfTab)
+    {
+        auto const& layoutRects = winrt::get_self<winrt::urPDF::implementation::PdfPageLayout>(PagesLayout())->PageRects();
+        const std::size_t knownPages = (std::min)(layoutRects.size(), static_cast<std::size_t>((std::max)(pdfTab->m_pagecount, 0)));
+
+        std::vector<urpdf::PageRect> pages;
+        pages.reserve(knownPages);
+        for (std::size_t i = 0; i < knownPages; ++i)
+        {
+            auto const& rect = layoutRects[i];
+            pages.push_back({ rect.X, rect.Y, rect.Width, rect.Height });
+        }
+
+        auto scrollViewer = PdfScrollViewer();
+        const auto repeaterOffset = PagesRepeater().ActualOffset();
+        urpdf::ViewportGeometry viewport;
+        viewport.offsetX = scrollViewer.HorizontalOffset();
+        viewport.offsetY = scrollViewer.VerticalOffset();
+        viewport.width = scrollViewer.ViewportWidth();
+        viewport.height = scrollViewer.ViewportHeight();
+        viewport.zoom = scrollViewer.ZoomFactor();
+        viewport.contentX = repeaterOffset.x;
+        viewport.contentY = repeaterOffset.y;
+
+        auto state = urpdf::CaptureViewAnchor(pages, viewport);
+        if (state)
+        {
+            state->rotation = pdfTab->m_currentRotation;
+            state->bookView = m_bookViewMode;
+        }
+        return state;
+    }
+
+    void MainWindow::ScrollToPage(int32_t page)
+    {
+        auto const& pageRects = winrt::get_self<winrt::urPDF::implementation::PdfPageLayout>(PagesLayout())->PageRects();
+        if (page < 1 || static_cast<std::size_t>(page) > pageRects.size()) { return; }
+
+        auto scrollViewer = PdfScrollViewer();
+        const double zoom = scrollViewer.ZoomFactor();
+        if (!std::isfinite(zoom) || zoom <= 0.0) { return; }
+
+        const double pageTop = (pageRects[page - 1].Y + PagesRepeater().ActualOffset().y) * zoom;
+        const double targetOffset = std::clamp(pageTop, 0.0, (std::max)(0.0, scrollViewer.ScrollableHeight()));
+        scrollViewer.ChangeView(nullptr, targetOffset, nullptr);
+    }
+
     void MainWindow::PageNumberBox_ValueChanged(controls::NumberBox const& sender, controls::NumberBoxValueChangedEventArgs const& args)
     {
         if (std::isnan(args.NewValue())) return;
@@ -2128,15 +2175,7 @@ namespace winrt::urPDF::implementation
 
             if (totalPages > 1 && newPage >= 1 && newPage <= totalPages)
             {
-                int pagesPerRow = m_bookViewMode ? 2 : 1;
-                int totalRows = (totalPages + pagesPerRow - 1) / pagesPerRow;
-                int targetRow = (newPage - 1) / pagesPerRow;
-                double scrollPercentage = totalRows > 1
-                    ? static_cast<double>(targetRow) / (totalRows - 1)
-                    : 0.0;
-                double targetOffset = scrollPercentage * PdfScrollViewer().ScrollableHeight();
-
-                PdfScrollViewer().ChangeView(nullptr, targetOffset, nullptr);
+                ScrollToPage(newPage);
             }
         }
     }
@@ -2159,12 +2198,7 @@ namespace winrt::urPDF::implementation
 
             if (totalRows > 1 && currentRow + 1 < totalRows)
             {
-                int targetRow = currentRow + 1;
-
-                double scrollPercentage = static_cast<double>(targetRow) / (totalRows - 1);
-                double targetOffset = scrollPercentage * PdfScrollViewer().ScrollableHeight();
-
-                PdfScrollViewer().ChangeView(nullptr, targetOffset, nullptr);
+                ScrollToPage((currentRow + 1) * pagesPerRow + 1);
             }
         }
         button.IsEnabled(true);
@@ -2188,12 +2222,7 @@ namespace winrt::urPDF::implementation
 
             if (totalRows > 1 && currentRow > 0)
             {
-                int targetRow = currentRow - 1;
-
-                double scrollPercentage = static_cast<double>(targetRow) / (totalRows - 1);
-                double targetOffset = scrollPercentage * PdfScrollViewer().ScrollableHeight();
-
-                PdfScrollViewer().ChangeView(nullptr, targetOffset, nullptr);
+                ScrollToPage((currentRow - 1) * pagesPerRow + 1);
             }
         }
         button.IsEnabled(true);
@@ -2258,8 +2287,6 @@ namespace winrt::urPDF::implementation
         if (m_isRestoringTabView) { co_return; }
         auto scrollViewer = sender.as<controls::ScrollViewer>();
 
-        double scrollOffset = scrollViewer.VerticalOffset();
-        double totalHeight = scrollViewer.ScrollableHeight() + scrollViewer.ViewportHeight();
         const double currentZoom = scrollViewer.ZoomFactor();
 
         auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
@@ -2267,7 +2294,6 @@ namespace winrt::urPDF::implementation
         if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
         {
             auto pdfInfo = m_openedTabs[currentTab];
-            int totalPages = pdfInfo->m_pagecount;
 
             TryRecordFirstVisiblePage(pdfInfo);
 
@@ -2277,19 +2303,10 @@ namespace winrt::urPDF::implementation
                 RenderVisiblePagesAsync();
             }
 
-            if (totalPages > 0 && totalHeight > 0)
+            if (auto viewState = CaptureViewState(pdfInfo))
             {
-                double scrollPercentage = scrollOffset / scrollViewer.ScrollableHeight();
-
-                if (scrollViewer.ScrollableHeight() == 0) scrollPercentage = 0.0;
-                if (scrollPercentage > 1.0) scrollPercentage = 1.0;
-                if (scrollPercentage < 0.0) scrollPercentage = 0.0;
-
-                int32_t currentPage = static_cast<int32_t>(std::round(scrollPercentage * (totalPages - 1))) + 1;
-
-                pdfInfo->m_currentPageIndex = currentPage;
-
-                DisplayPageNumber(currentPage);
+                pdfInfo->m_currentPageIndex = viewState->page;
+                DisplayPageNumber(viewState->page);
             }
         }
         co_return;

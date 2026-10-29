@@ -4,6 +4,7 @@
 #include "MainWindow.g.h"
 
 // Project
+#include "DocumentViewState.h"
 #include "PdfPageLayout.h"
 #include "PdfRenderScale.h"
 
@@ -324,6 +325,8 @@ namespace winrt::urPDF::implementation
         foundation::Collections::IObservableVector<foundation::IInspectable> m_pageRepeaterItems{ nullptr };
 
         void CloseTab(controls::TabViewItem const& tab);
+        std::optional<urpdf::DocumentViewState> CaptureViewState(std::shared_ptr<PdfTabInfo> const& pdfTab);
+        void ScrollToPage(int32_t page);
         bool TryAcquireRenderingLock();
         void ReleaseRenderingLock();
         void UpdateRenderZoom(std::shared_ptr<PdfTabInfo> const& pdfTab, double zoom, bool isIntermediate);
