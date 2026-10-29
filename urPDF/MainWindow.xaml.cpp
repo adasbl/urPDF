@@ -2111,12 +2111,12 @@ namespace winrt::urPDF::implementation
 
 
     // NAVIGATION
-    std::optional<urpdf::DocumentViewState> MainWindow::CaptureViewState(std::shared_ptr<PdfTabInfo> const& pdfTab)
+    void MainWindow::ReadViewGeometry(std::shared_ptr<PdfTabInfo> const& pdfTab, std::vector<urpdf::PageRect>& pages, urpdf::ViewportGeometry& viewport)
     {
         auto const& layoutRects = winrt::get_self<winrt::urPDF::implementation::PdfPageLayout>(PagesLayout())->PageRects();
         const std::size_t knownPages = (std::min)(layoutRects.size(), static_cast<std::size_t>((std::max)(pdfTab->m_pagecount, 0)));
 
-        std::vector<urpdf::PageRect> pages;
+        pages.clear();
         pages.reserve(knownPages);
         for (std::size_t i = 0; i < knownPages; ++i)
         {
@@ -2126,7 +2126,7 @@ namespace winrt::urPDF::implementation
 
         auto scrollViewer = PdfScrollViewer();
         const auto repeaterOffset = PagesRepeater().ActualOffset();
-        urpdf::ViewportGeometry viewport;
+        viewport = {};
         viewport.offsetX = scrollViewer.HorizontalOffset();
         viewport.offsetY = scrollViewer.VerticalOffset();
         viewport.width = scrollViewer.ViewportWidth();
@@ -2134,6 +2134,22 @@ namespace winrt::urPDF::implementation
         viewport.zoom = scrollViewer.ZoomFactor();
         viewport.contentX = repeaterOffset.x;
         viewport.contentY = repeaterOffset.y;
+        viewport.scrollableHeight = scrollViewer.ScrollableHeight();
+    }
+
+    std::optional<int32_t> MainWindow::VisiblePageNumber(std::shared_ptr<PdfTabInfo> const& pdfTab)
+    {
+        std::vector<urpdf::PageRect> pages;
+        urpdf::ViewportGeometry viewport;
+        ReadViewGeometry(pdfTab, pages, viewport);
+        return urpdf::CurrentPageNumber(pages, viewport);
+    }
+
+    std::optional<urpdf::DocumentViewState> MainWindow::CaptureViewState(std::shared_ptr<PdfTabInfo> const& pdfTab)
+    {
+        std::vector<urpdf::PageRect> pages;
+        urpdf::ViewportGeometry viewport;
+        ReadViewGeometry(pdfTab, pages, viewport);
 
         auto state = urpdf::CaptureViewAnchor(pages, viewport);
         if (state)
@@ -2303,10 +2319,10 @@ namespace winrt::urPDF::implementation
                 RenderVisiblePagesAsync();
             }
 
-            if (auto viewState = CaptureViewState(pdfInfo))
+            if (auto pageNumber = VisiblePageNumber(pdfInfo))
             {
-                pdfInfo->m_currentPageIndex = viewState->page;
-                DisplayPageNumber(viewState->page);
+                pdfInfo->m_currentPageIndex = *pageNumber;
+                DisplayPageNumber(*pageNumber);
             }
         }
         co_return;

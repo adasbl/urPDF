@@ -38,7 +38,10 @@ namespace urpdf
 
         double contentX{ 0.0 };
         double contentY{ 0.0 };
+
+        double scrollableHeight{ 0.0 };
     };
 
     std::optional<DocumentViewState> CaptureViewAnchor(std::vector<PageRect> const& pages, ViewportGeometry const& viewport);
+    std::optional<int> CurrentPageNumber(std::vector<PageRect> const& pages, ViewportGeometry const& viewport);
 }

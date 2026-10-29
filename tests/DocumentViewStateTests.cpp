@@ -8,6 +8,7 @@ using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 namespace urPDFTests
 {
     using urpdf::CaptureViewAnchor;
+    using urpdf::CurrentPageNumber;
     using urpdf::DocumentViewState;
     using urpdf::PageRect;
     using urpdf::ViewportGeometry;
@@ -158,6 +159,37 @@ namespace urPDFTests
             Assert::IsFalse(CaptureViewAnchor(SingleColumn(2), Viewport(0.0, 0.0, 0.0)).has_value(), L"zero zoom");
             Assert::IsFalse(CaptureViewAnchor(SingleColumn(2), Viewport(0.0, 0.0, 1.0, 0.0)).has_value(), L"zero width");
             Assert::IsFalse(CaptureViewAnchor(SingleColumn(2), Viewport(0.0, 0.0, 1.0, 600.0, 0.0)).has_value(), L"zero height");
+        }
+
+        TEST_METHOD(CurrentPageIsPageWithLargestVisibleArea)
+        {
+            Assert::AreEqual(1, CurrentPageNumber(SingleColumn(3), Viewport(0.0, 400.0)).value(), L"previous page still dominates");
+            Assert::AreEqual(2, CurrentPageNumber(SingleColumn(3), Viewport(0.0, 500.0)).value(), L"next page fills more of the viewport");
+        }
+
+        TEST_METHOD(CurrentPageInBookViewIsLeftPageOfRow)
+        {
+            Assert::AreEqual(1, CurrentPageNumber(TwoColumns(4), Viewport(0.0, 0.0, 1.0, 1210.0)).value());
+        }
+
+        TEST_METHOD(CurrentPageAtEndOfDocumentIsLastVisiblePage)
+        {
+            const std::vector<PageRect> pages{
+                { 0.0, 0.0, 600.0, 800.0 },
+                { 0.0, 810.0, 600.0, 800.0 },
+                { 0.0, 1620.0, 600.0, 200.0 },
+            };
+            auto viewport = Viewport(0.0, 1120.0);
+            Assert::AreEqual(2, CurrentPageNumber(pages, viewport).value(), L"end position unknown");
+
+            viewport.scrollableHeight = 1120.0;
+            Assert::AreEqual(3, CurrentPageNumber(pages, viewport).value(), L"scrolled to end");
+        }
+
+        TEST_METHOD(CurrentPageRejectsInvisibleOrInvalidViewport)
+        {
+            Assert::IsFalse(CurrentPageNumber(SingleColumn(3), Viewport(0.0, 5000.0)).has_value(), L"no visible page");
+            Assert::IsFalse(CurrentPageNumber(SingleColumn(3), Viewport(0.0, 0.0, 0.0)).has_value(), L"zero zoom");
         }
     };
 }

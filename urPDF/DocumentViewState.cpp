@@ -25,19 +25,39 @@ namespace urpdf
         {
             return std::clamp((value - origin) / length, 0.0, 1.0);
         }
+
+        struct LayoutViewport
+        {
+            double left{ 0.0 };
+            double top{ 0.0 };
+            double width{ 0.0 };
+            double height{ 0.0 };
+        };
+
+        std::optional<LayoutViewport> ToLayoutViewport(ViewportGeometry const& viewport) noexcept
+        {
+            if (!IsPositiveFinite(viewport.zoom) || !IsPositiveFinite(viewport.width) || !IsPositiveFinite(viewport.height) || !std::isfinite(viewport.offsetX) || !std::isfinite(viewport.offsetY) || !std::isfinite(viewport.contentX) || !std::isfinite(viewport.contentY))
+            {
+                return std::nullopt;
+            }
+
+            return LayoutViewport{
+                viewport.offsetX / viewport.zoom - viewport.contentX,
+                viewport.offsetY / viewport.zoom - viewport.contentY,
+                viewport.width / viewport.zoom,
+                viewport.height / viewport.zoom };
+        }
     }
 
     std::optional<DocumentViewState> CaptureViewAnchor(std::vector<PageRect> const& pages, ViewportGeometry const& viewport)
     {
-        if (!IsPositiveFinite(viewport.zoom) || !IsPositiveFinite(viewport.width) || !IsPositiveFinite(viewport.height) || !std::isfinite(viewport.offsetX) || !std::isfinite(viewport.offsetY) || !std::isfinite(viewport.contentX) || !std::isfinite(viewport.contentY))
-        {
-            return std::nullopt;
-        }
+        const auto view = ToLayoutViewport(viewport);
+        if (!view) { return std::nullopt; }
 
-        const double left = viewport.offsetX / viewport.zoom - viewport.contentX;
-        const double top = viewport.offsetY / viewport.zoom - viewport.contentY;
-        const double width = viewport.width / viewport.zoom;
-        const double height = viewport.height / viewport.zoom;
+        const double left = view->left;
+        const double top = view->top;
+        const double width = view->width;
+        const double height = view->height;
         const double right = left + width;
         const double bottom = top + height;
 
@@ -80,5 +100,40 @@ namespace urpdf
         state.viewportX = Fraction(bestX, left, width);
         state.viewportY = Fraction(bestY, top, height);
         return state;
+    }
+
+    std::optional<int> CurrentPageNumber(std::vector<PageRect> const& pages, ViewportGeometry const& viewport)
+    {
+        const auto view = ToLayoutViewport(viewport);
+        if (!view) { return std::nullopt; }
+
+        const double right = view->left + view->width;
+        const double bottom = view->top + view->height;
+        const bool isScrolledToEnd = viewport.scrollableHeight > 0.0 && viewport.offsetY >= viewport.scrollableHeight - 1.0;
+
+        std::optional<int> largestPage;
+        std::optional<int> lastVisiblePage;
+        double largestArea = 0.0;
+
+        for (std::size_t i = 0; i < pages.size(); ++i)
+        {
+            auto const& page = pages[i];
+            if (!IsValidPage(page)) { continue; }
+
+            const double visibleWidth = (std::min)(right, page.x + page.width) - (std::max)(view->left, page.x);
+            const double visibleHeight = (std::min)(bottom, page.y + page.height) - (std::max)(view->top, page.y);
+            if (visibleWidth <= 0.0 || visibleHeight <= 0.0) { continue; }
+
+            const int pageNumber = static_cast<int>(i) + 1;
+            const double area = visibleWidth * visibleHeight;
+            lastVisiblePage = pageNumber;
+            if (area > largestArea)
+            {
+                largestArea = area;
+                largestPage = pageNumber;
+            }
+        }
+
+        return isScrolledToEnd && lastVisiblePage ? lastVisiblePage : largestPage;
     }
 }
