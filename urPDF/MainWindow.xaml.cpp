@@ -900,11 +900,18 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    void MainWindow::TabView_TabCloseRequested(foundation::IInspectable const& sender, controls::TabViewTabCloseRequestedEventArgs const& args)
+    void MainWindow::TabView_TabCloseRequested(foundation::IInspectable const&, controls::TabViewTabCloseRequestedEventArgs const& args)
     {
-        auto tabView = sender.as<controls::TabView>();
+        CloseTab(args.Tab());
+    }
 
-        auto openedTab = m_openedTabs.find(args.Tab());
+    void MainWindow::CloseTab(controls::TabViewItem const& tab)
+    {
+        if (!tab) { return; }
+
+        auto tabView = MainTabView();
+
+        auto openedTab = m_openedTabs.find(tab);
         if (openedTab != m_openedTabs.end())
         {
             if (m_pendingZoomTab.lock() == openedTab->second)
@@ -917,12 +924,12 @@ namespace winrt::urPDF::implementation
         }
 
         uint32_t index;
-        if (tabView.TabItems().IndexOf(args.Tab(), index))
+        if (tabView.TabItems().IndexOf(tab, index))
         {
             tabView.TabItems().RemoveAt(index);
         }
 
-        if (tabView.TabItems().Size() == 0)
+        if (tabView.TabItems().Size() == 0 && !m_isClosed)
         {
             Close();
         }

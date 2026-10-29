@@ -323,6 +323,7 @@ namespace winrt::urPDF::implementation
         PageBitmapCache m_pageBitmapCache{ 256ull * 1024ull * 1024ull };
         foundation::Collections::IObservableVector<foundation::IInspectable> m_pageRepeaterItems{ nullptr };
 
+        void CloseTab(controls::TabViewItem const& tab);
         bool TryAcquireRenderingLock();
         void ReleaseRenderingLock();
         void UpdateRenderZoom(std::shared_ptr<PdfTabInfo> const& pdfTab, double zoom, bool isIntermediate);
