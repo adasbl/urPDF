@@ -222,9 +222,9 @@ namespace winrt::urPDF::implementation
         winrt::hstring m_fileName = L"unknown";
         std::vector<PageSlot> m_renderedPages;
         int32_t m_currentPageIndex = { 1 };
-        double m_uiZoom{ 1.0 };
+        urpdf::DocumentViewState m_viewState{};
+        bool m_hasViewAnchor{ false };
         double m_renderZoom{ 1.0 };
-        int m_currentRotation = { 0 };
         std::atomic<std::uint64_t> m_renderGeneration{ 0 };
         
         fz_context* m_ctx{ nullptr };
@@ -305,7 +305,6 @@ namespace winrt::urPDF::implementation
         bool m_isRendering{ false };
         bool m_isRestoringTabView{ false };
         bool m_zoomWasEnabled{ false };
-        bool m_bookViewMode{ false };
         bool m_isVisibleRenderRunning{ false };
         bool m_visibleRenderRequested{ false };
         bool m_isClosed{ false };
