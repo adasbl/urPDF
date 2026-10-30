@@ -35,6 +35,7 @@ namespace winrt::urPDF::implementation
         if (m_columnCount != value)
         {
             m_columnCount = value;
+            m_pageRects.clear();
             InvalidateMeasure();
         }
     }
@@ -54,6 +55,7 @@ namespace winrt::urPDF::implementation
         if (std::abs(m_spacing - value) > 0.001)
         {
             m_spacing = value;
+            m_pageRects.clear();
             InvalidateMeasure();
         }
     }
@@ -67,6 +69,7 @@ namespace winrt::urPDF::implementation
         foundation::Collections::IVectorView<foundation::Size> const& value)
     {
         m_pageSizes = value;
+        m_pageRects.clear();
         InvalidateMeasure();
     }
 

@@ -868,6 +868,7 @@ namespace winrt::urPDF::implementation
 
         if (currentTab)
         {
+            m_presentedTab.reset();
             PagesRepeater().ItemsSource(nullptr);
             m_pageRepeaterItems = nullptr;
 
@@ -894,6 +895,7 @@ namespace winrt::urPDF::implementation
         }
         else
         {
+            m_presentedTab.reset();
             EmptyTabDropZone().Visibility(xaml::Visibility::Collapsed);
             DisplayPageNumber(0);
             DisplayPageCount(0);
@@ -1087,6 +1089,7 @@ namespace winrt::urPDF::implementation
                 MainTabView().TabItems().Append(targetTab);
                 MainTabView().SelectedItem(targetTab);
             }
+            m_presentedTab.reset();
             PagesRepeater().ItemsSource(nullptr);
             m_pageRepeaterItems = nullptr;
             EmptyTabDropZone().Visibility(xaml::Visibility::Collapsed);
@@ -1949,6 +1952,8 @@ namespace winrt::urPDF::implementation
 
     void MainWindow::RebuildPagesContainer(std::vector<PageSlot> const& pages)
     {
+        m_presentedTab.reset();
+        std::shared_ptr<PdfTabInfo> pdfTab;
         int currentRotation = 0;
         bool bookView = false;
         auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
@@ -1957,8 +1962,9 @@ namespace winrt::urPDF::implementation
             auto openedTab = m_openedTabs.find(currentTab);
             if (openedTab != m_openedTabs.end())
             {
-                currentRotation = openedTab->second->m_viewState.rotation;
-                bookView = openedTab->second->m_viewState.bookView;
+                pdfTab = openedTab->second;
+                currentRotation = pdfTab->m_viewState.rotation;
+                bookView = pdfTab->m_viewState.bookView;
             }
         }
 
@@ -1988,6 +1994,7 @@ namespace winrt::urPDF::implementation
 
         PagesRepeater().ItemsSource(m_pageRepeaterItems);
         PdfScrollViewer().UpdateLayout();
+        m_presentedTab = pdfTab;
 
         for (int32_t i = 0; i < static_cast<int32_t>(pages.size()); ++i)
         {
@@ -2169,6 +2176,33 @@ namespace winrt::urPDF::implementation
             state->bookView = pdfTab->m_viewState.bookView;
         }
         return state;
+    }
+
+    void MainWindow::SaveViewState(std::shared_ptr<PdfTabInfo> const& pdfTab)
+    {
+        if (!pdfTab || m_isClosed || m_isRestoringTabView || m_presentedTab.lock() != pdfTab) { return; }
+
+        const double zoom = PdfScrollViewer().ZoomFactor();
+        if (std::isfinite(zoom) && zoom > 0.0)
+        {
+            pdfTab->m_viewState.zoom = zoom;
+        }
+
+        auto layout = winrt::get_self<winrt::urPDF::implementation::PdfPageLayout>(PagesLayout());
+        if (pdfTab->m_pagecount <= 0 || layout->PageRects().size() != static_cast<std::size_t>(pdfTab->m_pagecount) || m_layoutRotation != NormalizeRotation(pdfTab->m_viewState.rotation) || layout->ColumnCount() != (pdfTab->m_viewState.bookView ? 2 : 1))
+        {
+            return;
+        }
+
+        if (auto state = CaptureViewState(pdfTab))
+        {
+            pdfTab->m_viewState.anchorPage = state->anchorPage;
+            pdfTab->m_viewState.anchorX = state->anchorX;
+            pdfTab->m_viewState.anchorY = state->anchorY;
+            pdfTab->m_viewState.viewportX = state->viewportX;
+            pdfTab->m_viewState.viewportY = state->viewportY;
+            pdfTab->m_hasViewAnchor = true;
+        }
     }
 
     void MainWindow::ScrollToPage(int32_t page)

@@ -294,6 +294,7 @@ namespace winrt::urPDF::implementation
         fz_locks_context m_mupdfLocks{};
         fz_context* m_ctx{ nullptr };
         std::map<controls::TabViewItem, std::shared_ptr<PdfTabInfo>> m_openedTabs;
+        std::weak_ptr<PdfTabInfo> m_presentedTab;
         int32_t m_pageNumber{ 0 };
         int32_t m_pageCounter{ 0 };
         storage::StorageFile m_pendingFile{ nullptr };
@@ -327,6 +328,7 @@ namespace winrt::urPDF::implementation
         void ReadViewGeometry(std::shared_ptr<PdfTabInfo> const& pdfTab, std::vector<urpdf::PageRect>& pages, urpdf::ViewportGeometry& viewport);
         std::optional<int32_t> VisiblePageNumber(std::shared_ptr<PdfTabInfo> const& pdfTab);
         std::optional<urpdf::DocumentViewState> CaptureViewState(std::shared_ptr<PdfTabInfo> const& pdfTab);
+        void SaveViewState(std::shared_ptr<PdfTabInfo> const& pdfTab);
         void ScrollToPage(int32_t page);
         bool TryAcquireRenderingLock();
         void ReleaseRenderingLock();
