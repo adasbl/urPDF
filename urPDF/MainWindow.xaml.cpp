@@ -346,6 +346,14 @@ namespace winrt::urPDF::implementation
             }
         });
 
+        PdfScrollViewer().LayoutUpdated([weakThis = get_weak()](auto const&, auto const&)
+        {
+            if (auto self = weakThis.get())
+            {
+                self->QueuePendingViewStateSave();
+            }
+        });
+
         Closed([weakThis = get_weak()](auto const&, auto const&)
         {
             if (auto self = weakThis.get())
@@ -840,7 +848,18 @@ namespace winrt::urPDF::implementation
 
     void MainWindow::TabView_SelectionChanged(foundation::IInspectable const& sender, controls::SelectionChangedEventArgs const& args)
     {
+        // SelectedItem already identifies the destination; the geometry still belongs to the removed tab.
+        for (auto const& removedItem : args.RemovedItems())
+        {
+            auto removedTab = removedItem.try_as<controls::TabViewItem>();
+            auto removedEntry = m_openedTabs.find(removedTab);
+            if (removedEntry != m_openedTabs.end())
+            {
+                SaveViewState(removedEntry->second);
+            }
+        }
         CancelPendingZoomRender();
+        CancelPendingViewStateSave();
         auto tabView = sender.as<controls::TabView>();
 
         m_isRestoringTabView = true;
@@ -866,12 +885,12 @@ namespace winrt::urPDF::implementation
         }
         auto currentTab = tabView.SelectedItem().try_as<controls::TabViewItem>();
 
+        m_presentedTab.reset();
+        PagesRepeater().ItemsSource(nullptr);
+        m_pageRepeaterItems = nullptr;
+
         if (currentTab)
         {
-            m_presentedTab.reset();
-            PagesRepeater().ItemsSource(nullptr);
-            m_pageRepeaterItems = nullptr;
-
             if (m_openedTabs.find(currentTab) != m_openedTabs.end())
             {
                 EmptyTabDropZone().Visibility(xaml::Visibility::Collapsed);
@@ -889,13 +908,14 @@ namespace winrt::urPDF::implementation
             }
             else
             {
+                DisplayPageNumber(0);
+                DisplayPageCount(0);
                 EmptyTabDropZone().Visibility(xaml::Visibility::Visible);
                 PdfScrollViewer().ChangeView(nullptr, nullptr, 1.0f, true);
             }
         }
         else
         {
-            m_presentedTab.reset();
             EmptyTabDropZone().Visibility(xaml::Visibility::Collapsed);
             DisplayPageNumber(0);
             DisplayPageCount(0);
@@ -1089,6 +1109,8 @@ namespace winrt::urPDF::implementation
                 MainTabView().TabItems().Append(targetTab);
                 MainTabView().SelectedItem(targetTab);
             }
+            SaveViewState(m_presentedTab.lock());
+            CancelPendingViewStateSave();
             m_presentedTab.reset();
             PagesRepeater().ItemsSource(nullptr);
             m_pageRepeaterItems = nullptr;
@@ -1926,6 +1948,7 @@ namespace winrt::urPDF::implementation
             return false;
         }
 
+        SaveViewState(m_presentedTab.lock());
         CancelPendingZoomRender();
         m_isRendering = true;
         m_zoomWasEnabled = PdfScrollViewer().ZoomMode() == controls::ZoomMode::Enabled;
@@ -2188,8 +2211,7 @@ namespace winrt::urPDF::implementation
             pdfTab->m_viewState.zoom = zoom;
         }
 
-        auto layout = winrt::get_self<winrt::urPDF::implementation::PdfPageLayout>(PagesLayout());
-        if (pdfTab->m_pagecount <= 0 || layout->PageRects().size() != static_cast<std::size_t>(pdfTab->m_pagecount) || m_layoutRotation != NormalizeRotation(pdfTab->m_viewState.rotation) || layout->ColumnCount() != (pdfTab->m_viewState.bookView ? 2 : 1))
+        if (m_pendingLayoutViewSaveTab.lock() == pdfTab || !HasViewGeometry(pdfTab))
         {
             return;
         }
@@ -2203,6 +2225,75 @@ namespace winrt::urPDF::implementation
             pdfTab->m_viewState.viewportY = state->viewportY;
             pdfTab->m_hasViewAnchor = true;
         }
+    }
+
+    bool MainWindow::HasViewGeometry(std::shared_ptr<PdfTabInfo> const& pdfTab)
+    {
+        if (!pdfTab || m_isClosed || m_isRestoringTabView || m_presentedTab.lock() != pdfTab) { return false; }
+
+        auto layout = winrt::get_self<winrt::urPDF::implementation::PdfPageLayout>(PagesLayout());
+        return pdfTab->m_pagecount > 0
+            && layout->PageRects().size() == static_cast<std::size_t>(pdfTab->m_pagecount)
+            && m_layoutRotation == NormalizeRotation(pdfTab->m_viewState.rotation)
+            && layout->ColumnCount() == (pdfTab->m_viewState.bookView ? 2 : 1)
+            && PdfScrollViewer().ViewportWidth() > 0.0 && PdfScrollViewer().ViewportHeight() > 0.0;
+    }
+
+    void MainWindow::UpdatePageCounter(std::shared_ptr<PdfTabInfo> const& pdfTab)
+    {
+        if (m_pendingLayoutViewSaveTab.lock() == pdfTab || !HasViewGeometry(pdfTab)) { return; }
+
+        if (auto pageNumber = VisiblePageNumber(pdfTab))
+        {
+            pdfTab->m_currentPageIndex = *pageNumber;
+            DisplayPageNumber(*pageNumber);
+        }
+    }
+
+    void MainWindow::DeferViewStateSave(std::shared_ptr<PdfTabInfo> const& pdfTab)
+    {
+        CancelPendingViewStateSave();
+        m_pendingLayoutViewSaveTab = pdfTab;
+    }
+
+    void MainWindow::CancelPendingViewStateSave()
+    {
+        ++m_layoutViewSaveGeneration;
+        m_pendingLayoutViewSaveTab.reset();
+        m_pendingLayoutViewOffsetY.reset();
+        m_layoutViewSaveQueued = false;
+    }
+
+    void MainWindow::QueuePendingViewStateSave()
+    {
+        auto pdfTab = m_pendingLayoutViewSaveTab.lock();
+        if (!pdfTab || m_layoutViewSaveQueued || m_isClosed) { return; }
+
+        const auto generation = m_layoutViewSaveGeneration;
+        m_layoutViewSaveQueued = DispatcherQueue().TryEnqueue(dispatching::DispatcherQueuePriority::Low,
+            [weakThis = get_weak(), pdfTab, generation]
+            {
+                auto self = weakThis.get();
+                if (!self || self->m_isClosed || self->m_layoutViewSaveGeneration != generation) { return; }
+                self->m_layoutViewSaveQueued = false;
+
+                // Run after layout and normal-priority scroll notifications, never during an animated view change.
+                if (self->m_isViewChanging || !self->HasViewGeometry(pdfTab)) { return; }
+                if (self->m_pendingLayoutViewOffsetY)
+                {
+                    const double targetOffset = (std::clamp)(*self->m_pendingLayoutViewOffsetY, 0.0, self->PdfScrollViewer().ScrollableHeight());
+                    if (std::abs(self->PdfScrollViewer().VerticalOffset() - targetOffset) > 1.0) { return; }
+                }
+                self->m_pendingLayoutViewSaveTab.reset();
+                self->m_pendingLayoutViewOffsetY.reset();
+                if (!self->m_isRendering)
+                {
+                    self->UpdateRenderZoom(pdfTab, self->PdfScrollViewer().ZoomFactor(), false);
+                }
+                self->SaveViewState(pdfTab);
+                self->UpdatePageCounter(pdfTab);
+                if (!self->m_isRendering) { self->RenderVisiblePagesAsync(); }
+            });
     }
 
     void MainWindow::ScrollToPage(int32_t page)
@@ -2345,6 +2436,7 @@ namespace winrt::urPDF::implementation
 
     winrt::fire_and_forget MainWindow::PdfScrollViewer_ViewChanged(foundation::IInspectable const& sender, controls::ScrollViewerViewChangedEventArgs const& args)
     {
+        m_isViewChanging = args.IsIntermediate();
         if (m_isRestoringTabView) { co_return; }
         auto scrollViewer = sender.as<controls::ScrollViewer>();
 
@@ -2355,19 +2447,29 @@ namespace winrt::urPDF::implementation
         if (currentTab && m_openedTabs.find(currentTab) != m_openedTabs.end())
         {
             auto pdfInfo = m_openedTabs[currentTab];
+            if (m_presentedTab.lock() != pdfInfo) { co_return; }
 
             TryRecordFirstVisiblePage(pdfInfo);
 
-            if (!m_isRendering)
+            const bool layoutSavePending = m_pendingLayoutViewSaveTab.lock() == pdfInfo;
+            // Let the render debounce compare against the previous zoom before SaveViewState updates it.
+            if (!m_isRendering && !layoutSavePending)
             {
                 UpdateRenderZoom(pdfInfo, currentZoom, args.IsIntermediate());
-                RenderVisiblePagesAsync();
             }
 
-            if (auto pageNumber = VisiblePageNumber(pdfInfo))
+            SaveViewState(pdfInfo);
+            UpdatePageCounter(pdfInfo);
+
+            if (layoutSavePending)
             {
-                pdfInfo->m_currentPageIndex = *pageNumber;
-                DisplayPageNumber(*pageNumber);
+                // A completed user scroll can supersede the book-view target offset.
+                if (!args.IsIntermediate()) { m_pendingLayoutViewOffsetY.reset(); }
+                QueuePendingViewStateSave();
+            }
+            else if (!m_isRendering)
+            {
+                RenderVisiblePagesAsync();
             }
         }
         co_return;
@@ -2382,6 +2484,8 @@ namespace winrt::urPDF::implementation
         {
             auto pdfInfo = m_openedTabs[currentTab];
 
+            SaveViewState(pdfInfo);
+            DeferViewStateSave(pdfInfo);
             pdfInfo->m_viewState.rotation += 90;
             if (pdfInfo->m_viewState.rotation >= 360)
             {
@@ -2397,6 +2501,7 @@ namespace winrt::urPDF::implementation
             }
 
             RebuildPagesContainer(pdfInfo->m_renderedPages);
+            QueuePendingViewStateSave();
             RenderVisiblePagesAsync();
         }
         co_return;
@@ -2465,6 +2570,8 @@ namespace winrt::urPDF::implementation
             return;
         }
 
+        SaveViewState(pdfInfo);
+        DeferViewStateSave(pdfInfo);
         pdfInfo->m_viewState.bookView = !pdfInfo->m_viewState.bookView;
 
         RebuildPagesContainer(pdfInfo->m_renderedPages);
@@ -2472,17 +2579,14 @@ namespace winrt::urPDF::implementation
         const int pagesPerRow = pdfInfo->m_viewState.bookView ? 2 : 1;
         const int totalRows = (pdfInfo->m_pagecount + pagesPerRow - 1) / pagesPerRow;
         const int targetRow = totalRows > 0 ? (std::min)((currentPage - 1) / pagesPerRow, totalRows - 1) : 0;
-        const int targetPage = (targetRow * pagesPerRow) + 1;
-
-        pdfInfo->m_currentPageIndex = targetPage;
-        DisplayPageNumber(targetPage);
-
         PdfScrollViewer().UpdateLayout();
 
         const double scrollPercentage = totalRows > 1 ? static_cast<double>(targetRow) / (totalRows - 1) : 0.0;
         const double targetOffset = scrollPercentage * PdfScrollViewer().ScrollableHeight();
 
+        m_pendingLayoutViewOffsetY = targetOffset;
         PdfScrollViewer().ChangeView(nullptr, targetOffset, nullptr);
+        QueuePendingViewStateSave();
         RenderVisiblePagesAsync();
     }
 

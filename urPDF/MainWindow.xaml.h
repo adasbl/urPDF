@@ -305,6 +305,11 @@ namespace winrt::urPDF::implementation
         winrt::event_token m_printTaskRequestedToken{};
         bool m_isRendering{ false };
         bool m_isRestoringTabView{ false };
+        bool m_isViewChanging{ false };
+        std::weak_ptr<PdfTabInfo> m_pendingLayoutViewSaveTab;
+        std::optional<double> m_pendingLayoutViewOffsetY;
+        std::uint64_t m_layoutViewSaveGeneration{ 0 };
+        bool m_layoutViewSaveQueued{ false };
         bool m_zoomWasEnabled{ false };
         bool m_isVisibleRenderRunning{ false };
         bool m_visibleRenderRequested{ false };
@@ -329,6 +334,11 @@ namespace winrt::urPDF::implementation
         std::optional<int32_t> VisiblePageNumber(std::shared_ptr<PdfTabInfo> const& pdfTab);
         std::optional<urpdf::DocumentViewState> CaptureViewState(std::shared_ptr<PdfTabInfo> const& pdfTab);
         void SaveViewState(std::shared_ptr<PdfTabInfo> const& pdfTab);
+        bool HasViewGeometry(std::shared_ptr<PdfTabInfo> const& pdfTab);
+        void UpdatePageCounter(std::shared_ptr<PdfTabInfo> const& pdfTab);
+        void DeferViewStateSave(std::shared_ptr<PdfTabInfo> const& pdfTab);
+        void CancelPendingViewStateSave();
+        void QueuePendingViewStateSave();
         void ScrollToPage(int32_t page);
         bool TryAcquireRenderingLock();
         void ReleaseRenderingLock();
