@@ -71,7 +71,7 @@ namespace urPDFTests
         TEST_METHOD(AnchorsTopLeftCornerOnVisiblePage)
         {
             const auto state = Capture(SingleColumn(3), Viewport(0.0, 810.0 + 400.0));
-            Assert::AreEqual(2, state.page);
+            Assert::AreEqual(2, state.anchorPage);
             AssertNear(0.0, state.anchorX, L"anchorX");
             AssertNear(0.5, state.anchorY, L"anchorY");
             AssertNear(0.0, state.viewportX, L"viewportX");
@@ -81,7 +81,7 @@ namespace urPDFTests
         TEST_METHOD(ConvertsZoomedOffsetsToLayoutCoordinates)
         {
             const auto state = Capture(SingleColumn(3), Viewport(300.0, 2.0 * (810.0 + 400.0), 2.0));
-            Assert::AreEqual(2, state.page);
+            Assert::AreEqual(2, state.anchorPage);
             AssertNear(0.25, state.anchorX, L"anchorX includes horizontal scroll");
             AssertNear(0.5, state.anchorY, L"anchorY");
             AssertNear(2.0, state.zoom, L"zoom");
@@ -90,7 +90,7 @@ namespace urPDFTests
         TEST_METHOD(CornerInGapAnchorsToNextPageEdge)
         {
             const auto state = Capture(SingleColumn(3), Viewport(0.0, 805.0));
-            Assert::AreEqual(2, state.page);
+            Assert::AreEqual(2, state.anchorPage);
             AssertNear(0.0, state.anchorY, L"anchorY at top edge");
             AssertNear(5.0 / 700.0, state.viewportY, L"anchor below viewport top");
         }
@@ -103,20 +103,20 @@ namespace urPDFTests
                 { 0.0, 1120.0, 600.0, 800.0 },
             };
             const auto state = Capture(pages, Viewport(0.0, 1000.0));
-            Assert::AreEqual(2, state.page);
+            Assert::AreEqual(2, state.anchorPage);
             AssertNear(190.0 / 300.0, state.anchorY, L"anchorY");
         }
 
         TEST_METHOD(BookViewPicksLeftPageOfRow)
         {
             const auto state = Capture(TwoColumns(4), Viewport(0.0, 900.0, 1.0, 1210.0));
-            Assert::AreEqual(3, state.page);
+            Assert::AreEqual(3, state.anchorPage);
         }
 
         TEST_METHOD(BookViewPicksRightPageWhenScrolledToIt)
         {
             const auto state = Capture(TwoColumns(4), Viewport(700.0, 900.0));
-            Assert::AreEqual(4, state.page);
+            Assert::AreEqual(4, state.anchorPage);
             AssertNear(90.0 / 600.0, state.anchorX, L"anchorX");
             AssertNear(90.0 / 800.0, state.anchorY, L"anchorY");
         }
@@ -126,7 +126,7 @@ namespace urPDFTests
             auto viewport = Viewport(0.0, 0.0, 1.0, 800.0);
             viewport.contentX = 100.0;
             const auto state = Capture(SingleColumn(3), viewport);
-            Assert::AreEqual(1, state.page);
+            Assert::AreEqual(1, state.anchorPage);
             AssertNear(0.0, state.anchorX, L"anchorX");
             AssertNear(100.0 / 800.0, state.viewportX, L"page starts right of viewport edge");
         }
@@ -134,14 +134,14 @@ namespace urPDFTests
         TEST_METHOD(DocumentSmallerThanViewport)
         {
             const auto state = Capture(SingleColumn(1), Viewport(0.0, 0.0, 1.0, 1000.0, 1000.0));
-            Assert::AreEqual(1, state.page);
+            Assert::AreEqual(1, state.anchorPage);
             AssertNear(0.0, state.anchorY, L"anchorY");
         }
 
         TEST_METHOD(ViewportPastLastPageFallsBackToNearestPage)
         {
             const auto state = Capture(SingleColumn(3), Viewport(0.0, 5000.0));
-            Assert::AreEqual(3, state.page);
+            Assert::AreEqual(3, state.anchorPage);
             AssertNear(1.0, state.anchorY, L"anchorY at bottom edge");
         }
 
@@ -150,7 +150,7 @@ namespace urPDFTests
             auto pages = SingleColumn(3);
             pages[1].width = 0.0;
             const auto state = Capture(pages, Viewport(0.0, 810.0 + 400.0));
-            Assert::AreNotEqual(2, state.page);
+            Assert::AreNotEqual(2, state.anchorPage);
         }
 
         TEST_METHOD(RejectsMissingPagesOrInvalidViewport)
@@ -172,6 +172,26 @@ namespace urPDFTests
             Assert::AreEqual(1, CurrentPageNumber(TwoColumns(4), Viewport(0.0, 0.0, 1.0, 1210.0)).value());
         }
 
+        TEST_METHOD(AnchorPageIsIndependentOfLargestVisiblePage)
+        {
+            const auto pages = SingleColumn(6);
+            const auto viewport = Viewport(0.0, 3.0 * (PageHeight + Spacing) + 500.0);
+            const auto state = Capture(pages, viewport);
+
+            Assert::AreEqual(4, state.anchorPage, L"anchor remains on the tail of page 4");
+            AssertNear(500.0 / PageHeight, state.anchorY, L"anchor belongs to page 4");
+            AssertNear(0.0, state.viewportY, L"anchor is at the viewport top");
+            Assert::AreEqual(5, CurrentPageNumber(pages, viewport).value(), L"page 5 has the largest visible area");
+        }
+
+        TEST_METHOD(CurrentPageWithEqualVisibleAreasIsEarlierPage)
+        {
+            const auto pages = SingleColumn(3);
+            const auto viewport = Viewport(0.0, 455.0);
+
+            Assert::AreEqual(1, CurrentPageNumber(pages, viewport).value(), L"both pages have 345 visible units of height");
+        }
+
         TEST_METHOD(CurrentPageAtEndOfDocumentIsLastVisiblePage)
         {
             const std::vector<PageRect> pages{
@@ -184,6 +204,10 @@ namespace urPDFTests
 
             viewport.scrollableHeight = 1120.0;
             Assert::AreEqual(3, CurrentPageNumber(pages, viewport).value(), L"scrolled to end");
+
+            const auto state = Capture(pages, viewport);
+            Assert::AreEqual(2, state.anchorPage, L"end-of-document counter rule does not change the anchor page");
+            AssertNear(310.0 / PageHeight, state.anchorY, L"anchor still belongs to page 2");
         }
 
         TEST_METHOD(CurrentPageRejectsInvisibleOrInvalidViewport)

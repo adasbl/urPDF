@@ -8,7 +8,8 @@ namespace urpdf
 {
     struct DocumentViewState
     {
-        int page{ 1 };
+        // One-based page containing the anchor, independent of the page counter.
+        int anchorPage{ 1 };
         double zoom{ 1.0 };
         int rotation{ 0 };
         bool bookView{ false };

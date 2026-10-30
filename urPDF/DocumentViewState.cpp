@@ -93,7 +93,7 @@ namespace urpdf
 
         auto const& page = pages[*bestIndex];
         DocumentViewState state;
-        state.page = static_cast<int>(*bestIndex) + 1;
+        state.anchorPage = static_cast<int>(*bestIndex) + 1;
         state.zoom = viewport.zoom;
         state.anchorX = Fraction(bestX, page.x, page.width);
         state.anchorY = Fraction(bestY, page.y, page.height);
