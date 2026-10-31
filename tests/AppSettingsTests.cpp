@@ -54,18 +54,172 @@ namespace urPDFTests
         Assert::IsTrue(data.backdrop == backdrop);
     }
 
+    void AssertWindowSettings(urpdf::AppSettings const& settings, urpdf::WindowState const& state,
+        urpdf::WindowStartupMode mode)
+    {
+        const auto data = settings.Get();
+        Assert::IsTrue(data.windowState == state);
+        Assert::IsTrue(data.windowStartupMode == mode);
+    }
+
     TEST_CLASS(AppSettingsTests)
     {
     public:
+        TEST_METHOD(WindowDefaultsRememberLastStateWithoutSavedSize)
+        {
+            auto settings = MakeSettings();
+            AssertWindowSettings(settings, {}, urpdf::WindowStartupMode::RememberLastState);
+        }
+
+        TEST_METHOD(WindowSettingsPersistAcrossInstances)
+        {
+            auto values = std::make_shared<Values>();
+            auto settings = MakeSettings(values);
+            const urpdf::WindowState state{ urpdf::WindowSize{ 1200, 800 }, true };
+            settings.SetWindowState(state);
+            settings.SetTheme(urpdf::AppTheme::Dark);
+
+            for (auto mode : { urpdf::WindowStartupMode::RememberLastState,
+                urpdf::WindowStartupMode::Maximized, urpdf::WindowStartupMode::Normal })
+            {
+                settings.SetWindowStartupMode(mode);
+                auto reloaded = MakeSettings(values);
+                AssertWindowSettings(reloaded, state, mode);
+                AssertSettings(reloaded, urpdf::AppTheme::Dark, urpdf::Backdrop::None);
+            }
+
+            settings.SetWindowState({ urpdf::WindowSize{ 900, 600 }, false });
+            auto normal = MakeSettings(values);
+            AssertWindowSettings(normal, { urpdf::WindowSize{ 900, 600 }, false }, urpdf::WindowStartupMode::Normal);
+            settings.SetWindowState({});
+            auto withoutSize = MakeSettings(values);
+            AssertWindowSettings(withoutSize, {}, urpdf::WindowStartupMode::Normal);
+        }
+
+        TEST_METHOD(LegacySettingsKeepWindowDefaults)
+        {
+            auto values = std::make_shared<Values>(Values{ { L"AppTheme", L"Dark" }, { L"Transparency", L"Mica" } });
+            auto settings = MakeSettings(values);
+            AssertSettings(settings, urpdf::AppTheme::Dark, urpdf::Backdrop::Mica);
+            AssertWindowSettings(settings, {}, urpdf::WindowStartupMode::RememberLastState);
+        }
+
+        TEST_METHOD(InvalidStoredWindowSettingsUseDefaults)
+        {
+            const wchar_t* invalidStates[] = {
+                L"not json", L"[]", L"{}", L"null",
+                LR"({"maximized":"true"})",
+                LR"({"maximized":true,"normalWidth":1200})",
+                LR"({"maximized":false,"normalHeight":800})",
+                LR"({"maximized":true,"normalWidth":0,"normalHeight":800})",
+                LR"({"maximized":true,"normalWidth":1200,"normalHeight":-1})",
+                LR"({"maximized":true,"normalWidth":1200.5,"normalHeight":800})",
+                LR"({"maximized":true,"normalWidth":2147483648,"normalHeight":800})",
+                LR"({"maximized":true,"normalWidth":"1200","normalHeight":800})",
+            };
+            for (auto state : invalidStates)
+            {
+                auto values = std::make_shared<Values>(Values{
+                    { L"AppTheme", L"Dark" }, { L"WindowState", state }, { L"WindowStartupMode", L"Minimized" } });
+                auto settings = MakeSettings(values);
+                AssertWindowSettings(settings, {}, urpdf::WindowStartupMode::RememberLastState);
+                AssertSettings(settings, urpdf::AppTheme::Dark, urpdf::Backdrop::None);
+            }
+        }
+
+        TEST_METHOD(InvalidWindowSizeDoesNotOverwriteSavedState)
+        {
+            auto values = std::make_shared<Values>();
+            auto settings = MakeSettings(values);
+            const urpdf::WindowState state{ urpdf::WindowSize{ 1200, 800 }, true };
+            settings.SetWindowState(state);
+            for (auto size : { urpdf::WindowSize{ 0, 800 }, urpdf::WindowSize{ 1200, -1 } })
+            {
+                settings.SetWindowState({ size, false });
+                AssertWindowSettings(settings, state, urpdf::WindowStartupMode::RememberLastState);
+                auto reloaded = MakeSettings(values);
+                AssertWindowSettings(reloaded, state, urpdf::WindowStartupMode::RememberLastState);
+            }
+        }
+
+        TEST_METHOD(WindowWriteFailureKeepsSettingsForCurrentSession)
+        {
+            urpdf::AppSettings settings{ std::make_unique<FailingSettingsStore>() };
+            const urpdf::WindowState state{ urpdf::WindowSize{ 1200, 800 }, true };
+            settings.SetWindowState(state);
+            settings.SetWindowStartupMode(urpdf::WindowStartupMode::Maximized);
+            AssertWindowSettings(settings, state, urpdf::WindowStartupMode::Maximized);
+        }
+
         TEST_METHOD(ExportThenImportRestoresSettings)
         {
             auto source = MakeSettings();
             source.SetTheme(urpdf::AppTheme::Dark);
             source.SetBackdrop(urpdf::Backdrop::MicaAlt);
+            const urpdf::WindowState state{ urpdf::WindowSize{ 1200, 800 }, true };
+            source.SetWindowState(state);
+            source.SetWindowStartupMode(urpdf::WindowStartupMode::Normal);
 
-            auto target = MakeSettings();
+            auto values = std::make_shared<Values>();
+            auto target = MakeSettings(values);
             Assert::IsTrue(target.ImportJson(source.ExportJson()));
             AssertSettings(target, urpdf::AppTheme::Dark, urpdf::Backdrop::MicaAlt);
+            AssertWindowSettings(target, state, urpdf::WindowStartupMode::Normal);
+            auto reloaded = MakeSettings(values);
+            AssertWindowSettings(reloaded, state, urpdf::WindowStartupMode::Normal);
+        }
+
+        TEST_METHOD(DefaultWindowSettingsRoundTripWithoutInventingSize)
+        {
+            auto source = MakeSettings();
+            auto target = MakeSettings();
+            target.SetWindowState({ urpdf::WindowSize{ 1200, 800 }, true });
+            target.SetWindowStartupMode(urpdf::WindowStartupMode::Maximized);
+            Assert::IsTrue(target.ImportJson(source.ExportJson()));
+            AssertWindowSettings(target, {}, urpdf::WindowStartupMode::RememberLastState);
+        }
+
+        TEST_METHOD(LegacyImportPreservesCurrentWindowSettings)
+        {
+            auto values = std::make_shared<Values>();
+            auto settings = MakeSettings(values);
+            const urpdf::WindowState state{ urpdf::WindowSize{ 1200, 800 }, true };
+            settings.SetWindowState(state);
+            settings.SetWindowStartupMode(urpdf::WindowStartupMode::Maximized);
+            Assert::IsTrue(settings.ImportJson(LR"({"schemaVersion":1,"AppTheme":"Dark"})"));
+            AssertWindowSettings(settings, state, urpdf::WindowStartupMode::Maximized);
+            auto reloaded = MakeSettings(values);
+            AssertWindowSettings(reloaded, state, urpdf::WindowStartupMode::Maximized);
+        }
+
+        TEST_METHOD(InvalidWindowImportsDoNotChangeCacheOrStore)
+        {
+            const wchar_t* invalidImports[] = {
+                LR"({"schemaVersion":1,"WindowStartupMode":"Minimized"})",
+                LR"({"schemaVersion":1,"WindowStartupMode":true})",
+                LR"({"schemaVersion":1,"WindowState":"invalid"})",
+                LR"({"schemaVersion":1,"WindowState":{}})",
+                LR"({"schemaVersion":1,"WindowState":{"maximized":1}})",
+                LR"({"schemaVersion":1,"WindowState":{"maximized":true,"normalWidth":1200}})",
+                LR"({"schemaVersion":1,"WindowState":{"maximized":true,"normalHeight":800}})",
+                LR"({"schemaVersion":1,"WindowState":{"maximized":true,"normalWidth":0,"normalHeight":800}})",
+                LR"({"schemaVersion":1,"WindowState":{"maximized":true,"normalWidth":1200,"normalHeight":-800}})",
+                LR"({"schemaVersion":1,"WindowState":{"maximized":true,"normalWidth":1200.5,"normalHeight":800}})",
+                LR"({"schemaVersion":1,"WindowState":{"maximized":true,"normalWidth":2147483648,"normalHeight":800}})",
+                LR"({"schemaVersion":1,"WindowState":{"maximized":true,"normalWidth":"1200","normalHeight":800}})",
+            };
+            for (auto json : invalidImports)
+            {
+                auto values = std::make_shared<Values>();
+                auto settings = MakeSettings(values);
+                const urpdf::WindowState state{ urpdf::WindowSize{ 1200, 800 }, false };
+                settings.SetWindowState(state);
+                settings.SetWindowStartupMode(urpdf::WindowStartupMode::Normal);
+                const auto previousValues = *values;
+                Assert::IsFalse(settings.ImportJson(json), json);
+                AssertWindowSettings(settings, state, urpdf::WindowStartupMode::Normal);
+                Assert::IsTrue(*values == previousValues, json);
+            }
         }
 
         TEST_METHOD(ImportPersistsToStore)
