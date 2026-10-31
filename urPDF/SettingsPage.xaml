@@ -53,6 +53,17 @@
                 <StackPanel Spacing="12">
                     <TextBlock Text="Default behavior" Style="{StaticResource SubtitleTextBlockStyle}"/>
 
+                    <ComboBox
+                        x:Name="WindowStartupModeComboBox"
+                        Header="Window state at startup"
+                        Width="280"
+                        Margin="8,0,0,0"
+                        SelectionChanged="WindowStartupModeSelection_SelectionChanged">
+                        <ComboBoxItem Content="Remember last state" Tag="RememberLastState"/>
+                        <ComboBoxItem Content="Always maximized" Tag="Maximized"/>
+                        <ComboBoxItem Content="Always in a normal window" Tag="Normal"/>
+                    </ComboBox>
+
                     <ToggleSwitch
                         OffContent="On" OnContent="Off" 
                         Toggled="ToggleSwitch_Toggled"/>

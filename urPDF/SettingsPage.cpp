@@ -99,6 +99,21 @@ namespace winrt::urPDF::implementation
         }
     }
 
+    void SettingsPage::WindowStartupModeSelection_SelectionChanged(foundation::IInspectable const& sender, controls::SelectionChangedEventArgs const&)
+    {
+        if (m_isInitializing) { return; }
+
+        auto comboBox = sender.as<controls::ComboBox>();
+        if (auto selectedItem = comboBox.SelectedItem().try_as<controls::ComboBoxItem>())
+        {
+            auto modeTag = winrt::unbox_value<winrt::hstring>(selectedItem.Tag());
+            auto mode = urpdf::ParseWindowStartupMode(modeTag);
+            if (!mode) { return; }
+
+            urpdf::AppSettings::Instance().SetWindowStartupMode(*mode);
+        }
+    }
+
     winrt::event_token SettingsPage::ThemeChanged(foundation::EventHandler<winrt::hstring> const& handler)
     {
         return m_themeChangedEvent.add(handler);
@@ -134,5 +149,6 @@ namespace winrt::urPDF::implementation
 
         ThemeComboBox().SelectedIndex(static_cast<int32_t>(settings.theme));
         TransparencyComboBox().SelectedIndex(static_cast<int32_t>(settings.backdrop));
+        WindowStartupModeComboBox().SelectedIndex(static_cast<int32_t>(settings.windowStartupMode));
     }
 }
