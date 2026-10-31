@@ -324,6 +324,7 @@ namespace winrt::urPDF::implementation
         foundation::Collections::IObservableVector<foundation::IInspectable> m_pageRepeaterItems{ nullptr };
 
         bool TryAcquireRenderingLock();
+        void RestoreWindowState();
         void TrackWindowState();
         void CaptureWindowState();
         void SaveWindowState();

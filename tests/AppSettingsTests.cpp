@@ -66,6 +66,86 @@ namespace urPDFTests
     TEST_CLASS(AppSettingsTests)
     {
     public:
+        TEST_METHOD(StartupWithoutSavedSizeKeepsNativeDefaultBounds)
+        {
+            const RECT defaultBounds{ 100, 100, 1124, 868 };
+            const auto placement = urpdf::ResolveWindowStartupPlacement({}, defaultBounds, { 0, 0, 1920, 1040 });
+            Assert::IsTrue(EqualRect(&placement.normalBounds, &defaultBounds) != FALSE);
+            Assert::IsFalse(placement.maximized);
+        }
+
+        TEST_METHOD(StartupPreferencesOverrideSavedMaximizedState)
+        {
+            for (bool maximized : { false, true })
+            {
+                for (auto mode : { urpdf::WindowStartupMode::RememberLastState,
+                    urpdf::WindowStartupMode::Maximized, urpdf::WindowStartupMode::Normal })
+                {
+                    urpdf::SettingsData settings;
+                    settings.windowState = { urpdf::WindowSize{ 900, 600 }, maximized };
+                    settings.windowStartupMode = mode;
+                    const auto placement = urpdf::ResolveWindowStartupPlacement(
+                        settings, { 100, 100, 1124, 868 }, { 0, 0, 1920, 1040 });
+                    const RECT expectedBounds{ 100, 100, 1000, 700 };
+                    Assert::IsTrue(EqualRect(&placement.normalBounds, &expectedBounds) != FALSE);
+                    Assert::IsTrue(placement.maximized == (mode == urpdf::WindowStartupMode::Maximized
+                        || (mode == urpdf::WindowStartupMode::RememberLastState && maximized)));
+                }
+            }
+        }
+
+        TEST_METHOD(StartupShrinksOversizedWindowToMonitorWorkArea)
+        {
+            urpdf::SettingsData settings;
+            settings.windowState = { urpdf::WindowSize{ 5000, 3000 }, true };
+            const RECT workArea{ -1920, 40, 0, 1080 };
+            const auto placement = urpdf::ResolveWindowStartupPlacement(settings, { -1800, 100, -800, 800 }, workArea);
+            Assert::IsTrue(EqualRect(&placement.normalBounds, &workArea) != FALSE);
+            Assert::IsTrue(placement.maximized);
+        }
+
+        TEST_METHOD(StartupKeepsResizedWindowInsideWorkArea)
+        {
+            urpdf::SettingsData settings;
+            settings.windowState.normalSize = urpdf::WindowSize{ 900, 600 };
+            const auto placement = urpdf::ResolveWindowStartupPlacement(
+                settings, { 1800, 900, 2824, 1668 }, { 0, 40, 1920, 1040 });
+            const RECT expectedBounds{ 1020, 440, 1920, 1040 };
+            Assert::IsTrue(EqualRect(&placement.normalBounds, &expectedBounds) != FALSE);
+
+            settings.windowState.normalSize = urpdf::WindowSize{ 5000, 600 };
+            const auto wide = urpdf::ResolveWindowStartupPlacement(
+                settings, { 100, 100, 1124, 868 }, { 0, 40, 1920, 1040 });
+            const RECT expectedWideBounds{ 0, 100, 1920, 700 };
+            Assert::IsTrue(EqualRect(&wide.normalBounds, &expectedWideBounds) != FALSE);
+        }
+
+        TEST_METHOD(StartupInvalidSizesUseDefaults)
+        {
+            const RECT defaultBounds{ 100, 100, 1124, 868 };
+            for (auto size : { urpdf::WindowSize{ 0, 800 }, urpdf::WindowSize{ 1200, -1 } })
+            {
+                urpdf::SettingsData settings;
+                settings.windowState.normalSize = size;
+                const auto placement = urpdf::ResolveWindowStartupPlacement(settings, defaultBounds, { 0, 0, 1920, 1040 });
+                Assert::IsTrue(EqualRect(&placement.normalBounds, &defaultBounds) != FALSE);
+            }
+
+            const auto fallback = urpdf::ResolveWindowStartupPlacement({}, {}, { 0, 0, 800, 600 });
+            const RECT expectedFallback{ 0, 0, 800, 600 };
+            Assert::IsTrue(EqualRect(&fallback.normalBounds, &expectedFallback) != FALSE);
+        }
+
+        TEST_METHOD(StartupWithoutMonitorDataKeepsNativeBoundsAndPreference)
+        {
+            urpdf::SettingsData settings;
+            settings.windowStartupMode = urpdf::WindowStartupMode::Maximized;
+            const RECT defaultBounds{ 100, 100, 1124, 868 };
+            const auto placement = urpdf::ResolveWindowStartupPlacement(settings, defaultBounds, {});
+            Assert::IsTrue(EqualRect(&placement.normalBounds, &defaultBounds) != FALSE);
+            Assert::IsTrue(placement.maximized);
+        }
+
         TEST_METHOD(WindowTrackingPreservesNormalSizeAcrossMaximizeAndMinimize)
         {
             urpdf::WindowState state;
@@ -140,6 +220,13 @@ namespace urPDFTests
                     settings.SetWindowState(state);
                     auto reloaded = MakeSettings(values);
                     AssertWindowSettings(reloaded, state, mode);
+
+                    const auto startup = urpdf::ResolveWindowStartupPlacement(
+                        reloaded.Get(), { 100, 100, 1000, 700 }, { 0, 0, 1920, 1040 });
+                    const RECT expectedBounds{ 100, 100, 1300, 900 };
+                    Assert::IsTrue(EqualRect(&startup.normalBounds, &expectedBounds) != FALSE);
+                    Assert::IsTrue(startup.maximized == (mode == urpdf::WindowStartupMode::Maximized
+                        || (mode == urpdf::WindowStartupMode::RememberLastState && wasMaximized)));
                 }
 
                 urpdf::WindowState withoutSavedSize;

@@ -365,7 +365,6 @@ namespace winrt::urPDF::implementation
         SetTitleBar(AppTitleBar());
 
         LoadSettings();
-        TrackWindowState();
 
         m_mupdfLocks.user = m_mupdfMutexes.data();
         m_mupdfLocks.lock = LockMuPdf;
@@ -386,12 +385,49 @@ namespace winrt::urPDF::implementation
         {
             m_pendingFilePath = *path;
         }
+
+        RestoreWindowState();
+        TrackWindowState();
     }
 
 
+    void MainWindow::RestoreWindowState()
+    {
+        const auto settings = urpdf::AppSettings::Instance().Get();
+        m_windowState = settings.windowState;
+
+        auto nativeWindow = try_as<::IWindowNative>();
+        HWND hwnd{};
+        if (!nativeWindow || FAILED(nativeWindow->get_WindowHandle(&hwnd))) { return; }
+
+        RECT defaultBounds{};
+        MONITORINFO monitorInfo{};
+        monitorInfo.cbSize = sizeof(monitorInfo);
+        if (!GetWindowRect(hwnd, &defaultBounds)) { return; }
+        if (!GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitorInfo))
+        {
+            monitorInfo.rcWork = defaultBounds;
+        }
+
+        const auto placement = urpdf::ResolveWindowStartupPlacement(settings, defaultBounds, monitorInfo.rcWork);
+        auto appWindow = AppWindow();
+        auto presenter = appWindow.Presenter().try_as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>();
+        if (!presenter) { return; }
+        if (presenter.State() != winrt::Microsoft::UI::Windowing::OverlappedPresenterState::Restored)
+        {
+            presenter.Restore(false);
+        }
+
+        const auto& bounds = placement.normalBounds;
+        appWindow.MoveAndResize({ static_cast<int32_t>(bounds.left), static_cast<int32_t>(bounds.top),
+            static_cast<int32_t>(bounds.right - bounds.left), static_cast<int32_t>(bounds.bottom - bounds.top) });
+        const auto size = appWindow.Size();
+        m_windowState = { urpdf::WindowSize{ size.Width, size.Height }, placement.maximized };
+        if (placement.maximized) { presenter.Maximize(); }
+    }
+
     void MainWindow::TrackWindowState()
     {
-        m_windowState = urpdf::AppSettings::Instance().Get().windowState;
         CaptureWindowState();
 
         m_windowChangedRevoker = AppWindow().Changed(winrt::auto_revoke,
