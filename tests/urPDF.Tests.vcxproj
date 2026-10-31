@@ -61,6 +61,7 @@
     <ClInclude Include="..\urPDF\WindowPlacement.h" />
     <ClInclude Include="..\urPDF\SettingsStore.h" />
     <None Include="README.md" />
+    <None Include="WindowSettings.Integration.ps1" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
