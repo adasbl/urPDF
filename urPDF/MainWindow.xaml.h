@@ -293,6 +293,9 @@ namespace winrt::urPDF::implementation
 
     private:
         foundation::IAsyncOperation<storage::StorageFile> PickPdfFileAsync();
+        winrt::fire_and_forget ShowOpenErrorAsync(winrt::hstring message);
+        controls::ContentDialog m_openErrorDialog{ nullptr };
+        std::list<winrt::hstring> m_openErrorMessages;
 
         std::array<std::mutex, FZ_LOCK_MAX> m_mupdfMutexes;
         fz_locks_context m_mupdfLocks{};

@@ -8,6 +8,7 @@
 
 // Project
 #include "AppSettings.h"
+#include "App.xaml.h"
 #include "PdfRenderScale.h"
 #include "SettingsPage.h"
 #include "AboutPage.h"
@@ -34,7 +35,6 @@ extern "C" {
 // Windows SDK / WinRT
 #include <shobjidl_core.h>
 #include <MemoryBuffer.h>
-#include <wil/resource.h>
 #include <printmanagerinterop.h>
 #include <microsoft.ui.xaml.window.h>
 #include <winrt/Windows.Storage.h>
@@ -105,6 +105,64 @@ namespace
         return fileType == L".pdf";
     }
 
+    winrt::hstring CurrentOpenErrorMessage()
+    {
+        try { throw; }
+        catch (winrt::hresult_error const& error) { return error.message(); }
+        catch (std::exception const& error) { return winrt::to_hstring(error.what()); }
+        catch (...) { return L"The document could not be opened."; }
+    }
+
+    // Keep MuPDF's longjmp-based exceptions inside these calls, away from C++ owners.
+    fz_document* OpenPdfDocument(fz_context* ctx, char const* path)
+    {
+        fz_document* document = nullptr;
+        fz_try(ctx)
+        {
+            document = fz_open_document(ctx, path);
+        }
+        fz_catch(ctx)
+        {
+            throw winrt::hresult_error(E_FAIL, winrt::to_hstring(fz_caught_message(ctx)));
+        }
+        return document;
+    }
+
+    int CountDocumentPages(fz_context* ctx, fz_document* document)
+    {
+        int count = 0;
+        fz_try(ctx)
+        {
+            count = fz_count_pages(ctx, document);
+        }
+        fz_catch(ctx)
+        {
+            throw winrt::hresult_error(E_FAIL, winrt::to_hstring(fz_caught_message(ctx)));
+        }
+        return count;
+    }
+
+    fz_rect LoadPageBounds(fz_context* ctx, fz_document* document, int index)
+    {
+        fz_page* page = nullptr;
+        fz_rect bounds{};
+        fz_var(page);
+        fz_try(ctx)
+        {
+            page = fz_load_page(ctx, document, index);
+            bounds = fz_bound_page(ctx, page);
+        }
+        fz_always(ctx)
+        {
+            fz_drop_page(ctx, page);
+        }
+        fz_catch(ctx)
+        {
+            throw winrt::hresult_error(E_FAIL, winrt::to_hstring(fz_caught_message(ctx)));
+        }
+        return bounds;
+    }
+
     constexpr double PdfRenderScale(double zoom, double dpiScale) noexcept
     {
         return urpdf::DipPerPdfPoint * zoom * dpiScale * urpdf::RenderSupersampling;
@@ -150,9 +208,7 @@ namespace
 
         for (int i = 0; i < pagecount; ++i)
         {
-            fz_page* page = fz_load_page(ctx, doc, i);
-            pageBounds.push_back(fz_bound_page(ctx, page));
-            fz_drop_page(ctx, page);
+            pageBounds.push_back(LoadPageBounds(ctx, doc, i));
         }
 
         return pageBounds;
@@ -295,6 +351,8 @@ namespace winrt::urPDF::implementation
             ++tabEntry.second->m_renderGeneration;
         }
 
+        m_openedTabs.clear();
+
         if (m_ctx) {
             fz_drop_context(m_ctx);
             m_ctx = nullptr;
@@ -363,6 +421,7 @@ namespace winrt::urPDF::implementation
             if (auto self = weakThis.get())
             {
                 self->m_isClosed = true;
+                if (self->m_openErrorDialog) { self->m_openErrorDialog.Hide(); }
                 self->CancelPendingViewStateSave();
                 self->DetachDpiObserver();
                 self->CancelPendingZoomRender();
@@ -556,7 +615,7 @@ namespace winrt::urPDF::implementation
     PdfTabInfo::PdfTabInfo(fz_context* ctx, const std::string& filePath)
     {
         m_ctx = ctx;
-        m_doc = fz_open_document(m_ctx, filePath.c_str());
+        m_doc = OpenPdfDocument(m_ctx, filePath.c_str());
     }
 
     PdfTabInfo::~PdfTabInfo()
@@ -994,29 +1053,49 @@ namespace winrt::urPDF::implementation
             auto file = co_await PickPdfFileAsync();
             if (!file || m_isClosed) { co_return; }
 
-            const auto executablePath = ExecutableDirectory() / L"urPDF.exe";
-            std::wstring commandLine = L"\"" + executablePath.wstring() + L"\" \"" + file.Path().c_str() + L"\"";
-            STARTUPINFOW startupInfo{};
-            startupInfo.cb = sizeof(startupInfo);
-            PROCESS_INFORMATION processInfo{};
-            winrt::check_bool(CreateProcessW(executablePath.c_str(), commandLine.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startupInfo, &processInfo));
-            wil::unique_handle processHandle{ processInfo.hProcess };
-            wil::unique_handle threadHandle{ processInfo.hThread };
+            urpdf::WindowCreationOptions options;
+            options.file = file;
+            auto app = xaml::Application::Current().as<App>();
+            app->CreateWindow(options);
         }
-        catch (winrt::hresult_error const& error)
+        catch (...)
         {
-            errorMessage = error.message();
+            errorMessage = CurrentOpenErrorMessage();
         }
 
         if (!errorMessage.empty() && !m_isClosed)
         {
-            controls::ContentDialog dialog;
-            dialog.XamlRoot(MainWindowUI().XamlRoot());
-            dialog.Title(winrt::box_value(L"Couldn't open document in a new window"));
-            dialog.Content(winrt::box_value(errorMessage));
-            dialog.CloseButtonText(L"OK");
-            co_await dialog.ShowAsync();
+            ShowOpenErrorAsync(errorMessage);
         }
+    }
+
+    winrt::fire_and_forget MainWindow::ShowOpenErrorAsync(winrt::hstring message)
+    {
+        auto strongThis = get_strong();
+        if (m_isClosed) { co_return; }
+
+        m_openErrorMessages.push_back(std::move(message));
+        if (m_openErrorMessages.size() > 1) { co_return; }
+
+        while (!m_isClosed && !m_openErrorMessages.empty())
+        {
+            m_openErrorDialog = controls::ContentDialog();
+            m_openErrorDialog.XamlRoot(MainWindowUI().XamlRoot());
+            m_openErrorDialog.Title(winrt::box_value(L"Couldn't open document"));
+            m_openErrorDialog.Content(winrt::box_value(m_openErrorMessages.front()));
+            m_openErrorDialog.CloseButtonText(L"OK");
+            try
+            {
+                co_await m_openErrorDialog.ShowAsync();
+            }
+            catch (winrt::hresult_error const& error)
+            {
+                if (!m_isClosed) { OutputDebugStringW(error.message().c_str()); }
+            }
+            m_openErrorDialog = nullptr;
+            m_openErrorMessages.pop_front();
+        }
+        m_openErrorMessages.clear();
     }
 
     winrt::fire_and_forget MainWindow::OpenPdfPathAsync(winrt::hstring path)
@@ -1024,16 +1103,25 @@ namespace winrt::urPDF::implementation
         auto strongThis = get_strong();
 
         storage::StorageFile file{ nullptr };
+        winrt::hstring errorMessage;
         try
         {
             file = co_await storage::StorageFile::GetFileFromPathAsync(path);
+            if (!IsPdfFile(file))
+            {
+                throw winrt::hresult_error(E_INVALIDARG, L"Please select a PDF document.");
+            }
         }
-        catch (winrt::hresult_error const&)
+        catch (...)
         {
-            co_return;
+            errorMessage = CurrentOpenErrorMessage();
         }
 
-        if (IsPdfFile(file))
+        if (!errorMessage.empty())
+        {
+            ShowOpenErrorAsync(errorMessage);
+        }
+        else if (!m_isClosed)
         {
             OpenPdfFileAsync(file);
         }
@@ -1048,6 +1136,8 @@ namespace winrt::urPDF::implementation
         }
 
         std::shared_ptr<PdfTabInfo> loadingTab;
+        controls::TabViewItem loadingTabItem{ nullptr };
+        winrt::hstring errorMessage;
         try
         {
             const auto openStartedAt = std::chrono::steady_clock::now();
@@ -1059,6 +1149,9 @@ namespace winrt::urPDF::implementation
             PdfInfo->m_renderMetrics.openStartedAt = openStartedAt;
             PdfInfo->m_documentId = m_nextDocumentId++;
             PdfInfo->m_fileName = fileName;
+
+            co_await LoadDocumentLayoutAsync(PdfInfo);
+            if (m_isClosed) { co_return; }
 
             controls::TabViewItem targetTab;
 
@@ -1078,6 +1171,7 @@ namespace winrt::urPDF::implementation
                 MainTabView().TabItems().Append(targetTab);
                 MainTabView().SelectedItem(targetTab);
             }
+            loadingTabItem = targetTab;
             SaveViewState(m_presentedTab.lock());
             targetTab.Header(winrt::box_value(fileName));
 
@@ -1088,24 +1182,27 @@ namespace winrt::urPDF::implementation
             m_openedTabs[targetTab] = PdfInfo;
             RestoreViewState(PdfInfo);
 
-            co_await LoadDocumentLayoutAsync(PdfInfo);
-            if (m_isClosed) { co_return; }
             ReleaseRenderingLock();
             if (!m_viewStateGuard.IsPending()) { RenderVisiblePagesAsync(); }
         }
         catch (...)
         {
+            errorMessage = CurrentOpenErrorMessage();
             if (!m_isClosed)
             {
-                // A failed open must not leave protection stuck, nor cancel a newer tab's operation.
-                if (loadingTab)
+                if (loadingTab) { ++loadingTab->m_renderGeneration; }
+                if (loadingTabItem)
                 {
-                    loadingTab->m_layoutLoaded = true;
-                    QueuePendingViewStateSave();
+                    if (MainTabView().TabItems().Size() == 1)
+                    {
+                        TabView_AddButtonClick(nullptr, nullptr);
+                    }
+                    CloseTab(loadingTabItem);
                 }
                 ReleaseRenderingLock();
             }
         }
+        if (!errorMessage.empty()) { ShowOpenErrorAsync(errorMessage); }
     }
 
     foundation::IAsyncAction MainWindow::LoadDocumentLayoutAsync(std::shared_ptr<PdfTabInfo> PdfTab)
@@ -1114,7 +1211,7 @@ namespace winrt::urPDF::implementation
         auto dispatcher = DispatcherQueue();
         const std::uint64_t generation = PdfTab->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
 
-        fz_context* layoutCtx = fz_clone_context(m_ctx);
+        std::unique_ptr<fz_context, decltype(&fz_drop_context)> layoutCtx(fz_clone_context(m_ctx), &fz_drop_context);
         if (!layoutCtx)
         {
             winrt::throw_hresult(E_OUTOFMEMORY);
@@ -1122,9 +1219,9 @@ namespace winrt::urPDF::implementation
 
         co_await winrt::resume_background();
 
-        const int pagecount = fz_count_pages(layoutCtx, PdfTab->m_doc);
-        auto pageBounds = CollectPageBounds(layoutCtx, PdfTab->m_doc, pagecount);
-        fz_drop_context(layoutCtx);
+        const int pagecount = CountDocumentPages(layoutCtx.get(), PdfTab->m_doc);
+        auto pageBounds = CollectPageBounds(layoutCtx.get(), PdfTab->m_doc, pagecount);
+        layoutCtx.reset();
 
         co_await resume_foreground(dispatcher);
 
@@ -1145,8 +1242,6 @@ namespace winrt::urPDF::implementation
         PdfTab->m_renderedPages = std::move(pageSlots);
         PdfTab->m_layoutLoaded = true;
 
-        // Only load the model here. The current restoration operation owns all UI work,
-        // including when loading finishes after A -> B -> A.
         QueuePendingViewStateSave();
     }
 
@@ -2274,17 +2369,20 @@ namespace winrt::urPDF::implementation
 
         m_layoutViewSaveQueued = true;
         m_viewStateRenderingRevoker = xaml::Media::CompositionTarget::Rendering(winrt::auto_revoke,
-            [weakThis = get_weak(), pdfTab, operation](auto const&, auto const&)
+            [weakThis = get_weak(), weakTab = std::weak_ptr<PdfTabInfo>(pdfTab), operation](auto const&, auto const&)
             {
                 auto window = weakThis.get();
-                if (!window || !window->IsCurrentViewOperation(pdfTab, operation)) { return; }
+                if (!window) { return; }
+                auto pdfTab = weakTab.lock();
+                if (!window->IsCurrentViewOperation(pdfTab, operation)) { return; }
                 window->m_viewStateRenderingRevoker.revoke();
                 const bool queued = window->DispatcherQueue().TryEnqueue(dispatching::DispatcherQueuePriority::Low,
-                    [weakThis, pdfTab, operation]
+                    [weakThis, weakTab, operation]
                     {
                         auto self = weakThis.get();
-
-                        if (!self || !self->IsCurrentViewOperation(pdfTab, operation)) { return; }
+                        if (!self) { return; }
+                        auto pdfTab = weakTab.lock();
+                        if (!self->IsCurrentViewOperation(pdfTab, operation)) { return; }
                         self->m_layoutViewSaveQueued = false;
                         self->AdvanceViewStateChange(pdfTab, operation);
                     });
