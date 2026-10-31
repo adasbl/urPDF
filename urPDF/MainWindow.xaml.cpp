@@ -290,6 +290,7 @@ namespace winrt::urPDF::implementation
     // MAINWINDOW
     MainWindow::~MainWindow()
     {
+        StopTrackingWindowState();
         DetachDpiObserver();
         CancelPendingZoomRender();
         for (auto const& tabEntry : m_openedTabs)
@@ -352,8 +353,7 @@ namespace winrt::urPDF::implementation
             {
                 self->m_isClosed = true;
                 self->SaveWindowState();
-                self->m_windowChangedRevoker.revoke();
-                self->m_windowClosingRevoker.revoke();
+                self->StopTrackingWindowState();
                 self->DetachDpiObserver();
                 self->CancelPendingZoomRender();
             }
@@ -428,9 +428,13 @@ namespace winrt::urPDF::implementation
 
     void MainWindow::TrackWindowState()
     {
+        StopTrackingWindowState();
         CaptureWindowState();
 
-        m_windowChangedRevoker = AppWindow().Changed(winrt::auto_revoke,
+        // AppWindow does not support the weak references required by auto_revoke.
+        // Keep the event source alive and remove the handlers explicitly.
+        m_observedAppWindow = AppWindow();
+        m_windowChangedToken = m_observedAppWindow.Changed(
             [weakThis = get_weak()](auto const&, auto const&)
             {
                 if (auto self = weakThis.get(); self && !self->m_isClosed)
@@ -439,7 +443,7 @@ namespace winrt::urPDF::implementation
                 }
             });
 
-        m_windowClosingRevoker = AppWindow().Closing(winrt::auto_revoke,
+        m_windowClosingToken = m_observedAppWindow.Closing(
             [weakThis = get_weak()](auto const&, auto const&)
             {
                 if (auto self = weakThis.get())
@@ -448,6 +452,22 @@ namespace winrt::urPDF::implementation
                     self->SaveWindowState();
                 }
             });
+    }
+
+    void MainWindow::StopTrackingWindowState() noexcept
+    {
+        if (m_observedAppWindow)
+        {
+            if (m_windowChangedToken)
+            {
+                m_observedAppWindow.Changed(std::exchange(m_windowChangedToken, {}));
+            }
+            if (m_windowClosingToken)
+            {
+                m_observedAppWindow.Closing(std::exchange(m_windowClosingToken, {}));
+            }
+            m_observedAppWindow = nullptr;
+        }
     }
 
     void MainWindow::CaptureWindowState()

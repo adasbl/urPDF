@@ -307,8 +307,9 @@ namespace winrt::urPDF::implementation
         bool m_visibleRenderRequested{ false };
         bool m_isClosed{ false };
         urpdf::WindowState m_windowState;
-        winrt::Microsoft::UI::Windowing::AppWindow::Changed_revoker m_windowChangedRevoker;
-        winrt::Microsoft::UI::Windowing::AppWindow::Closing_revoker m_windowClosingRevoker;
+        winrt::Microsoft::UI::Windowing::AppWindow m_observedAppWindow{ nullptr };
+        winrt::event_token m_windowChangedToken{};
+        winrt::event_token m_windowClosingToken{};
         xaml::XamlRoot m_observedXamlRoot{ nullptr };
         xaml::XamlRoot::Changed_revoker m_xamlRootChangedRevoker;
         dispatching::DispatcherQueueTimer m_dpiRenderTimer{ nullptr };
@@ -326,6 +327,7 @@ namespace winrt::urPDF::implementation
         bool TryAcquireRenderingLock();
         void RestoreWindowState();
         void TrackWindowState();
+        void StopTrackingWindowState() noexcept;
         void CaptureWindowState();
         void SaveWindowState();
         void ReleaseRenderingLock();
