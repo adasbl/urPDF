@@ -790,8 +790,8 @@ namespace winrt::urPDF::implementation
 
                 auto pdfInfo = m_openedTabs[currentTab];
 
-                DisplayPageNumber(pdfInfo->m_currentPageIndex);
                 DisplayPageCount(pdfInfo->m_pagecount);
+                DisplayPageNumber(pdfInfo->m_currentPageIndex);
                 RebuildPagesContainer(pdfInfo->m_renderedPages);
                 PdfScrollViewer().ChangeView(nullptr, nullptr, static_cast<float>(pdfInfo->m_uiZoom), true);
                 PdfScrollViewer().UpdateLayout();
@@ -1975,6 +1975,7 @@ namespace winrt::urPDF::implementation
     // NAVIGATION
     void MainWindow::PageNumberBox_ValueChanged(controls::NumberBox const& sender, controls::NumberBoxValueChangedEventArgs const& args)
     {
+        if (m_isRestoringTabView) return;
         if (std::isnan(args.NewValue())) return;
 
         int32_t newPage = static_cast<int32_t>(std::round(args.NewValue()));

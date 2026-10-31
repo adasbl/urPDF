@@ -132,11 +132,11 @@
                                 <TextBlock Text="Page: " VerticalAlignment="Center"/>
                                 <NumberBox Value="{x:Bind DisplayPageNumber, Mode=OneWay}"
                                         Minimum="0"
-                                        Maximum="100"
+                                        Maximum="{x:Bind DisplayPageCount, Mode=OneWay}"
                                         SpinButtonPlacementMode="Hidden"
                                         ValueChanged="PageNumberBox_ValueChanged"
                                         SmallChange="1"
-                                        Width="48"
+                                        Width="72"
                                         MinWidth="0"
                                         HorizontalContentAlignment="Center"
                                         VerticalAlignment="Center"/>
