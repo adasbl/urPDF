@@ -4,6 +4,7 @@
 #include "MainWindow.g.h"
 
 // Project
+#include "AppSettings.h"
 #include "PdfPageLayout.h"
 #include "PdfRenderScale.h"
 
@@ -34,6 +35,7 @@ extern "C" {
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Microsoft.UI.Dispatching.h>
+#include <winrt/Microsoft.UI.Windowing.h>
 #include <winrt/Microsoft.UI.Xaml.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 #include <winrt/Microsoft.UI.Xaml.Data.h>
@@ -304,6 +306,9 @@ namespace winrt::urPDF::implementation
         bool m_isVisibleRenderRunning{ false };
         bool m_visibleRenderRequested{ false };
         bool m_isClosed{ false };
+        urpdf::WindowState m_windowState;
+        winrt::Microsoft::UI::Windowing::AppWindow::Changed_revoker m_windowChangedRevoker;
+        winrt::Microsoft::UI::Windowing::AppWindow::Closing_revoker m_windowClosingRevoker;
         xaml::XamlRoot m_observedXamlRoot{ nullptr };
         xaml::XamlRoot::Changed_revoker m_xamlRootChangedRevoker;
         dispatching::DispatcherQueueTimer m_dpiRenderTimer{ nullptr };
@@ -319,6 +324,9 @@ namespace winrt::urPDF::implementation
         foundation::Collections::IObservableVector<foundation::IInspectable> m_pageRepeaterItems{ nullptr };
 
         bool TryAcquireRenderingLock();
+        void TrackWindowState();
+        void CaptureWindowState();
+        void SaveWindowState();
         void ReleaseRenderingLock();
         void UpdateRenderZoom(std::shared_ptr<PdfTabInfo> const& pdfTab, double zoom, bool isIntermediate);
         void ApplyPendingRenderZoom();

@@ -163,6 +163,7 @@
       <SubType>Code</SubType>
     </ClInclude>
     <ClInclude Include="AppSettings.h" />
+    <ClInclude Include="WindowPlacement.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="PdfRenderScale.h" />
     <ClInclude Include="App.xaml.h">

@@ -8,6 +8,7 @@
 
 // Project
 #include "AppSettings.h"
+#include "WindowPlacement.h"
 #include "CommandLine.h"
 #include "PdfRenderScale.h"
 #include "SettingsPage.h"
@@ -350,6 +351,9 @@ namespace winrt::urPDF::implementation
             if (auto self = weakThis.get())
             {
                 self->m_isClosed = true;
+                self->SaveWindowState();
+                self->m_windowChangedRevoker.revoke();
+                self->m_windowClosingRevoker.revoke();
                 self->DetachDpiObserver();
                 self->CancelPendingZoomRender();
             }
@@ -361,6 +365,7 @@ namespace winrt::urPDF::implementation
         SetTitleBar(AppTitleBar());
 
         LoadSettings();
+        TrackWindowState();
 
         m_mupdfLocks.user = m_mupdfMutexes.data();
         m_mupdfLocks.lock = LockMuPdf;
@@ -383,6 +388,54 @@ namespace winrt::urPDF::implementation
         }
     }
 
+
+    void MainWindow::TrackWindowState()
+    {
+        m_windowState = urpdf::AppSettings::Instance().Get().windowState;
+        CaptureWindowState();
+
+        m_windowChangedRevoker = AppWindow().Changed(winrt::auto_revoke,
+            [weakThis = get_weak()](auto const&, auto const&)
+            {
+                if (auto self = weakThis.get(); self && !self->m_isClosed)
+                {
+                    self->CaptureWindowState();
+                }
+            });
+
+        m_windowClosingRevoker = AppWindow().Closing(winrt::auto_revoke,
+            [weakThis = get_weak()](auto const&, auto const&)
+            {
+                if (auto self = weakThis.get())
+                {
+                    self->CaptureWindowState();
+                    self->SaveWindowState();
+                }
+            });
+    }
+
+    void MainWindow::CaptureWindowState()
+    {
+        auto nativeWindow = try_as<::IWindowNative>();
+        HWND hwnd{};
+        if (!nativeWindow || FAILED(nativeWindow->get_WindowHandle(&hwnd))) { return; }
+
+        WINDOWPLACEMENT placement{};
+        placement.length = sizeof(placement);
+        if (GetWindowPlacement(hwnd, &placement))
+        {
+            urpdf::UpdateWindowStateFromPlacement(m_windowState, placement);
+        }
+    }
+
+    void MainWindow::SaveWindowState()
+    {
+        auto& settings = urpdf::AppSettings::Instance();
+        if (settings.Get().windowState != m_windowState)
+        {
+            settings.SetWindowState(m_windowState);
+        }
+    }
 
     // HELPER FUNCTIONS
     auto resume_foreground(dispatching::DispatcherQueue const& dispatcher)

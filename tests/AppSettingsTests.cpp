@@ -1,5 +1,6 @@
 #include "CppUnitTest.h"
 #include "../urPDF/AppSettings.h"
+#include "../urPDF/WindowPlacement.h"
 
 #include <map>
 #include <memory>
@@ -65,6 +66,66 @@ namespace urPDFTests
     TEST_CLASS(AppSettingsTests)
     {
     public:
+        TEST_METHOD(WindowTrackingPreservesNormalSizeAcrossMaximizeAndMinimize)
+        {
+            urpdf::WindowState state;
+            WINDOWPLACEMENT placement{};
+            placement.showCmd = SW_SHOWNORMAL;
+            placement.rcNormalPosition = { 100, 200, 1300, 1000 };
+            urpdf::UpdateWindowStateFromPlacement(state, placement);
+
+            placement.showCmd = SW_SHOWMAXIMIZED;
+            placement.rcNormalPosition = { 0, 0, 1920, 1080 };
+            urpdf::UpdateWindowStateFromPlacement(state, placement);
+            Assert::IsTrue(state == urpdf::WindowState{ urpdf::WindowSize{ 1200, 800 }, true });
+
+            placement.showCmd = SW_SHOWMINIMIZED;
+            placement.rcNormalPosition = { -32000, -32000, -31840, -31972 };
+            urpdf::UpdateWindowStateFromPlacement(state, placement);
+            Assert::IsTrue(state == urpdf::WindowState{ urpdf::WindowSize{ 1200, 800 }, true });
+
+            auto values = std::make_shared<Values>();
+            auto settings = MakeSettings(values);
+            settings.SetWindowStartupMode(urpdf::WindowStartupMode::Normal);
+            settings.SetWindowState(state);
+            auto reloaded = MakeSettings(values);
+            AssertWindowSettings(reloaded, state, urpdf::WindowStartupMode::Normal);
+        }
+
+        TEST_METHOD(WindowTrackingUpdatesSizeAfterRestoreAndResize)
+        {
+            urpdf::WindowState state{ urpdf::WindowSize{ 1200, 800 }, true };
+            WINDOWPLACEMENT placement{};
+            placement.showCmd = SW_SHOWNORMAL;
+            placement.rcNormalPosition = { -1200, -100, -300, 500 };
+            urpdf::UpdateWindowStateFromPlacement(state, placement);
+            const urpdf::WindowState expected{ urpdf::WindowSize{ 900, 600 }, false };
+            Assert::IsTrue(state == expected);
+
+            placement.showCmd = SW_SHOWMINIMIZED;
+            placement.rcNormalPosition = {};
+            urpdf::UpdateWindowStateFromPlacement(state, placement);
+            Assert::IsTrue(state == expected);
+        }
+
+        TEST_METHOD(WindowTrackingIgnoresInvalidNormalSizes)
+        {
+            const urpdf::WindowState expected{ urpdf::WindowSize{ 1200, 800 }, true };
+            auto state = expected;
+            WINDOWPLACEMENT placement{};
+            placement.showCmd = SW_SHOWNORMAL;
+            const RECT invalidBounds[] = {
+                { 0, 0, 0, 800 }, { 0, 0, 1200, -1 },
+                { (std::numeric_limits<LONG>::min)(), 0, (std::numeric_limits<LONG>::max)(), 800 }
+            };
+            for (auto bounds : invalidBounds)
+            {
+                placement.rcNormalPosition = bounds;
+                urpdf::UpdateWindowStateFromPlacement(state, placement);
+                Assert::IsTrue(state == expected);
+            }
+        }
+
         TEST_METHOD(WindowDefaultsRememberLastStateWithoutSavedSize)
         {
             auto settings = MakeSettings();
