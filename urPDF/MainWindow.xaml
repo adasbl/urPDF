@@ -136,10 +136,14 @@
                                         SpinButtonPlacementMode="Hidden"
                                         ValueChanged="PageNumberBox_ValueChanged"
                                         SmallChange="1"
-                                        Width="72"
+                                        Width="48"
                                         MinWidth="0"
                                         HorizontalContentAlignment="Center"
-                                        VerticalAlignment="Center"/>
+                                        VerticalAlignment="Center">
+                                    <NumberBox.Resources>
+                                        <x:Double x:Key="TextControlThemeMinWidth">0</x:Double>
+                                    </NumberBox.Resources>
+                                </NumberBox>
                                 <TextBlock VerticalAlignment="Center" Width="48" IsTextSelectionEnabled="False">
                                         <Run Text="of "/>
                                         <Run Text="{x:Bind DisplayPageCount, Mode=OneWay}"/>
