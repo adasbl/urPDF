@@ -678,15 +678,12 @@ namespace winrt::urPDF::implementation
             MainWindowUI().IsHitTestVisible(true);
         });
 
-        settingsPage.ThemeChanged([this](auto const&, winrt::hstring const& themeName)
+        auto applySettings = [](auto const&, auto const&)
         {
-            ApplyTheme(themeName);
-        });
-
-        settingsPage.BackdropChanged([this](auto const&, winrt::hstring const& transparencyValue)
-        {
-            ApplyBackdrop(transparencyValue);
-        });
+            xaml::Application::Current().as<App>()->ApplySettingsToWindows();
+        };
+        settingsPage.ThemeChanged(applySettings);
+        settingsPage.BackdropChanged(applySettings);
 
         SettingsFrame().Content(settingsPage);
         SettingsOverlay().Visibility(xaml::Visibility::Visible);
@@ -704,10 +701,15 @@ namespace winrt::urPDF::implementation
 
     void MainWindow::LoadSettings()
     {
+        if (m_isClosed) { return; }
         auto settings = urpdf::AppSettings::Instance().Get();
 
         ApplyTheme(winrt::hstring{ urpdf::ToString(settings.theme) });
         ApplyBackdrop(winrt::hstring{ urpdf::ToString(settings.backdrop) });
+        if (auto page = SettingsFrame().Content().try_as<winrt::urPDF::SettingsPage>())
+        {
+            winrt::get_self<SettingsPage>(page)->LoadSavedSettings();
+        }
     }
 
     void MainWindow::ApplyBackdrop(winrt::hstring const& transparencyValue)

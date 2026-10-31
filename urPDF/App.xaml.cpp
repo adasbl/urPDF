@@ -63,6 +63,15 @@ namespace winrt::urPDF::implementation
         window.Activate();
         return window;
     }
+
+    void App::ApplySettingsToWindows()
+    {
+        auto windows = m_windows;
+        for (auto const& window : windows)
+        {
+            get_self<MainWindow>(window.as<winrt::urPDF::MainWindow>())->LoadSettings();
+        }
+    }
 }
 
 int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)

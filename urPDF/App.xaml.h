@@ -23,6 +23,7 @@ namespace winrt::urPDF::implementation
 
         void OnLaunched(Microsoft::UI::Xaml::LaunchActivatedEventArgs const&);
         winrt::urPDF::MainWindow CreateWindow(::urpdf::WindowCreationOptions const& options = {});
+        void ApplySettingsToWindows();
 
     private:
         std::vector<winrt::Microsoft::UI::Xaml::Window> m_windows;

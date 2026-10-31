@@ -15,6 +15,7 @@
 #include <cstdint>
 
 // Windows SDK / WinRT
+#include <wil/resource.h>
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Microsoft.UI.Xaml.h>
@@ -124,6 +125,13 @@ namespace winrt::urPDF::implementation
 
     void SettingsPage::LoadSavedSettings()
     {
+        const bool wasInitializing = m_isInitializing;
+        m_isInitializing = true;
+        auto restoreInitializing = wil::scope_exit([this, wasInitializing]
+        {
+            m_isInitializing = wasInitializing;
+        });
+
         auto settings = urpdf::AppSettings::Instance().Get();
 
         ThemeComboBox().SelectedIndex(static_cast<int32_t>(settings.theme));
