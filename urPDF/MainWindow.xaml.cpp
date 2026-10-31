@@ -404,7 +404,10 @@ namespace winrt::urPDF::implementation
         MONITORINFO monitorInfo{};
         monitorInfo.cbSize = sizeof(monitorInfo);
         if (!GetWindowRect(hwnd, &defaultBounds)) { return; }
-        if (!GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitorInfo))
+        HMONITOR monitor = settings.windowState.normalPosition
+            ? urpdf::FindWindowMonitor(settings.windowState.normalPosition->monitorDevice) : nullptr;
+        if (!monitor) { monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST); }
+        if (!GetMonitorInfoW(monitor, &monitorInfo))
         {
             monitorInfo.rcWork = defaultBounds;
         }
@@ -422,7 +425,8 @@ namespace winrt::urPDF::implementation
         appWindow.MoveAndResize({ static_cast<int32_t>(bounds.left), static_cast<int32_t>(bounds.top),
             static_cast<int32_t>(bounds.right - bounds.left), static_cast<int32_t>(bounds.bottom - bounds.top) });
         const auto size = appWindow.Size();
-        m_windowState = { urpdf::WindowSize{ size.Width, size.Height }, placement.maximized };
+        m_windowState.normalSize = urpdf::WindowSize{ size.Width, size.Height };
+        m_windowState.maximized = placement.maximized;
         if (placement.maximized) { presenter.Maximize(); }
     }
 
@@ -481,6 +485,13 @@ namespace winrt::urPDF::implementation
         if (GetWindowPlacement(hwnd, &placement))
         {
             urpdf::UpdateWindowStateFromPlacement(m_windowState, placement);
+            MONITORINFOEXW monitor{};
+            monitor.cbSize = sizeof(monitor);
+            if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor))
+            {
+                const bool toolWindow = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) != 0;
+                urpdf::UpdateWindowPositionFromPlacement(m_windowState, placement, monitor, toolWindow);
+            }
         }
     }
 

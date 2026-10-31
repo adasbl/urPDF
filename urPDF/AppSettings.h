@@ -27,10 +27,21 @@ namespace urpdf
         bool operator==(WindowSize const&) const = default;
     };
 
+    struct WindowPosition
+    {
+        // Offsets within the monitor's work area survive rearranging displays.
+        std::int32_t x;
+        std::int32_t y;
+        std::wstring monitorDevice;
+
+        bool operator==(WindowPosition const&) const = default;
+    };
+
     struct WindowState
     {
         std::optional<WindowSize> normalSize;
         bool maximized{ false };
+        std::optional<WindowPosition> normalPosition;
 
         bool operator==(WindowState const&) const = default;
     };
@@ -60,7 +71,7 @@ namespace urpdf
 
         static AppSettings& Instance();
 
-        SettingsData Get() const noexcept;
+        SettingsData Get() const;
         void SetTheme(AppTheme theme);
         void SetBackdrop(Backdrop backdrop);
         void SetWindowState(WindowState const& state);

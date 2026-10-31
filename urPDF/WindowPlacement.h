@@ -9,6 +9,31 @@
 
 namespace urpdf
 {
+    inline HMONITOR FindWindowMonitor(std::wstring_view deviceName) noexcept
+    {
+        if (deviceName.empty()) { return nullptr; }
+        struct Search
+        {
+            std::wstring_view deviceName;
+            HMONITOR result{};
+
+            static BOOL CALLBACK Visit(HMONITOR monitor, HDC, LPRECT, LPARAM context)
+            {
+                auto& search = *reinterpret_cast<Search*>(context);
+                MONITORINFOEXW info{};
+                info.cbSize = sizeof(info);
+                if (GetMonitorInfoW(monitor, &info) && search.deviceName == info.szDevice)
+                {
+                    search.result = monitor;
+                    return FALSE;
+                }
+                return TRUE;
+            }
+        } search{ deviceName };
+        EnumDisplayMonitors(nullptr, nullptr, Search::Visit, reinterpret_cast<LPARAM>(&search));
+        return search.result;
+    }
+
     struct WindowStartupPlacement
     {
         RECT normalBounds;
@@ -44,11 +69,42 @@ namespace urpdf
         }
         width = (std::min)(width, availableWidth);
         height = (std::min)(height, availableHeight);
-        const auto left = std::clamp<std::int64_t>(defaultBounds.left, workArea.left, workArea.right - width);
-        const auto top = std::clamp<std::int64_t>(defaultBounds.top, workArea.top, workArea.bottom - height);
+        const auto& position = settings.windowState.normalPosition;
+        const std::int64_t desiredLeft = position ? static_cast<std::int64_t>(workArea.left) + position->x : defaultBounds.left;
+        const std::int64_t desiredTop = position ? static_cast<std::int64_t>(workArea.top) + position->y : defaultBounds.top;
+        const auto left = std::clamp<std::int64_t>(desiredLeft, workArea.left, workArea.right - width);
+        const auto top = std::clamp<std::int64_t>(desiredTop, workArea.top, workArea.bottom - height);
 
         return { { static_cast<LONG>(left), static_cast<LONG>(top),
             static_cast<LONG>(left + width), static_cast<LONG>(top + height) }, maximized };
+    }
+
+    inline void UpdateWindowPositionFromPlacement(WindowState& state, WINDOWPLACEMENT const& placement,
+        MONITORINFOEXW const& monitor, bool toolWindow = false)
+    {
+        if (!state.normalSize) { return; }
+        if (placement.showCmd == SW_SHOWMINIMIZED || placement.showCmd == SW_SHOWMAXIMIZED)
+        {
+            if (state.normalPosition)
+            {
+                // Keep the restore position, including when a maximized window
+                // is moved to another monitor with Win+Shift+Arrow.
+                state.normalPosition->monitorDevice = monitor.szDevice;
+                return;
+            }
+        }
+        else if (placement.showCmd != SW_SHOWNORMAL) { return; }
+
+        const auto& bounds = placement.rcNormalPosition;
+        if (bounds.right <= bounds.left || bounds.bottom <= bounds.top) { return; }
+        // Regular WINDOWPLACEMENT coordinates are in workspace coordinates;
+        // tool windows use screen coordinates. Both become work-area offsets.
+        const auto& origin = toolWindow ? monitor.rcWork : monitor.rcMonitor;
+        const std::int64_t x = static_cast<std::int64_t>(bounds.left) - origin.left;
+        const std::int64_t y = static_cast<std::int64_t>(bounds.top) - origin.top;
+        if (x < (std::numeric_limits<std::int32_t>::min)() || x > (std::numeric_limits<std::int32_t>::max)()
+            || y < (std::numeric_limits<std::int32_t>::min)() || y > (std::numeric_limits<std::int32_t>::max)()) { return; }
+        state.normalPosition = WindowPosition{ static_cast<std::int32_t>(x), static_cast<std::int32_t>(y), monitor.szDevice };
     }
 
     inline void UpdateWindowStateFromPlacement(WindowState& state, WINDOWPLACEMENT const& placement) noexcept

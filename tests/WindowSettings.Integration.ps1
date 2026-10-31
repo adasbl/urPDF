@@ -53,6 +53,7 @@ function Assert-DefaultWindowSettings($Settings) {
     Assert-Condition ($Settings.WindowState.maximized -eq $false) 'Expected a normal default window.'
     Assert-Condition ($null -eq $Settings.WindowState.PSObject.Properties['normalWidth']) 'Default settings must not invent a saved width.'
     Assert-Condition ($null -eq $Settings.WindowState.PSObject.Properties['normalHeight']) 'Default settings must not invent a saved height.'
+    Assert-Condition ($null -eq $Settings.WindowState.PSObject.Properties['monitorDevice']) 'Default settings must not invent a saved position.'
 }
 
 try {
@@ -81,7 +82,10 @@ try {
                 AppTheme = 'Dark'
                 Transparency = 'Mica'
                 WindowStartupMode = $mode
-                WindowState = @{ normalWidth = 1200; normalHeight = 800; maximized = $maximized }
+                WindowState = @{
+                    normalWidth = 1200; normalHeight = 800; maximized = $maximized
+                    normalOffsetX = 120; normalOffsetY = 80; monitorDevice = '\\.\DISPLAY2'
+                }
             } | ConvertTo-Json -Depth 4
             [System.IO.File]::WriteAllText($importPath, $fixture, $utf8)
             Invoke-SettingsCommand '--import-settings' $importPath
@@ -90,6 +94,8 @@ try {
             Assert-Condition ($reloaded.WindowStartupMode -eq $mode) 'Startup preference did not survive process restart.'
             Assert-Condition ($reloaded.WindowState.normalWidth -eq 1200 -and $reloaded.WindowState.normalHeight -eq 800) 'Window size did not survive process restart.'
             Assert-Condition ($reloaded.WindowState.maximized -eq $maximized) 'Maximized state did not survive process restart.'
+            Assert-Condition ($reloaded.WindowState.normalOffsetX -eq 120 -and $reloaded.WindowState.normalOffsetY -eq 80 `
+                -and $reloaded.WindowState.monitorDevice -eq '\\.\DISPLAY2') 'Position and monitor did not survive process restart.'
             $passed.Add("Persistence: $mode, maximized=$maximized")
         }
     }
@@ -105,6 +111,8 @@ try {
     $partial = Export-Settings
     Assert-Condition ($partial.AppTheme -eq 'Light' -and $partial.WindowStartupMode -eq 'Normal') 'Partial import changed the startup preference.'
     Assert-Condition ($partial.WindowState.normalWidth -eq 1200 -and $partial.WindowState.normalHeight -eq 800 -and $partial.WindowState.maximized) 'Partial import changed the saved window state.'
+    Assert-Condition ($partial.WindowState.normalOffsetX -eq 120 -and $partial.WindowState.normalOffsetY -eq 80 `
+        -and $partial.WindowState.monitorDevice -eq '\\.\DISPLAY2') 'Partial import changed the saved window position.'
     $passed.Add('Partial legacy import preserves saved window settings')
 
     [System.IO.File]::WriteAllText($settingsPath, 'invalid json', $utf8)

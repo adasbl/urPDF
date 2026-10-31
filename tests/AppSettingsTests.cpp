@@ -66,6 +66,133 @@ namespace urPDFTests
     TEST_CLASS(AppSettingsTests)
     {
     public:
+        TEST_METHOD(WindowPositionAndMonitorPersistAndExport)
+        {
+            auto values = std::make_shared<Values>();
+            auto settings = MakeSettings(values);
+            const urpdf::WindowState state{ urpdf::WindowSize{ 1000, 740 }, true,
+                urpdf::WindowPosition{ 120, -20, L"\\\\.\\DISPLAY2" } };
+            settings.SetWindowState(state);
+            auto reloaded = MakeSettings(values);
+            AssertWindowSettings(reloaded, state, urpdf::WindowStartupMode::RememberLastState);
+
+            auto imported = MakeSettings();
+            Assert::IsTrue(imported.ImportJson(settings.ExportJson()));
+            AssertWindowSettings(imported, state, urpdf::WindowStartupMode::RememberLastState);
+        }
+
+        TEST_METHOD(LegacyWindowStateStillLoadsWithoutPosition)
+        {
+            auto values = std::make_shared<Values>(Values{ { L"WindowState",
+                LR"({"normalWidth":1200,"normalHeight":800,"maximized":true})" } });
+            auto settings = MakeSettings(values);
+            AssertWindowSettings(settings, { urpdf::WindowSize{ 1200, 800 }, true },
+                urpdf::WindowStartupMode::RememberLastState);
+        }
+
+        TEST_METHOD(InvalidPositionImportsPreserveSavedSettings)
+        {
+            const wchar_t* invalidPositions[] = {
+                LR"({"normalOffsetX":100,"monitorDevice":"DISPLAY2"})",
+                LR"({"normalOffsetX":100,"normalOffsetY":200})",
+                LR"({"normalOffsetX":100,"normalOffsetY":200,"monitorDevice":""})",
+                LR"({"normalOffsetX":100,"normalOffsetY":200,"monitorDevice":false})",
+                LR"({"normalOffsetX":"100","normalOffsetY":200,"monitorDevice":"DISPLAY2"})",
+                LR"({"normalOffsetX":0.5,"normalOffsetY":200,"monitorDevice":"DISPLAY2"})",
+                LR"({"normalOffsetX":2147483648,"normalOffsetY":200,"monitorDevice":"DISPLAY2"})",
+                LR"({"normalOffsetX":100,"normalOffsetY":-2147483649,"monitorDevice":"DISPLAY2"})",
+            };
+            for (auto position : invalidPositions)
+            {
+                auto values = std::make_shared<Values>();
+                auto settings = MakeSettings(values);
+                const urpdf::WindowState state{ urpdf::WindowSize{ 1000, 740 }, false,
+                    urpdf::WindowPosition{ 120, 80, L"DISPLAY1" } };
+                settings.SetWindowState(state);
+                const auto previousValues = *values;
+                std::wstring json{ LR"({"schemaVersion":1,"WindowState":{"maximized":false,"normalWidth":1000,"normalHeight":740,)" };
+                json.append(position + 1);
+                json.append(L"}");
+                Assert::IsFalse(settings.ImportJson(json), json.c_str());
+                AssertWindowSettings(settings, state, urpdf::WindowStartupMode::RememberLastState);
+                Assert::IsTrue(*values == previousValues);
+            }
+        }
+
+        TEST_METHOD(StartupPositionFollowsMonitorWhenDisplayLayoutChanges)
+        {
+            urpdf::SettingsData settings;
+            settings.windowState = { urpdf::WindowSize{ 900, 600 }, true,
+                urpdf::WindowPosition{ 120, 80, L"DISPLAY2" } };
+            const auto left = urpdf::ResolveWindowStartupPlacement(
+                settings, { 100, 100, 1124, 868 }, { -1920, 40, 0, 1080 });
+            const RECT expectedLeft{ -1800, 120, -900, 720 };
+            Assert::IsTrue(EqualRect(&left.normalBounds, &expectedLeft) != FALSE);
+            Assert::IsTrue(left.maximized);
+
+            const auto right = urpdf::ResolveWindowStartupPlacement(
+                settings, { 100, 100, 1124, 868 }, { 1920, 0, 3840, 1040 });
+            const RECT expectedRight{ 2040, 80, 2940, 680 };
+            Assert::IsTrue(EqualRect(&right.normalBounds, &expectedRight) != FALSE);
+        }
+
+        TEST_METHOD(MissingMonitorAndOffscreenPositionFallBackToVisibleBounds)
+        {
+            Assert::IsTrue(urpdf::FindWindowMonitor(L"urPDF nonexistent test display") == nullptr);
+            urpdf::SettingsData settings;
+            settings.windowState = { urpdf::WindowSize{ 1200, 800 }, false,
+                urpdf::WindowPosition{ 2000, -100, L"Disconnected" } };
+            const auto placement = urpdf::ResolveWindowStartupPlacement(
+                settings, { 100, 100, 1124, 868 }, { 0, 40, 1024, 768 });
+            const RECT expected{ 0, 40, 1024, 768 };
+            Assert::IsTrue(EqualRect(&placement.normalBounds, &expected) != FALSE);
+        }
+
+        TEST_METHOD(MonitorLookupFindsAnAttachedDisplay)
+        {
+            const auto primary = MonitorFromPoint({ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
+            MONITORINFOEXW monitor{};
+            monitor.cbSize = sizeof(monitor);
+            Assert::IsTrue(GetMonitorInfoW(primary, &monitor) != FALSE);
+            Assert::IsTrue(urpdf::FindWindowMonitor(monitor.szDevice) == primary);
+        }
+
+        TEST_METHOD(PositionTrackingAccountsForTaskbarAndNegativeMonitorCoordinates)
+        {
+            MONITORINFOEXW monitor{};
+            monitor.rcMonitor = { -1920, -1080, 0, 0 };
+            monitor.rcWork = { -1880, -1040, 0, 0 };
+            wcscpy_s(monitor.szDevice, L"DISPLAY2");
+            WINDOWPLACEMENT placement{};
+            placement.showCmd = SW_SHOWNORMAL;
+            placement.rcNormalPosition = { -1800, -1000, -900, -400 };
+            urpdf::WindowState state{ urpdf::WindowSize{ 900, 600 }, false };
+            urpdf::UpdateWindowPositionFromPlacement(state, placement, monitor);
+            Assert::IsTrue(state.normalPosition == urpdf::WindowPosition{ 120, 80, L"DISPLAY2" });
+
+            // Tool-window placement is already in screen coordinates.
+            OffsetRect(&placement.rcNormalPosition, 40, 40);
+            urpdf::UpdateWindowPositionFromPlacement(state, placement, monitor, true);
+            Assert::IsTrue(state.normalPosition == urpdf::WindowPosition{ 120, 80, L"DISPLAY2" });
+        }
+
+        TEST_METHOD(MaximizeAndMinimizePreservePositionWhenMovingMonitors)
+        {
+            urpdf::WindowState state{ urpdf::WindowSize{ 900, 600 }, false,
+                urpdf::WindowPosition{ 120, 80, L"DISPLAY1" } };
+            MONITORINFOEXW monitor{};
+            wcscpy_s(monitor.szDevice, L"DISPLAY2");
+            WINDOWPLACEMENT placement{};
+            placement.showCmd = SW_SHOWMAXIMIZED;
+            urpdf::UpdateWindowPositionFromPlacement(state, placement, monitor);
+            Assert::IsTrue(state.normalPosition == urpdf::WindowPosition{ 120, 80, L"DISPLAY2" });
+
+            placement.showCmd = SW_SHOWMINIMIZED;
+            placement.rcNormalPosition = { -32000, -32000, -31840, -31972 };
+            urpdf::UpdateWindowPositionFromPlacement(state, placement, monitor);
+            Assert::IsTrue(state.normalPosition == urpdf::WindowPosition{ 120, 80, L"DISPLAY2" });
+        }
+
         TEST_METHOD(StartupWithoutSavedSizeKeepsNativeDefaultBounds)
         {
             const RECT defaultBounds{ 100, 100, 1124, 868 };

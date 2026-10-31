@@ -25,7 +25,8 @@ namespace urpdf
 
         bool IsValid(WindowState const& state) noexcept
         {
-            return !state.normalSize || (state.normalSize->width > 0 && state.normalSize->height > 0);
+            return (!state.normalSize || (state.normalSize->width > 0 && state.normalSize->height > 0))
+                && (!state.normalPosition || (state.normalSize && !state.normalPosition->monitorDevice.empty()));
         }
 
         json::JsonObject WindowStateJson(WindowState const& state)
@@ -36,6 +37,12 @@ namespace urpdf
             {
                 root.SetNamedValue(L"normalWidth", json::JsonValue::CreateNumberValue(state.normalSize->width));
                 root.SetNamedValue(L"normalHeight", json::JsonValue::CreateNumberValue(state.normalSize->height));
+            }
+            if (state.normalPosition)
+            {
+                root.SetNamedValue(L"normalOffsetX", json::JsonValue::CreateNumberValue(state.normalPosition->x));
+                root.SetNamedValue(L"normalOffsetY", json::JsonValue::CreateNumberValue(state.normalPosition->y));
+                root.SetNamedValue(L"monitorDevice", json::JsonValue::CreateStringValue(state.normalPosition->monitorDevice));
             }
             return root;
         }
@@ -69,6 +76,25 @@ namespace urpdf
                 auto height = ParseDimension(root.GetNamedValue(L"normalHeight"));
                 if (!width || !height) { return std::nullopt; }
                 state.normalSize = WindowSize{ *width, *height };
+            }
+            if (root.HasKey(L"normalOffsetX") || root.HasKey(L"normalOffsetY") || root.HasKey(L"monitorDevice"))
+            {
+                if (!state.normalSize || !root.HasKey(L"normalOffsetX")
+                    || !root.HasKey(L"normalOffsetY") || !root.HasKey(L"monitorDevice")) { return std::nullopt; }
+                auto x = root.GetNamedValue(L"normalOffsetX");
+                auto y = root.GetNamedValue(L"normalOffsetY");
+                auto device = root.GetNamedValue(L"monitorDevice");
+                if (x.ValueType() != json::JsonValueType::Number || y.ValueType() != json::JsonValueType::Number
+                    || device.ValueType() != json::JsonValueType::String || device.GetString().empty()) { return std::nullopt; }
+                const auto validCoordinate = [](double number)
+                {
+                    return std::isfinite(number) && number == std::floor(number)
+                        && number >= (std::numeric_limits<std::int32_t>::min)()
+                        && number <= (std::numeric_limits<std::int32_t>::max)();
+                };
+                if (!validCoordinate(x.GetNumber()) || !validCoordinate(y.GetNumber())) { return std::nullopt; }
+                state.normalPosition = WindowPosition{ static_cast<std::int32_t>(x.GetNumber()),
+                    static_cast<std::int32_t>(y.GetNumber()), std::wstring{ device.GetString() } };
             }
             return state;
         }
@@ -168,7 +194,7 @@ namespace urpdf
         }
     }
 
-    SettingsData AppSettings::Get() const noexcept
+    SettingsData AppSettings::Get() const
     {
         return m_cache;
     }
