@@ -269,7 +269,7 @@ namespace winrt::urPDF::implementation
         winrt::fire_and_forget EmptyTab_Drop(foundation::IInspectable const& sender, xaml::DragEventArgs const& args);
         foundation::IAsyncAction RenderSinglePageAsync(std::shared_ptr<PdfTabInfo> PdfTabInfo);
         foundation::IAsyncAction RenderMultiPageAsync(std::shared_ptr<PdfTabInfo> PdfTab);
-        foundation::IAsyncAction LoadDocumentLayoutAsync(std::shared_ptr<PdfTabInfo> PdfTab, urpdf::ViewStateGuard::Operation operation);
+        foundation::IAsyncAction LoadDocumentLayoutAsync(std::shared_ptr<PdfTabInfo> PdfTab);
         winrt::fire_and_forget RenderVisiblePagesAsync();
         winrt::fire_and_forget PdfScrollViewer_ViewChanged(foundation::IInspectable const& sender, controls::ScrollViewerViewChangedEventArgs const& args);
         void PagesRepeater_ElementPrepared(foundation::IInspectable const& sender, controls::ItemsRepeaterElementPreparedEventArgs const& args);
@@ -313,8 +313,11 @@ namespace winrt::urPDF::implementation
         std::optional<double> m_pendingLayoutViewOffsetY;
         std::optional<double> m_pendingLayoutViewZoom;
         std::optional<std::array<double, 10>> m_pendingViewSnapshot;
+        enum class ViewRestorePhase { None, Layout, Zoom, Offsets };
+        ViewRestorePhase m_viewRestorePhase{ ViewRestorePhase::None };
+        std::optional<urpdf::DocumentViewState> m_pendingRestoreState;
+        bool m_pendingRestoreHasAnchor{ false };
         bool m_viewOperationReady{ false };
-        bool m_saveAfterViewOperation{ false };
         bool m_layoutViewSaveQueued{ false };
         xaml::Media::CompositionTarget::Rendering_revoker m_viewStateRenderingRevoker;
         bool m_zoomWasEnabled{ false };
@@ -343,11 +346,13 @@ namespace winrt::urPDF::implementation
         void SaveViewState(std::shared_ptr<PdfTabInfo> const& pdfTab);
         bool HasViewGeometry(std::shared_ptr<PdfTabInfo> const& pdfTab);
         void UpdatePageCounter(std::shared_ptr<PdfTabInfo> const& pdfTab);
-        urpdf::ViewStateGuard::Operation DeferViewStateSave(std::shared_ptr<PdfTabInfo> const& pdfTab, bool saveWhenReady = true);
+        void RestoreViewState(std::shared_ptr<PdfTabInfo> const& pdfTab);
+        urpdf::ViewStateGuard::Operation DeferViewStateSave(std::shared_ptr<PdfTabInfo> const& pdfTab);
         bool IsCurrentViewOperation(std::shared_ptr<PdfTabInfo> const& pdfTab, urpdf::ViewStateGuard::Operation operation);
         void FinishViewStateChange(std::shared_ptr<PdfTabInfo> const& pdfTab, urpdf::ViewStateGuard::Operation operation);
         void CancelPendingViewStateSave();
         void QueuePendingViewStateSave();
+        void AdvanceViewStateChange(std::shared_ptr<PdfTabInfo> const& pdfTab, urpdf::ViewStateGuard::Operation operation);
         void ScrollToPage(int32_t page);
         bool TryAcquireRenderingLock();
         void ReleaseRenderingLock();

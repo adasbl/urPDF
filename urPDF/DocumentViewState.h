@@ -86,9 +86,19 @@ namespace urpdf
         double contentX{ 0.0 };
         double contentY{ 0.0 };
 
+        double scrollableWidth{ 0.0 };
         double scrollableHeight{ 0.0 };
     };
 
+    struct ScrollOffsets
+    {
+        double x{ 0.0 };
+        double y{ 0.0 };
+    };
+
     std::optional<DocumentViewState> CaptureViewAnchor(std::vector<PageRect> const& pages, ViewportGeometry const& viewport);
+    // Uses the measured (already rotated/book-view) layout and the applied viewport zoom.
+    // Missing/invalid anchors return nullopt; callers restore the document start instead.
+    std::optional<ScrollOffsets> RestoreViewAnchor(DocumentViewState const& state, std::vector<PageRect> const& pages, ViewportGeometry const& viewport);
     std::optional<int> CurrentPageNumber(std::vector<PageRect> const& pages, ViewportGeometry const& viewport);
 }

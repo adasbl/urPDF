@@ -2,6 +2,7 @@
 #include "../urPDF/DocumentViewState.h"
 
 #include <vector>
+#include <limits>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -11,6 +12,7 @@ namespace urPDFTests
     using urpdf::CurrentPageNumber;
     using urpdf::DocumentViewState;
     using urpdf::PageRect;
+    using urpdf::RestoreViewAnchor;
     using urpdf::ViewportGeometry;
 
     namespace
@@ -214,6 +216,164 @@ namespace urPDFTests
         {
             Assert::IsFalse(CurrentPageNumber(SingleColumn(3), Viewport(0.0, 5000.0)).has_value(), L"no visible page");
             Assert::IsFalse(CurrentPageNumber(SingleColumn(3), Viewport(0.0, 0.0, 0.0)).has_value(), L"zero zoom");
+        }
+
+        TEST_METHOD(RestoresCapturedAnchorInBothAxesAtAppliedZoom)
+        {
+            const auto pages = SingleColumn(5);
+            auto viewport = Viewport(330.0, 2300.0, 2.0, 800.0, 700.0);
+            viewport.contentX = 90.0;
+            viewport.contentY = 20.0;
+            viewport.scrollableWidth = 1000.0;
+            viewport.scrollableHeight = 10000.0;
+            const auto state = Capture(pages, viewport);
+
+            viewport.offsetX = viewport.offsetY = 0.0;
+            const auto restored = RestoreViewAnchor(state, pages, viewport).value();
+            AssertNear(330.0, restored.x, L"horizontal offset round trip");
+            AssertNear(2300.0, restored.y, L"vertical offset round trip");
+        }
+
+        TEST_METHOD(RestoresAnchorInResizedViewportWithCenteredContent)
+        {
+            DocumentViewState state;
+            state.anchorPage = 3;
+            state.anchorX = 0.6;
+            state.anchorY = 0.4;
+            state.viewportX = 0.25;
+            state.viewportY = 0.5;
+            auto pages = SingleColumn(4);
+            for (auto& page : pages) { page.x = 200.0; }
+            auto viewport = Viewport(0.0, 0.0, 1.5, 1000.0, 900.0);
+            viewport.contentX = 10.0;
+            viewport.contentY = 20.0;
+            viewport.scrollableWidth = viewport.scrollableHeight = 10000.0;
+
+            const auto restored = RestoreViewAnchor(state, pages, viewport).value();
+            AssertNear(605.0, restored.x, L"anchor retains its relative horizontal viewport position");
+            AssertNear(2490.0, restored.y, L"anchor retains its relative vertical viewport position");
+        }
+
+        TEST_METHOD(RestoresRightHandBookPageUsingItsActualRectangle)
+        {
+            DocumentViewState state;
+            state.bookView = true;
+            state.anchorPage = 4;
+            state.anchorX = 0.5;
+            state.anchorY = 0.25;
+            state.viewportX = 0.5;
+            auto viewport = Viewport(0.0, 0.0, 2.0, 600.0, 700.0);
+            viewport.scrollableWidth = 2000.0;
+            viewport.scrollableHeight = 3000.0;
+
+            const auto restored = RestoreViewAnchor(state, TwoColumns(4), viewport).value();
+            AssertNear(1520.0, restored.x, L"right-hand page, horizontal scroll and zoom");
+            AssertNear(2020.0, restored.y, L"second row, quarter-page anchor");
+        }
+
+        TEST_METHOD(RestoresMixedPageSizesAfterRotation)
+        {
+            DocumentViewState state;
+            state.rotation = 90;
+            state.anchorPage = 2;
+            state.anchorX = 0.5;
+            state.anchorY = 0.25;
+            const std::vector<PageRect> rotatedPages{
+                { 0.0, 0.0, 800.0, 600.0 }, { 20.0, 610.0, 300.0, 900.0 }
+            };
+            auto viewport = Viewport(0.0, 0.0, 1.25, 500.0, 400.0);
+            viewport.scrollableWidth = viewport.scrollableHeight = 10000.0;
+
+            const auto restored = RestoreViewAnchor(state, rotatedPages, viewport).value();
+            AssertNear(212.5, restored.x, L"uses rotated width without a second rotation");
+            AssertNear(1043.75, restored.y, L"uses the actual height and position of page 2");
+        }
+
+        TEST_METHOD(ClampsAnchorPageToExistingFirstOrLastPage)
+        {
+            DocumentViewState state;
+            state.anchorY = 0.5;
+            auto viewport = Viewport(0.0, 0.0);
+            viewport.scrollableHeight = 3000.0;
+            state.anchorPage = 100;
+            AssertNear(2020.0, RestoreViewAnchor(state, SingleColumn(3), viewport)->y, L"past last page");
+            state.anchorPage = (std::numeric_limits<int>::min)();
+            AssertNear(400.0, RestoreViewAnchor(state, SingleColumn(3), viewport)->y, L"before first page");
+        }
+
+        TEST_METHOD(ClampsBothOffsetsToAvailableScrollRange)
+        {
+            DocumentViewState state;
+            state.anchorPage = 3;
+            state.anchorX = state.anchorY = 1.0;
+            auto viewport = Viewport(0.0, 0.0, 2.0);
+            viewport.scrollableWidth = 300.0;
+            viewport.scrollableHeight = 2000.0;
+            auto restored = RestoreViewAnchor(state, SingleColumn(3), viewport).value();
+            AssertNear(300.0, restored.x, L"horizontal end");
+            AssertNear(2000.0, restored.y, L"vertical end");
+
+            state.anchorPage = 1;
+            state.anchorX = state.anchorY = 0.0;
+            state.viewportX = state.viewportY = 1.0;
+            restored = RestoreViewAnchor(state, SingleColumn(3), viewport).value();
+            AssertNear(0.0, restored.x, L"horizontal start");
+            AssertNear(0.0, restored.y, L"vertical start");
+        }
+
+        TEST_METHOD(RestoresSinglePageWithZeroScrollRange)
+        {
+            DocumentViewState state;
+            state.anchorPage = 50;
+            state.anchorX = state.anchorY = 0.8;
+            const auto viewport = Viewport(0.0, 0.0, 1.0, 1000.0, 1000.0);
+            const auto restored = RestoreViewAnchor(state, SingleColumn(1), viewport).value();
+            AssertNear(0.0, restored.x, L"no horizontal range");
+            AssertNear(0.0, restored.y, L"no vertical range");
+        }
+
+        TEST_METHOD(RestoredAnchorDoesNotForcePageCounterToAnchorPage)
+        {
+            const auto pages = SingleColumn(6);
+            auto viewport = Viewport(0.0, 3.0 * (PageHeight + Spacing) + 500.0);
+            viewport.scrollableHeight = 5000.0;
+            const auto state = Capture(pages, viewport);
+            viewport.height = 900.0;
+            const auto restored = RestoreViewAnchor(state, pages, viewport).value();
+            viewport.offsetX = restored.x;
+            viewport.offsetY = restored.y;
+
+            Assert::AreEqual(4, state.anchorPage);
+            AssertNear(2930.0, restored.y, L"the saved point on page 4 stays at the top");
+            Assert::AreEqual(5, CurrentPageNumber(pages, viewport).value(), L"page 5 dominates the resized viewport");
+        }
+
+        TEST_METHOD(RejectsEmptyDocumentAndUnmeasuredAnchorPage)
+        {
+            DocumentViewState state;
+            const auto viewport = Viewport(0.0, 0.0);
+            Assert::IsFalse(RestoreViewAnchor(state, {}, viewport).has_value());
+            auto pages = SingleColumn(1);
+            pages[0].height = 0.0;
+            Assert::IsFalse(RestoreViewAnchor(state, pages, viewport).has_value());
+        }
+
+        TEST_METHOD(RejectsInvalidAnchorAndRestoreGeometry)
+        {
+            DocumentViewState state;
+            const auto pages = SingleColumn(1);
+            auto viewport = Viewport(0.0, 0.0);
+            state.anchorX = std::numeric_limits<double>::quiet_NaN();
+            Assert::IsFalse(RestoreViewAnchor(state, pages, viewport).has_value());
+            state.anchorX = 0.0;
+            state.viewportY = 1.1;
+            Assert::IsFalse(RestoreViewAnchor(state, pages, viewport).has_value());
+            state.viewportY = 0.0;
+            viewport.zoom = 0.0;
+            Assert::IsFalse(RestoreViewAnchor(state, pages, viewport).has_value());
+            viewport.zoom = 1.0;
+            viewport.scrollableWidth = -1.0;
+            Assert::IsFalse(RestoreViewAnchor(state, pages, viewport).has_value());
         }
     };
 

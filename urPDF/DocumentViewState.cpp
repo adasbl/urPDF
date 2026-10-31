@@ -102,6 +102,33 @@ namespace urpdf
         return state;
     }
 
+    std::optional<ScrollOffsets> RestoreViewAnchor(DocumentViewState const& state, std::vector<PageRect> const& pages, ViewportGeometry const& viewport)
+    {
+        if (pages.empty() || !ToLayoutViewport(viewport)
+            || !std::isfinite(viewport.scrollableWidth) || viewport.scrollableWidth < 0.0
+            || !std::isfinite(viewport.scrollableHeight) || viewport.scrollableHeight < 0.0)
+        {
+            return std::nullopt;
+        }
+
+        const auto isFraction = [](double value) { return std::isfinite(value) && value >= 0.0 && value <= 1.0; };
+        if (!isFraction(state.anchorX) || !isFraction(state.anchorY)
+            || !isFraction(state.viewportX) || !isFraction(state.viewportY)) { return std::nullopt; }
+
+        // Clamp only when a page exists, and before converting a one-based index to size_t.
+        const auto pageIndex = (std::min)(static_cast<std::size_t>((std::max)(state.anchorPage, 1) - 1), pages.size() - 1);
+        auto const& page = pages[pageIndex];
+        if (!IsValidPage(page)) { return std::nullopt; }
+
+        const double offsetX = (page.x + state.anchorX * page.width + viewport.contentX) * viewport.zoom - state.viewportX * viewport.width;
+        const double offsetY = (page.y + state.anchorY * page.height + viewport.contentY) * viewport.zoom - state.viewportY * viewport.height;
+        if (!std::isfinite(offsetX) || !std::isfinite(offsetY)) { return std::nullopt; }
+
+        return ScrollOffsets{
+            std::clamp(offsetX, 0.0, viewport.scrollableWidth),
+            std::clamp(offsetY, 0.0, viewport.scrollableHeight) };
+    }
+
     std::optional<int> CurrentPageNumber(std::vector<PageRect> const& pages, ViewportGeometry const& viewport)
     {
         const auto view = ToLayoutViewport(viewport);
