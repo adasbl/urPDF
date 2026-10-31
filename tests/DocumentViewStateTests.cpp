@@ -216,4 +216,76 @@ namespace urPDFTests
             Assert::IsFalse(CurrentPageNumber(SingleColumn(3), Viewport(0.0, 0.0, 0.0)).has_value(), L"zero zoom");
         }
     };
+
+    TEST_CLASS(ViewStateGuardTests)
+    {
+    public:
+        TEST_METHOD(TransitionalGeometryCannotOverwriteEitherTab)
+        {
+            urpdf::ViewStateGuard guard;
+            const auto first = guard.Begin(1);
+            Assert::IsTrue(guard.Complete(first));
+            Assert::IsTrue(guard.CanSave(1));
+            Assert::IsFalse(guard.CanSave(2));
+
+            const auto second = guard.Begin(2);
+            Assert::IsFalse(guard.CanSave(1), L"outgoing geometry is protected");
+            Assert::IsFalse(guard.CanSave(2), L"destination geometry is not ready");
+            Assert::IsTrue(guard.Complete(second));
+            Assert::IsFalse(guard.CanSave(1));
+            Assert::IsTrue(guard.CanSave(2));
+        }
+
+        TEST_METHOD(RapidSwitchBackRejectsOldCompletionForSameDocument)
+        {
+            urpdf::ViewStateGuard guard;
+            const auto firstA = guard.Begin(1);
+            const auto firstB = guard.Begin(2);
+            const auto secondA = guard.Begin(1);
+
+            Assert::IsFalse(guard.IsCurrent(firstA), L"document identity alone is insufficient");
+            Assert::IsFalse(guard.Complete(firstA));
+            Assert::IsFalse(guard.Complete(firstB));
+            Assert::IsTrue(guard.IsPending(), L"stale completion must retain the newer protection");
+            Assert::IsFalse(guard.CanSave(1));
+            Assert::IsTrue(guard.Complete(secondA));
+            Assert::IsTrue(guard.CanSave(1));
+        }
+
+        TEST_METHOD(NewLayoutOnSameTabSupersedesPreviousLayout)
+        {
+            urpdf::ViewStateGuard guard;
+            const auto rotation = guard.Begin(1);
+            const auto bookView = guard.Begin(1);
+            Assert::IsFalse(guard.IsCurrent(rotation));
+            Assert::IsFalse(guard.Complete(rotation));
+            Assert::IsTrue(guard.IsCurrent(bookView));
+            Assert::IsTrue(guard.Complete(bookView));
+            Assert::IsFalse(guard.Complete(bookView), L"duplicate completions are discarded");
+        }
+
+        TEST_METHOD(EmptyTabInvalidatesOutgoingOperations)
+        {
+            urpdf::ViewStateGuard guard;
+            const auto document = guard.Begin(1);
+            const auto empty = guard.Begin(0);
+            Assert::IsFalse(guard.Complete(document));
+            Assert::IsTrue(guard.Complete(empty));
+            Assert::IsFalse(guard.CanSave(0));
+            Assert::IsFalse(guard.CanSave(1));
+        }
+
+        TEST_METHOD(CancelledCallbacksCannotUnlockLaterOperation)
+        {
+            urpdf::ViewStateGuard guard;
+            const auto closing = guard.Begin(1);
+            guard.Cancel();
+            Assert::IsFalse(guard.IsCurrent(closing));
+            Assert::IsFalse(guard.CanSave(1));
+            const auto opening = guard.Begin(2);
+            Assert::IsFalse(guard.Complete(closing));
+            Assert::IsTrue(guard.IsPending());
+            Assert::IsTrue(guard.Complete(opening));
+        }
+    };
 }

@@ -39,6 +39,7 @@ extern "C" {
 #include <winrt/Microsoft.UI.Xaml.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 #include <winrt/Microsoft.UI.Xaml.Data.h>
+#include <winrt/Microsoft.UI.Xaml.Media.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <winrt/Microsoft.UI.Xaml.Printing.h>
 
@@ -230,6 +231,7 @@ namespace winrt::urPDF::implementation
         fz_context* m_ctx{ nullptr };
         fz_document* m_doc{ nullptr };
         int m_pagecount{ 0 };
+        bool m_layoutLoaded{ false };
         std::vector<fz_rect> m_pageBounds;
         std::uint64_t m_documentId{ 0 };
         std::uint64_t m_slotBitmapReuses{ 0 };
@@ -267,7 +269,7 @@ namespace winrt::urPDF::implementation
         winrt::fire_and_forget EmptyTab_Drop(foundation::IInspectable const& sender, xaml::DragEventArgs const& args);
         foundation::IAsyncAction RenderSinglePageAsync(std::shared_ptr<PdfTabInfo> PdfTabInfo);
         foundation::IAsyncAction RenderMultiPageAsync(std::shared_ptr<PdfTabInfo> PdfTab);
-        foundation::IAsyncAction LoadDocumentLayoutAsync(std::shared_ptr<PdfTabInfo> PdfTab);
+        foundation::IAsyncAction LoadDocumentLayoutAsync(std::shared_ptr<PdfTabInfo> PdfTab, urpdf::ViewStateGuard::Operation operation);
         winrt::fire_and_forget RenderVisiblePagesAsync();
         winrt::fire_and_forget PdfScrollViewer_ViewChanged(foundation::IInspectable const& sender, controls::ScrollViewerViewChangedEventArgs const& args);
         void PagesRepeater_ElementPrepared(foundation::IInspectable const& sender, controls::ItemsRepeaterElementPreparedEventArgs const& args);
@@ -304,12 +306,17 @@ namespace winrt::urPDF::implementation
         xaml::Printing::PrintDocument m_printDocument{ nullptr };
         winrt::event_token m_printTaskRequestedToken{};
         bool m_isRendering{ false };
-        bool m_isRestoringTabView{ false };
+        urpdf::ViewStateGuard m_viewStateGuard;
         bool m_isViewChanging{ false };
         std::weak_ptr<PdfTabInfo> m_pendingLayoutViewSaveTab;
+        std::optional<double> m_pendingLayoutViewOffsetX;
         std::optional<double> m_pendingLayoutViewOffsetY;
-        std::uint64_t m_layoutViewSaveGeneration{ 0 };
+        std::optional<double> m_pendingLayoutViewZoom;
+        std::optional<std::array<double, 10>> m_pendingViewSnapshot;
+        bool m_viewOperationReady{ false };
+        bool m_saveAfterViewOperation{ false };
         bool m_layoutViewSaveQueued{ false };
+        xaml::Media::CompositionTarget::Rendering_revoker m_viewStateRenderingRevoker;
         bool m_zoomWasEnabled{ false };
         bool m_isVisibleRenderRunning{ false };
         bool m_visibleRenderRequested{ false };
@@ -336,7 +343,9 @@ namespace winrt::urPDF::implementation
         void SaveViewState(std::shared_ptr<PdfTabInfo> const& pdfTab);
         bool HasViewGeometry(std::shared_ptr<PdfTabInfo> const& pdfTab);
         void UpdatePageCounter(std::shared_ptr<PdfTabInfo> const& pdfTab);
-        void DeferViewStateSave(std::shared_ptr<PdfTabInfo> const& pdfTab);
+        urpdf::ViewStateGuard::Operation DeferViewStateSave(std::shared_ptr<PdfTabInfo> const& pdfTab, bool saveWhenReady = true);
+        bool IsCurrentViewOperation(std::shared_ptr<PdfTabInfo> const& pdfTab, urpdf::ViewStateGuard::Operation operation);
+        void FinishViewStateChange(std::shared_ptr<PdfTabInfo> const& pdfTab, urpdf::ViewStateGuard::Operation operation);
         void CancelPendingViewStateSave();
         void QueuePendingViewStateSave();
         void ScrollToPage(int32_t page);
@@ -350,7 +359,7 @@ namespace winrt::urPDF::implementation
         void DetachDpiObserver();
         void RequestDpiRefresh();
         void ApplyPendingDpiRefresh();
-        void RebuildPagesContainer(std::vector<PageSlot> const& pages);
+        void RebuildPagesContainer(std::shared_ptr<PdfTabInfo> const& pdfTab, std::vector<PageSlot> const& pages, urpdf::ViewStateGuard::Operation operation);
         void ConfigurePageElement(xaml::UIElement const& element, std::size_t pageIndex);
         void TryRecordFirstVisiblePage(std::shared_ptr<PdfTabInfo> const& PdfTab);
         std::vector<PageRenderRequest> BuildRenderQueue(int32_t pageCount, PageViewRange& viewRange);
