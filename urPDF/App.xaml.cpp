@@ -26,7 +26,17 @@ namespace winrt::urPDF::implementation
     }
     void App::OnLaunched([[maybe_unused]] LaunchActivatedEventArgs const& e)
     {
-        window = make<MainWindow>();
+        DispatcherShutdownMode(Microsoft::UI::Xaml::DispatcherShutdownMode::OnLastWindowClose);
+
+        auto window = make<MainWindow>();
+        window.Closed([weakThis = get_weak()](IInspectable const& sender, WindowEventArgs const&)
+        {
+            if (auto self = weakThis.get())
+            {
+                std::erase(self->m_windows, sender.as<Window>());
+            }
+        });
+        m_windows.push_back(window);
         window.Activate();
     }
 }

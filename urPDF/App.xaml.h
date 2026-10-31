@@ -2,6 +2,8 @@
 
 #include "App.xaml.g.h"
 
+#include <vector>
+
 namespace winrt::urPDF::implementation
 {
     struct App : AppT<App>
@@ -11,6 +13,6 @@ namespace winrt::urPDF::implementation
         void OnLaunched(Microsoft::UI::Xaml::LaunchActivatedEventArgs const&);
 
     private:
-        winrt::Microsoft::UI::Xaml::Window window{ nullptr };
+        std::vector<winrt::Microsoft::UI::Xaml::Window> m_windows;
     };
 }
