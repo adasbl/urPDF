@@ -7,6 +7,7 @@
 #include "DocumentViewState.h"
 #include "PdfPageLayout.h"
 #include "PdfRenderScale.h"
+#include "WindowCreationOptions.h"
 
 // External libraries
 extern "C" {
@@ -245,6 +246,7 @@ namespace winrt::urPDF::implementation
     struct MainWindow : MainWindowT<MainWindow>
     {
         MainWindow();
+        explicit MainWindow(urpdf::WindowCreationOptions const& options);
         ~MainWindow();
 
         int32_t DisplayPageNumber();

@@ -8,7 +8,6 @@
 
 // Project
 #include "AppSettings.h"
-#include "CommandLine.h"
 #include "PdfRenderScale.h"
 #include "SettingsPage.h"
 #include "AboutPage.h"
@@ -23,7 +22,6 @@ extern "C" {
 #include <chrono>
 #include <cmath>
 #include <coroutine>
-#include <cstdlib>
 #include <cwctype>
 #include <exception>
 #include <filesystem>
@@ -48,7 +46,6 @@ extern "C" {
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <winrt/Microsoft.UI.Dispatching.h>
 #include <winrt/Microsoft.UI.Xaml.Printing.h>
-#include <winrt/Microsoft.Windows.AppLifecycle.h>
 #include <winrt/Microsoft.UI.Windowing.h>
 #include <winrt/Microsoft.UI.Input.h>
 #include <winrt/Windows.UI.Xaml.Interop.h>
@@ -305,6 +302,12 @@ namespace winrt::urPDF::implementation
     }
 
     MainWindow::MainWindow()
+        : MainWindow(urpdf::WindowCreationOptions{})
+    {
+    }
+
+    MainWindow::MainWindow(urpdf::WindowCreationOptions const& options)
+        : m_pendingFile(options.file), m_pendingFilePath(options.filePath)
     {
         InitializeComponent();
 
@@ -386,20 +389,6 @@ namespace winrt::urPDF::implementation
         m_mupdfLocks.unlock = UnlockMuPdf;
         m_ctx = fz_new_context(nullptr, &m_mupdfLocks, PdfStoreBudgetBytes);
         fz_register_document_handlers(m_ctx);
-
-        auto activationArgs = winrt::Microsoft::Windows::AppLifecycle::AppInstance::GetCurrent().GetActivatedEventArgs();
-        if (activationArgs.Kind() == winrt::Microsoft::Windows::AppLifecycle::ExtendedActivationKind::File)
-        {
-            auto fileArgs = activationArgs.Data().try_as<winrt::Windows::ApplicationModel::Activation::IFileActivatedEventArgs>();
-            if (fileArgs && fileArgs.Files().Size() > 0)
-            {
-                m_pendingFile = fileArgs.Files().GetAt(0).try_as<storage::StorageFile>();
-            }
-        }
-        else if (auto path = urpdf::DocumentPathArgument(__argc, __wargv))
-        {
-            m_pendingFilePath = *path;
-        }
     }
 
 

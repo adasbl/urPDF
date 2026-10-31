@@ -28,6 +28,7 @@
     <ClInclude Include="resource.h" />
     <ClInclude Include="PdfPageLayout.h" />
     <ClInclude Include="AppSettings.h" />
+    <ClInclude Include="WindowCreationOptions.h" />
     <ClInclude Include="SettingsStore.h" />
     <ClInclude Include="CommandLine.h" />
   </ItemGroup>
