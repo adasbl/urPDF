@@ -80,6 +80,7 @@ namespace urPDFTests
             Assert::IsTrue(state == urpdf::WindowState{ urpdf::WindowSize{ 1200, 800 }, true });
 
             placement.showCmd = SW_SHOWMINIMIZED;
+            placement.flags = WPF_RESTORETOMAXIMIZED;
             placement.rcNormalPosition = { -32000, -32000, -31840, -31972 };
             urpdf::UpdateWindowStateFromPlacement(state, placement);
             Assert::IsTrue(state == urpdf::WindowState{ urpdf::WindowSize{ 1200, 800 }, true });
@@ -106,6 +107,63 @@ namespace urPDFTests
             placement.rcNormalPosition = {};
             urpdf::UpdateWindowStateFromPlacement(state, placement);
             Assert::IsTrue(state == expected);
+        }
+
+        TEST_METHOD(ClosingMinimizedWindowPersistsItsRestoreState)
+        {
+            for (bool wasMaximized : { false, true })
+            {
+                const DWORD style = WS_OVERLAPPEDWINDOW | WS_MINIMIZE | (wasMaximized ? WS_MAXIMIZE : 0);
+                HWND window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC", L"urPDF window state test",
+                    style, 100, 100, 900, 600, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+                Assert::IsTrue(window != nullptr);
+
+                WINDOWPLACEMENT placement{};
+                placement.length = sizeof(placement);
+                const bool captured = GetWindowPlacement(window, &placement) != FALSE;
+                const bool visible = IsWindowVisible(window) != FALSE;
+                DestroyWindow(window);
+                Assert::IsTrue(captured);
+                Assert::IsFalse(visible);
+                Assert::IsTrue(placement.showCmd == SW_SHOWMINIMIZED);
+
+                urpdf::WindowState state{ urpdf::WindowSize{ 1200, 800 }, !wasMaximized };
+                urpdf::UpdateWindowStateFromPlacement(state, placement);
+                Assert::IsTrue(state == urpdf::WindowState{ urpdf::WindowSize{ 1200, 800 }, wasMaximized });
+
+                for (auto mode : { urpdf::WindowStartupMode::RememberLastState,
+                    urpdf::WindowStartupMode::Maximized, urpdf::WindowStartupMode::Normal })
+                {
+                    auto values = std::make_shared<Values>();
+                    auto settings = MakeSettings(values);
+                    settings.SetWindowStartupMode(mode);
+                    settings.SetWindowState(state);
+                    auto reloaded = MakeSettings(values);
+                    AssertWindowSettings(reloaded, state, mode);
+                }
+
+                urpdf::WindowState withoutSavedSize;
+                urpdf::UpdateWindowStateFromPlacement(withoutSavedSize, placement);
+                Assert::IsTrue(withoutSavedSize == urpdf::WindowState{ urpdf::WindowSize{ 900, 600 }, wasMaximized });
+            }
+        }
+
+        TEST_METHOD(MinimizedWindowWithInvalidRestoreSizeKeepsSavedSize)
+        {
+            for (bool wasMaximized : { false, true })
+            {
+                urpdf::WindowState state{ urpdf::WindowSize{ 1200, 800 }, !wasMaximized };
+                WINDOWPLACEMENT placement{};
+                placement.showCmd = SW_SHOWMINIMIZED;
+                placement.flags = WPF_ASYNCWINDOWPLACEMENT | (wasMaximized ? WPF_RESTORETOMAXIMIZED : 0);
+                urpdf::UpdateWindowStateFromPlacement(state, placement);
+                Assert::IsTrue(state == urpdf::WindowState{ urpdf::WindowSize{ 1200, 800 }, wasMaximized });
+
+                urpdf::WindowState withoutSavedSize;
+                urpdf::UpdateWindowStateFromPlacement(withoutSavedSize, placement);
+                Assert::IsFalse(withoutSavedSize.normalSize.has_value());
+                Assert::IsTrue(withoutSavedSize.maximized == wasMaximized);
+            }
         }
 
         TEST_METHOD(WindowTrackingIgnoresInvalidNormalSizes)
