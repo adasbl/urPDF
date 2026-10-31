@@ -163,6 +163,7 @@
       <SubType>Code</SubType>
     </ClInclude>
     <ClInclude Include="AppSettings.h" />
+    <ClInclude Include="MuPdfRuntime.h" />
     <ClInclude Include="WindowCreationOptions.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="PdfRenderScale.h" />
@@ -200,6 +201,9 @@
       <SubType>Code</SubType>
     </ClCompile>
     <ClCompile Include="AppSettings.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="MuPdfRuntime.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="DocumentViewState.cpp">

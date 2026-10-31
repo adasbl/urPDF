@@ -2,6 +2,7 @@
 #include "App.xaml.h"
 #include "MainWindow.xaml.h"
 #include "CommandLine.h"
+#include "MuPdfRuntime.h"
 
 #include <cstdlib>
 
@@ -14,6 +15,7 @@ using namespace Microsoft::UI::Xaml;
 namespace winrt::urPDF::implementation
 {
     App::App()
+        : m_muPdfRuntime(std::make_shared<::urpdf::MuPdfRuntime>())
     {
 
 #if defined _DEBUG && !defined DISABLE_XAML_GENERATED_BREAK_ON_UNHANDLED_EXCEPTION
@@ -27,6 +29,12 @@ namespace winrt::urPDF::implementation
         });
 #endif
     }
+
+    std::shared_ptr<::urpdf::MuPdfRuntime> App::MuPdfRuntime() const noexcept
+    {
+        return m_muPdfRuntime;
+    }
+
     void App::OnLaunched([[maybe_unused]] LaunchActivatedEventArgs const& e)
     {
         DispatcherShutdownMode(Microsoft::UI::Xaml::DispatcherShutdownMode::OnLastWindowClose);

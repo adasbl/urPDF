@@ -5,6 +5,7 @@
 
 // Project
 #include "DocumentViewState.h"
+#include "MuPdfRuntime.h"
 #include "PdfPageLayout.h"
 #include "PdfRenderScale.h"
 #include "WindowCreationOptions.h"
@@ -24,7 +25,6 @@ extern "C" {
 #include <functional>
 #include <list>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -217,7 +217,7 @@ namespace winrt::urPDF::implementation
     class PdfTabInfo
     {
     public:
-        PdfTabInfo(fz_context* m_ctx, const std::string& filePath);
+        PdfTabInfo(std::shared_ptr<urpdf::MuPdfRuntime> runtime, const std::string& filePath);
         ~PdfTabInfo();
 
         winrt::hstring m_openedFilePath;
@@ -229,7 +229,8 @@ namespace winrt::urPDF::implementation
         double m_renderZoom{ 1.0 };
         std::atomic<std::uint64_t> m_renderGeneration{ 0 };
         
-        fz_context* m_ctx{ nullptr };
+        std::shared_ptr<urpdf::MuPdfRuntime> m_runtime;
+        urpdf::MuPdfRuntime::Context m_ctx;
         fz_document* m_doc{ nullptr };
         int m_pagecount{ 0 };
         bool m_layoutLoaded{ false };
@@ -297,9 +298,8 @@ namespace winrt::urPDF::implementation
         controls::ContentDialog m_openErrorDialog{ nullptr };
         std::list<winrt::hstring> m_openErrorMessages;
 
-        std::array<std::mutex, FZ_LOCK_MAX> m_mupdfMutexes;
-        fz_locks_context m_mupdfLocks{};
-        fz_context* m_ctx{ nullptr };
+        std::shared_ptr<urpdf::MuPdfRuntime> m_runtime;
+        urpdf::MuPdfRuntime::Context m_ctx;
         std::map<controls::TabViewItem, std::shared_ptr<PdfTabInfo>> m_openedTabs;
         std::weak_ptr<PdfTabInfo> m_presentedTab;
         int32_t m_pageNumber{ 0 };

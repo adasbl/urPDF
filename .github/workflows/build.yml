@@ -165,9 +165,16 @@ jobs:
               /bl:out/ci/logs/tests.binlog
           if ($LASTEXITCODE -ne 0) { throw 'Unit test build failed.' }
 
+          & $env:MSBUILD_PATH tests/MuPdfRuntime.Tests.vcxproj /m /nologo /verbosity:minimal `
+              /p:Configuration=Release /p:Platform=x64 `
+              "/p:VcpkgRoot=$env:VCPKG_ROOT" /p:VcpkgTriplet=x64-windows `
+              /p:VcpkgManifestInstall=false /bl:out/ci/logs/runtime-tests.binlog
+          if ($LASTEXITCODE -ne 0) { throw 'MuPDF runtime test build failed.' }
+
       - name: Run unit tests
         run: |
-          & $env:VSTEST_PATH out/tests/x64/Release/urPDF.Tests.dll /Platform:x64 `
+          & $env:VSTEST_PATH out/tests/x64/Release/urPDF.Tests.dll `
+              out/runtime-tests/x64/Release/MuPdfRuntime.Tests.dll /Platform:x64 `
               '/Logger:trx;LogFileName=urPDF.Tests.trx' `
               /ResultsDirectory:out/ci/test-results
           if ($LASTEXITCODE -ne 0) { throw 'Unit tests failed.' }

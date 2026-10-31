@@ -8,4 +8,5 @@
     <Deploy />
   </Project>
   <Project Path="tests/urPDF.Tests.vcxproj" Id="5d8f0cd9-376a-49d2-83a0-9b07e1c0e5f1" />
+  <Project Path="tests/MuPdfRuntime.Tests.vcxproj" Id="38bf7fec-ed8a-46e4-a493-fbfea6929584" />
 </Solution>
