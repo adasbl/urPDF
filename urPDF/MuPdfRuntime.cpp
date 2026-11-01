@@ -17,7 +17,6 @@ namespace
         static_cast<std::mutex*>(user)[lock].unlock();
     }
 
-    // Keep MuPDF's longjmp away from C++ owners in the calling constructor.
     void RegisterDocumentHandlers(fz_context* context)
     {
         fz_try(context)
@@ -26,7 +25,8 @@ namespace
         }
         fz_catch(context)
         {
-            throw std::runtime_error(fz_caught_message(context));
+            int code = 0;
+            throw std::runtime_error(fz_convert_error(context, &code));
         }
     }
 }
@@ -44,7 +44,6 @@ namespace urpdf
             throw std::bad_alloc();
         }
 
-        // The member owner also releases the context if registration throws.
         RegisterDocumentHandlers(m_context.get());
     }
 

@@ -12,7 +12,8 @@ affect the tests.
 
 The separate `MuPdfRuntime.Tests` project loads the same MuPDF installation as
 the application. It checks shared resources and locks, runtime lifetime, and
-concurrent context cloning. Restore the application's vcpkg dependencies before
+concurrent context cloning, transferring prepared contexts to workers, and
+cleanup after MuPDF errors. Restore the application's vcpkg dependencies before
 building this project; the original `urPDF.Tests` remains independent of MuPDF.
 
 ## Visual Studio

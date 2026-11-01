@@ -10,7 +10,6 @@ extern "C" {
 
 namespace urpdf
 {
-    // The owner must outlive every context returned by CloneContext().
     class MuPdfRuntime final
     {
     public:

@@ -112,7 +112,8 @@ namespace
         }
         fz_catch(ctx)
         {
-            throw winrt::hresult_error(E_FAIL, winrt::to_hstring(fz_caught_message(ctx)));
+            int code = 0;
+            throw winrt::hresult_error(E_FAIL, winrt::to_hstring(fz_convert_error(ctx, &code)));
         }
         return document;
     }
@@ -126,7 +127,8 @@ namespace
         }
         fz_catch(ctx)
         {
-            throw winrt::hresult_error(E_FAIL, winrt::to_hstring(fz_caught_message(ctx)));
+            int code = 0;
+            throw winrt::hresult_error(E_FAIL, winrt::to_hstring(fz_convert_error(ctx, &code)));
         }
         return count;
     }
@@ -147,7 +149,8 @@ namespace
         }
         fz_catch(ctx)
         {
-            throw winrt::hresult_error(E_FAIL, winrt::to_hstring(fz_caught_message(ctx)));
+            int code = 0;
+            throw winrt::hresult_error(E_FAIL, winrt::to_hstring(fz_convert_error(ctx, &code)));
         }
         return bounds;
     }
@@ -274,18 +277,18 @@ namespace
         fz_catch(ctx)
         {
             fz_drop_pixmap(ctx, pix);
+            fz_report_error(ctx);
             pix = nullptr;
         }
 
         return pix;
     }
 
-    graphics::SoftwareBitmap RenderPageToSoftwareBitmap(std::shared_ptr<urpdf::MuPdfRuntime> runtime, fz_document* doc, int pageIndex, fz_rect pageBounds, int renderScaleBucket, int rotation)
+    // The async caller owns this context and uses it exclusively for its task.
+    graphics::SoftwareBitmap RenderPageToSoftwareBitmap(fz_context* ctx, fz_document* doc, int pageIndex, fz_rect pageBounds, int renderScaleBucket, int rotation)
     {
         const double renderScale = urpdf::RenderScaleForBucket(renderScaleBucket);
         if (renderScale <= 0.0) { return nullptr; }
-        auto context = runtime->CloneContext();
-        auto* ctx = context.get();
 
         graphics::SoftwareBitmap bitmap{ nullptr };
         fz_pixmap* pix = RenderPagePixmap(ctx, doc, pageIndex, pageBounds, renderScaleBucket, rotation);
@@ -1190,11 +1193,17 @@ namespace winrt::urPDF::implementation
         const std::uint64_t generation = PdfTab->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
 
         auto layoutCtx = PdfTab->m_runtime->CloneContext();
+        auto* document = PdfTab->m_doc;
 
         co_await winrt::resume_background();
 
-        const int pagecount = CountDocumentPages(layoutCtx.get(), PdfTab->m_doc);
-        auto pageBounds = CollectPageBounds(layoutCtx.get(), PdfTab->m_doc, pagecount);
+        if (PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
+        {
+            co_return;
+        }
+
+        const int pagecount = CountDocumentPages(layoutCtx.get(), document);
+        auto pageBounds = CollectPageBounds(layoutCtx.get(), document, pagecount);
         layoutCtx.reset();
 
         co_await resume_foreground(dispatcher);
@@ -1223,6 +1232,8 @@ namespace winrt::urPDF::implementation
     // PAGE RENDERING
     foundation::IAsyncAction MainWindow::RenderSinglePageAsync(std::shared_ptr<PdfTabInfo> PdfTab)
     {
+        auto strongThis = get_strong();
+        auto dispatcher = DispatcherQueue();
         const double pageZoom = PdfTab->m_renderZoom;
         const int pageRotation = PdfTab->m_viewState.rotation;
         const int layoutBucket = GetPageRenderScaleBucket(PdfTab, 0);
@@ -1230,6 +1241,7 @@ namespace winrt::urPDF::implementation
         if (requestedBucket == 0) { co_return; }
         const std::uint64_t generation = PdfTab->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
         auto renderCtx = PdfTab->m_runtime->CloneContext();
+        auto* document = PdfTab->m_doc;
 
         co_await winrt::resume_background();
 
@@ -1238,25 +1250,25 @@ namespace winrt::urPDF::implementation
             co_return;
         }
 
-        int pagecount = CountDocumentPages(renderCtx.get(), PdfTab->m_doc);
-        auto pageBounds = CollectPageBounds(renderCtx.get(), PdfTab->m_doc, pagecount);
+        int pagecount = CountDocumentPages(renderCtx.get(), document);
+        auto pageBounds = CollectPageBounds(renderCtx.get(), document, pagecount);
 
         if (PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
         {
             co_return;
         }
 
-        renderCtx.reset();
         if (pageBounds.empty()) { co_return; }
         const fz_rect pdfBounds = pageBounds[0];
         const int renderScaleBucket = LimitedPageRenderScaleBucket(pdfBounds, pageRotation, urpdf::RenderScaleForBucket(requestedBucket));
         if (renderScaleBucket == 0) { co_return; }
-        graphics::SoftwareBitmap bitmap = RenderPageToSoftwareBitmap(PdfTab->m_runtime, PdfTab->m_doc, 0, pdfBounds, renderScaleBucket, pageRotation);
+        graphics::SoftwareBitmap bitmap = RenderPageToSoftwareBitmap(renderCtx.get(), document, 0, pdfBounds, renderScaleBucket, pageRotation);
+        renderCtx.reset();
         if (!bitmap) { co_return; }
         const int width = bitmap.PixelWidth();
         const int height = bitmap.PixelHeight();
 
-        co_await resume_foreground(DispatcherQueue());
+        co_await resume_foreground(dispatcher);
 
         const auto selectedTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         const auto selectedEntry = m_openedTabs.find(selectedTab);
@@ -1302,10 +1314,13 @@ namespace winrt::urPDF::implementation
 
     foundation::IAsyncAction MainWindow::RenderMultiPageAsync(std::shared_ptr<PdfTabInfo> PdfTab)
     {
+        auto strongThis = get_strong();
+        auto dispatcher = DispatcherQueue();
         const std::uint64_t generation = PdfTab->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
         std::vector<PageSlot> renderedPages;
 
         auto renderCtx = PdfTab->m_runtime->CloneContext();
+        auto* document = PdfTab->m_doc;
 
         co_await winrt::resume_background();
 
@@ -1314,9 +1329,8 @@ namespace winrt::urPDF::implementation
             co_return;
         }
 
-        int pagecount = CountDocumentPages(renderCtx.get(), PdfTab->m_doc);
-        auto pageBounds = CollectPageBounds(renderCtx.get(), PdfTab->m_doc, pagecount);
-        renderCtx.reset();
+        int pagecount = CountDocumentPages(renderCtx.get(), document);
+        auto pageBounds = CollectPageBounds(renderCtx.get(), document, pagecount);
         renderedPages.resize(pagecount);
 
         for (int i = 0; i < pagecount; ++i)
@@ -1325,7 +1339,7 @@ namespace winrt::urPDF::implementation
             renderedPages[i].generation = generation;
         }
 
-        co_await resume_foreground(DispatcherQueue());
+        co_await resume_foreground(dispatcher);
 
         if (PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
         {
@@ -1396,12 +1410,12 @@ namespace winrt::urPDF::implementation
             }
 
             renderedPages[i].state = PageRenderState::loading;
-            graphics::SoftwareBitmap bitmap = RenderPageToSoftwareBitmap(PdfTab->m_runtime, PdfTab->m_doc, i, renderedPages[i].pdfBounds, renderScaleBucket, pageRotation);
+            graphics::SoftwareBitmap bitmap = RenderPageToSoftwareBitmap(renderCtx.get(), document, i, renderedPages[i].pdfBounds, renderScaleBucket, pageRotation);
             if (!bitmap) { continue; }
             const int width = bitmap.PixelWidth();
             const int height = bitmap.PixelHeight();
                 
-            co_await resume_foreground(DispatcherQueue());
+            co_await resume_foreground(dispatcher);
 
             if (m_isClosed || PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation || NormalizeRotation(PdfTab->m_viewState.rotation) != NormalizeRotation(pageRotation) || GetPageRenderScaleBucket(PdfTab, i) != renderScaleBucket)
             {
@@ -1439,7 +1453,8 @@ namespace winrt::urPDF::implementation
             }
         }
 
-        co_await resume_foreground(DispatcherQueue());
+        renderCtx.reset();
+        co_await resume_foreground(dispatcher);
 
         if (PdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
         {
@@ -1878,6 +1893,9 @@ namespace winrt::urPDF::implementation
                     renderMetrics.renderScaleBucket = renderScaleBucket;
                     renderMetrics.rotation = pageRotation;
                     const fz_rect pageBounds = slot.pdfBounds;
+                    // pdfTab keeps the document and runtime alive across the await.
+                    auto renderCtx = pdfTab->m_runtime->CloneContext();
+                    auto* document = pdfTab->m_doc;
 
                     co_await winrt::resume_background();
                     const auto renderStart = std::chrono::steady_clock::now();
@@ -1885,7 +1903,7 @@ namespace winrt::urPDF::implementation
                     std::exception_ptr renderError;
                     try
                     {
-                        pageBitmap = RenderPageToSoftwareBitmap(pdfTab->m_runtime, pdfTab->m_doc, pageIndex, pageBounds, renderScaleBucket, pageRotation);
+                        pageBitmap = RenderPageToSoftwareBitmap(renderCtx.get(), document, pageIndex, pageBounds, renderScaleBucket, pageRotation);
                         renderMetrics.elapsedMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - renderStart).count();
                         renderMetrics.bitmapCreated = static_cast<bool>(pageBitmap);
                         if (pageBitmap)
@@ -1902,6 +1920,7 @@ namespace winrt::urPDF::implementation
                         renderMetrics.elapsedMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - renderStart).count();
                         renderError = std::current_exception();
                     }
+                    renderCtx.reset();
                     co_await resume_foreground(dispatcher);
 
                     if (renderError)
