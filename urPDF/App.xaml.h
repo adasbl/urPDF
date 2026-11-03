@@ -26,6 +26,7 @@ namespace winrt::urPDF::implementation
     struct App : AppT<App>
     {
         App();
+        explicit App(std::shared_ptr<::urpdf::MuPdfRuntime> runtime);
 
         void OnLaunched(Microsoft::UI::Xaml::LaunchActivatedEventArgs const&);
         winrt::urPDF::MainWindow CreateWindow(::urpdf::WindowCreationOptions const& options = {});

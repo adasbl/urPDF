@@ -27,6 +27,7 @@
     <ClInclude Include="PdfRenderScale.h" />
     <ClInclude Include="DocumentViewState.h" />
     <ClInclude Include="DocumentOperation.h" />
+    <ClInclude Include="BackgroundWork.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="PdfPageLayout.h" />
     <ClInclude Include="AppSettings.h" />

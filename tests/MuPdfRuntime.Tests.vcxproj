@@ -56,6 +56,7 @@
     <ClCompile Include="MuPdfRuntimeTests.cpp" />
     <ClCompile Include="..\urPDF\MuPdfRuntime.cpp" />
     <ClInclude Include="..\urPDF\MuPdfRuntime.h" />
+    <ClInclude Include="..\urPDF\BackgroundWork.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Import Project="$(VcpkgRoot)\scripts\buildsystems\msbuild\vcpkg.targets" Condition="'$(VcpkgTargetsImported)' != 'true' and Exists('$(VcpkgRoot)\scripts\buildsystems\msbuild\vcpkg.targets')" />

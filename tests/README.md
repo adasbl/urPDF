@@ -15,6 +15,9 @@ the application. It checks shared resources and locks, runtime lifetime, and
 concurrent context cloning, transferring prepared contexts to workers, and
 cleanup after MuPDF errors. Restore the application's vcpkg dependencies before
 building this project; the original `urPDF.Tests` remains independent of MuPDF.
+The runtime tests also open a one-page PDF and verify document/context cleanup
+after window ownership is released and after a MuPDF error, without executing
+the queued UI callback.
 
 ## Visual Studio
 

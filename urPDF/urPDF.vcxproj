@@ -169,6 +169,7 @@
     <ClInclude Include="PdfRenderScale.h" />
     <ClInclude Include="DocumentViewState.h" />
     <ClInclude Include="DocumentOperation.h" />
+    <ClInclude Include="BackgroundWork.h" />
     <ClInclude Include="App.xaml.h">
       <DependentUpon>App.xaml</DependentUpon>
     </ClInclude>

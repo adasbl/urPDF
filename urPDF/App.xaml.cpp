@@ -15,7 +15,12 @@ using namespace Microsoft::UI::Xaml;
 namespace winrt::urPDF::implementation
 {
     App::App()
-        : m_muPdfRuntime(std::make_shared<::urpdf::MuPdfRuntime>())
+        : App(std::make_shared<::urpdf::MuPdfRuntime>())
+    {
+    }
+
+    App::App(std::shared_ptr<::urpdf::MuPdfRuntime> runtime)
+        : m_muPdfRuntime(std::move(runtime))
     {
 
 #if defined _DEBUG && !defined DISABLE_XAML_GENERATED_BREAK_ON_UNHANDLED_EXCEPTION
@@ -59,12 +64,20 @@ namespace winrt::urPDF::implementation
 
     winrt::urPDF::MainWindow App::CreateWindow(::urpdf::WindowCreationOptions const& options)
     {
+        if (!m_muPdfRuntime) { throw hresult_error(RO_E_CLOSED); }
         auto window = make<MainWindow>(options);
         window.Closed([weakThis = get_weak()](IInspectable const& sender, WindowEventArgs const&)
         {
             if (auto self = weakThis.get())
             {
                 std::erase(self->m_windows, sender.as<Window>());
+                if (self->m_windows.empty() && self->m_muPdfRuntime)
+                {
+                    // wWinMain retains the process owner until its wait ends.
+                    // App may outlive the UI loop through pending UI work.
+                    auto runtime = std::move(self->m_muPdfRuntime);
+                    runtime->Work().Stop();
+                }
             }
         });
         m_windows.push_back(window);
@@ -91,11 +104,24 @@ int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         return *exitCode;
     }
 
-    Application::Start(
-        [](auto&&)
-        {
-            ::winrt::make<::winrt::urPDF::implementation::App>();
-        });
+    // Keep the runtime (and its locks) alive independently of App and windows.
+    auto runtime = std::make_shared<urpdf::MuPdfRuntime>();
+    try
+    {
+        Application::Start(
+            [&runtime](auto&&)
+            {
+                ::winrt::make<::winrt::urPDF::implementation::App>(runtime);
+            });
+    }
+    catch (...)
+    {
+        runtime->Work().Stop();
+        runtime->Work().Wait();
+        throw;
+    }
+    runtime->Work().Stop();
+    runtime->Work().Wait();
 
     return 0;
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "BackgroundWork.h"
+
 extern "C" {
 #include <mupdf/fitz.h>
 }
@@ -24,11 +26,13 @@ namespace urpdf
         MuPdfRuntime& operator=(MuPdfRuntime&&) = delete;
 
         Context CloneContext();
+        BackgroundWorkTracker& Work() noexcept { return m_work; }
 
     private:
         std::array<std::mutex, FZ_LOCK_MAX> m_mutexes;
         fz_locks_context m_locks{};
         Context m_context{ nullptr, &fz_drop_context };
         std::mutex m_cloneMutex;
+        BackgroundWorkTracker m_work;
     };
 }
