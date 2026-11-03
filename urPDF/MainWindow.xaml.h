@@ -25,6 +25,7 @@ extern "C" {
 #include <functional>
 #include <list>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -231,6 +232,7 @@ namespace winrt::urPDF::implementation
         
         std::shared_ptr<urpdf::MuPdfRuntime> m_runtime;
         urpdf::MuPdfRuntime::Context m_ctx;
+        std::mutex m_documentMutex;
         fz_document* m_doc{ nullptr };
         int m_pagecount{ 0 };
         bool m_layoutLoaded{ false };
