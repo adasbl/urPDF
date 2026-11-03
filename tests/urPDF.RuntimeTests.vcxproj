@@ -10,7 +10,7 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{38BF7FEC-ED8A-46E4-A493-FBFEA6929584}</ProjectGuid>
-    <ProjectName>MuPdfRuntime.Tests</ProjectName>
+    <ProjectName>urPDF.RuntimeTests</ProjectName>
     <RootNamespace>urPDFTests</RootNamespace>
     <Keyword>Win32Proj</Keyword>
     <ProjectSubType>NativeUnitTestProject</ProjectSubType>
@@ -37,6 +37,7 @@
   <PropertyGroup>
     <OutDir>$(MSBuildThisFileDirectory)..\out\runtime-tests\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(OutDir)obj\</IntDir>
+    <TargetName>urPDF.RuntimeTests</TargetName>
     <IncludePath>$(VCInstallDir)Auxiliary\VS\UnitTest\include;$(IncludePath)</IncludePath>
     <LibraryPath>$(VCInstallDir)Auxiliary\VS\UnitTest\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>

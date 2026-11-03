@@ -7,6 +7,6 @@
   <Project Path="urPDF/urPDF.vcxproj" Id="df28e78d-0fc5-45d7-a109-82f177591af5">
     <Deploy />
   </Project>
-  <Project Path="tests/urPDF.Tests.vcxproj" Id="5d8f0cd9-376a-49d2-83a0-9b07e1c0e5f1" />
-  <Project Path="tests/MuPdfRuntime.Tests.vcxproj" Id="38bf7fec-ed8a-46e4-a493-fbfea6929584" />
+  <Project Path="tests/urPDF.UnitTests.vcxproj" Id="5d8f0cd9-376a-49d2-83a0-9b07e1c0e5f1" />
+  <Project Path="tests/urPDF.RuntimeTests.vcxproj" Id="38bf7fec-ed8a-46e4-a493-fbfea6929584" />
 </Solution>
