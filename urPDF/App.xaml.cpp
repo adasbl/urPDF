@@ -40,6 +40,11 @@ namespace winrt::urPDF::implementation
         return m_muPdfRuntime;
     }
 
+    std::uint64_t App::AllocateDocumentId() noexcept
+    {
+        return m_nextDocumentId++;
+    }
+
     void App::OnLaunched([[maybe_unused]] LaunchActivatedEventArgs const& e)
     {
         DispatcherShutdownMode(Microsoft::UI::Xaml::DispatcherShutdownMode::OnLastWindowClose);

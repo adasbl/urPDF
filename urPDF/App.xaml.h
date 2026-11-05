@@ -3,6 +3,7 @@
 #include "App.xaml.g.h"
 #include "WindowCreationOptions.h"
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -32,9 +33,12 @@ namespace winrt::urPDF::implementation
         winrt::urPDF::MainWindow CreateWindow(::urpdf::WindowCreationOptions const& options = {});
         void ApplySettingsToWindows();
         std::shared_ptr<::urpdf::MuPdfRuntime> MuPdfRuntime() const noexcept;
+        std::uint64_t AllocateDocumentId() noexcept;
 
     private:
         std::shared_ptr<::urpdf::MuPdfRuntime> m_muPdfRuntime;
         std::vector<winrt::Microsoft::UI::Xaml::Window> m_windows;
+        // Document IDs are allocated on the shared UI thread for all windows.
+        std::uint64_t m_nextDocumentId{ 1 };
     };
 }

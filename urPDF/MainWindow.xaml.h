@@ -344,7 +344,6 @@ namespace winrt::urPDF::implementation
         bool m_zoomIsIntermediate{ false };
         bool m_zoomDebounceElapsed{ false };
         int m_layoutRotation{ 0 };
-        std::uint64_t m_nextDocumentId{ 1 };
         PageBitmapCache m_pageBitmapCache{ 256ull * 1024ull * 1024ull };
         foundation::Collections::IObservableVector<foundation::IInspectable> m_pageRepeaterItems{ nullptr };
 

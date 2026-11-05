@@ -1172,7 +1172,7 @@ namespace winrt::urPDF::implementation
             auto pdfTab = std::make_shared<PdfTabInfo>(m_runtime, winrt::to_string(file.Path()));
             m_loadingTab = pdfTab;
             pdfTab->m_renderMetrics.openStartedAt = openStartedAt;
-            pdfTab->m_documentId = m_nextDocumentId++;
+            pdfTab->m_documentId = xaml::Application::Current().as<App>()->AllocateDocumentId();
             pdfTab->m_fileName = file.Name();
             pdfTab->m_openedFilePath = file.Path();
             const auto generation = pdfTab->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
