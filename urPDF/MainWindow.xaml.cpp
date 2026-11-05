@@ -980,6 +980,52 @@ namespace winrt::urPDF::implementation
         CloseTab(args.Tab());
     }
 
+    std::shared_ptr<PdfTabInfo> MainWindow::DetachTab(controls::TabViewItem const& tab)
+    {
+        if (!tab || m_isClosed || m_isRendering) { return nullptr; }
+
+        auto openedTab = m_openedTabs.find(tab);
+        if (openedTab == m_openedTabs.end()) { return nullptr; }
+        auto pdfTab = openedTab->second;
+        if (!pdfTab->m_layoutLoaded
+            || (m_viewStateGuard.IsPending() && m_pendingLayoutViewSaveTab.lock() == pdfTab))
+        {
+            return nullptr;
+        }
+
+        auto tabView = MainTabView();
+        uint32_t index;
+        if (!tabView.TabItems().IndexOf(tab, index)) { return nullptr; }
+
+        // Inactive tabs already have their own saved view; the shared UI belongs
+        // to the selected tab. Capture its actual zoom before cancelling zoom work.
+        if (tabView.SelectedItem() == tab) { SaveViewState(pdfTab); }
+
+        const auto generation = pdfTab->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+        if (m_pendingZoomTab.lock() == pdfTab) { CancelPendingZoomRender(); }
+        if (m_presentedTab.lock() == pdfTab)
+        {
+            CancelPendingViewStateSave();
+            m_presentedTab.reset();
+        }
+
+        m_pageBitmapCache.ClearDocumentEntries(pdfTab->m_documentId);
+        ReleaseSlotsOutsideRange(pdfTab, 0, -1);
+        for (auto& slot : pdfTab->m_renderedPages)
+        {
+            // Keep page geometry, but leave no bitmap, error or in-flight request
+            // from the source window for the destination window to inherit.
+            slot = PageSlot{ slot.pdfBounds };
+            slot.generation = generation;
+        }
+        pdfTab->m_retainedPageFirst = 0;
+        pdfTab->m_retainedPageLast = -1;
+
+        m_openedTabs.erase(openedTab);
+        tabView.TabItems().RemoveAt(index);
+        return pdfTab;
+    }
+
     void MainWindow::CloseTab(controls::TabViewItem const& tab)
     {
         if (!tab) { return; }

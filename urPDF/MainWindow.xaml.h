@@ -268,6 +268,9 @@ namespace winrt::urPDF::implementation
         winrt::fire_and_forget OpenPdfInNewWindowAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         void OpenPdfFileAsync(storage::StorageFile const& file);
         winrt::fire_and_forget OpenPdfPathAsync(winrt::hstring path);        
+        // Returns null when the tab is absent or its document/view is not ready.
+        // The caller closes an empty source window only after attaching the document.
+        std::shared_ptr<PdfTabInfo> DetachTab(controls::TabViewItem const& tab);
         void TabView_AddButtonClick(foundation::IInspectable const& sender, foundation::IInspectable const& args);
         void TabView_TabCloseRequested(foundation::IInspectable const& sender, controls::TabViewTabCloseRequestedEventArgs const& args);
         void TabView_Loaded(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
