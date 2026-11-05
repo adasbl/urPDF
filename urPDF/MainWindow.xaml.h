@@ -275,7 +275,12 @@ namespace winrt::urPDF::implementation
         std::shared_ptr<PdfTabInfo> DetachTab(controls::TabViewItem const& tab);
         // Accepts a detached document; clamps index to the available tab positions.
         // Returns null if the document or destination window is not ready.
-        controls::TabViewItem AttachTab(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t index);
+        controls::TabViewItem AttachTab(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t index,
+            controls::TabViewItem const& transferredTab = nullptr);
+        void TabView_TabTearOutWindowRequested(controls::TabView const& sender, controls::TabViewTabTearOutWindowRequestedEventArgs const& args);
+        void TabView_TabTearOutRequested(controls::TabView const& sender, controls::TabViewTabTearOutRequestedEventArgs const& args);
+        void TabView_ExternalTornOutTabsDropping(controls::TabView const& sender, controls::TabViewExternalTornOutTabsDroppingEventArgs const& args);
+        void TabView_ExternalTornOutTabsDropped(controls::TabView const& sender, controls::TabViewExternalTornOutTabsDroppedEventArgs const& args);
         void TabView_AddButtonClick(foundation::IInspectable const& sender, foundation::IInspectable const& args);
         void TabView_TabCloseRequested(foundation::IInspectable const& sender, controls::TabViewTabCloseRequestedEventArgs const& args);
         void TabView_Loaded(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
@@ -356,6 +361,10 @@ namespace winrt::urPDF::implementation
         foundation::Collections::IObservableVector<foundation::IInspectable> m_pageRepeaterItems{ nullptr };
 
         void CloseTab(controls::TabViewItem const& tab);
+        bool CanTransferTab(controls::TabViewItem const& tab, bool allowViewRestore);
+        bool CanReceiveTabFrom(MainWindow& source, controls::TabViewItem const& tab);
+        bool TransferTabFrom(MainWindow& source, controls::TabViewItem const& tab, int32_t index);
+        std::shared_ptr<PdfTabInfo> DetachTabForTransfer(controls::TabViewItem const& tab, bool allowViewRestore);
         void ShutdownMuPdfWork() noexcept;
         void CompleteDocumentOpen(std::shared_ptr<PdfTabInfo> const& pdfTab, std::uint64_t generation,
             int pagecount, std::vector<fz_rect> pageBounds, std::exception_ptr error);

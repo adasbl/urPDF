@@ -8,6 +8,7 @@
 
 #include <winrt/Windows.ApplicationModel.Activation.h>
 #include <winrt/Microsoft.Windows.AppLifecycle.h>
+#include <winrt/Microsoft.UI.Windowing.h>
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -71,15 +72,14 @@ namespace winrt::urPDF::implementation
     {
         if (!m_muPdfRuntime) { throw hresult_error(RO_E_CLOSED); }
         auto window = make<MainWindow>(options);
-        window.Closed([weakThis = get_weak()](IInspectable const& sender, WindowEventArgs const&)
+        window.Closed([weakThis = get_weak(), id = window.AppWindow().Id()](IInspectable const& sender, WindowEventArgs const&)
         {
             if (auto self = weakThis.get())
             {
                 std::erase(self->m_windows, sender.as<Window>());
+                std::erase_if(self->m_tearOutWindows, [&](auto const& entry) { return entry.second == id; });
                 if (self->m_windows.empty() && self->m_muPdfRuntime)
                 {
-                    // wWinMain retains the process owner until its wait ends.
-                    // App may outlive the UI loop through pending UI work.
                     auto runtime = std::move(self->m_muPdfRuntime);
                     runtime->Work().Stop();
                 }
@@ -88,6 +88,38 @@ namespace winrt::urPDF::implementation
         m_windows.push_back(window);
         window.Activate();
         return window;
+    }
+
+    winrt::urPDF::MainWindow App::FindWindow(Microsoft::UI::WindowId const& id) const
+    {
+        for (auto const& window : m_windows)
+        {
+            if (window.AppWindow().Id() == id) { return window.as<winrt::urPDF::MainWindow>(); }
+        }
+        return nullptr;
+    }
+
+    winrt::urPDF::MainWindow App::FindWindowForTab(Microsoft::UI::Xaml::Controls::TabViewItem const& tab) const
+    {
+        if (!tab) { return nullptr; }
+        for (auto const& window : m_windows)
+        {
+            auto mainWindow = window.as<winrt::urPDF::MainWindow>();
+            uint32_t index;
+            if (get_self<MainWindow>(mainWindow)->MainTabView().TabItems().IndexOf(tab, index)) { return mainWindow; }
+        }
+        return nullptr;
+    }
+
+    void App::TrackTearOutWindow(Microsoft::UI::Xaml::Controls::TabViewItem const& tab, Microsoft::UI::WindowId const& id)
+    {
+        if (tab && FindWindow(id)) { m_tearOutWindows.insert_or_assign(tab, id); }
+    }
+
+    winrt::urPDF::MainWindow App::FindTearOutWindow(Microsoft::UI::Xaml::Controls::TabViewItem const& tab) const
+    {
+        auto entry = m_tearOutWindows.find(tab);
+        return entry != m_tearOutWindows.end() ? FindWindow(entry->second) : nullptr;
     }
 
     void App::ApplySettingsToWindows()
@@ -109,7 +141,6 @@ int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         return *exitCode;
     }
 
-    // Keep the runtime (and its locks) alive independently of App and windows.
     auto runtime = std::make_shared<urpdf::MuPdfRuntime>();
     try
     {

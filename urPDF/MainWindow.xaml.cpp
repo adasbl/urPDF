@@ -330,7 +330,6 @@ namespace
         return pix;
     }
 
-    // The async caller owns this context and uses it exclusively for its task.
     graphics::SoftwareBitmap RenderPageToSoftwareBitmap(fz_context* ctx, fz_document* doc, int pageIndex, fz_rect pageBounds, int renderScaleBucket, int rotation)
     {
         const double renderScale = urpdf::RenderScaleForBucket(renderScaleBucket);
@@ -640,7 +639,6 @@ namespace winrt::urPDF::implementation
     PdfTabInfo::PdfTabInfo(std::shared_ptr<urpdf::MuPdfRuntime> runtime, const std::string& filePath)
         : m_runtime(std::move(runtime)), m_ctx(m_runtime->CloneContext())
     {
-        // The card has not been published yet, so opening needs no document lock.
         m_doc = OpenPdfDocument(m_ctx.get(), filePath.c_str());
     }
 
@@ -853,6 +851,7 @@ namespace winrt::urPDF::implementation
             {
                 auto tab = item.try_as<controls::TabViewItem>();
                 if (!tab) { continue; }
+                if (tabView.CanTearOutTabs() && CanTransferTab(tab, true)) { continue; }
                 auto tabRect = toRect(tab);
                 if (!tabRect) { continue; }
 
@@ -894,7 +893,7 @@ namespace winrt::urPDF::implementation
     void MainWindow::TabView_Loaded(foundation::IInspectable const& sender, xaml::RoutedEventArgs const&)
     {
         auto tabView = sender.as<controls::TabView>();
-        TabView_AddButtonClick(tabView, nullptr);
+        if (tabView.TabItems().Size() == 0) { TabView_AddButtonClick(tabView, nullptr); }
 
         if (m_pendingFile)
         {
@@ -982,15 +981,19 @@ namespace winrt::urPDF::implementation
 
     bool MainWindow::CanDetachTab(controls::TabViewItem const& tab)
     {
-        // m_isRendering protects document loading. m_isVisibleRenderRunning is
-        // deliberately ignored: generations and the document mutex protect renders.
+        return CanTransferTab(tab, false);
+    }
+
+    bool MainWindow::CanTransferTab(controls::TabViewItem const& tab, bool allowViewRestore)
+    {
         if (!tab || m_isClosed || m_isRendering) { return false; }
 
         auto openedTab = m_openedTabs.find(tab);
         if (openedTab == m_openedTabs.end()) { return false; }
         auto const& pdfTab = openedTab->second;
+        const bool restoringSavedView = allowViewRestore && m_viewRestorePhase != ViewRestorePhase::None && m_pendingLayoutViewSaveTab.lock() == pdfTab;
         if (!pdfTab->m_layoutLoaded || m_loadingTab == pdfTab
-            || (m_viewStateGuard.IsPending() && m_pendingLayoutViewSaveTab.lock() == pdfTab))
+            || (m_viewStateGuard.IsPending() && m_pendingLayoutViewSaveTab.lock() == pdfTab && !restoringSavedView))
         {
             return false;
         }
@@ -1000,8 +1003,7 @@ namespace winrt::urPDF::implementation
         if (!tabView.TabItems().IndexOf(tab, index)) { return false; }
         if (tabView.SelectedItem() == tab)
         {
-            // A selected tab must own the settled shared view before its anchor
-            // can be captured. Inactive tabs use their previously saved view.
+            if (restoringSavedView) { return true; }
             return m_presentedTab.lock() == pdfTab && m_viewStateGuard.CanSave(pdfTab->m_documentId)
                 && (pdfTab->m_pagecount == 0 || HasViewGeometry(pdfTab));
         }
@@ -1010,7 +1012,12 @@ namespace winrt::urPDF::implementation
 
     std::shared_ptr<PdfTabInfo> MainWindow::DetachTab(controls::TabViewItem const& tab)
     {
-        if (!CanDetachTab(tab)) { return nullptr; }
+        return DetachTabForTransfer(tab, false);
+    }
+
+    std::shared_ptr<PdfTabInfo> MainWindow::DetachTabForTransfer(controls::TabViewItem const& tab, bool allowViewRestore)
+    {
+        if (!CanTransferTab(tab, allowViewRestore)) { return nullptr; }
 
         auto openedTab = m_openedTabs.find(tab);
         auto pdfTab = openedTab->second;
@@ -1018,13 +1025,11 @@ namespace winrt::urPDF::implementation
         uint32_t index;
         if (!tabView.TabItems().IndexOf(tab, index)) { return nullptr; }
 
-        // Inactive tabs already have their own saved view; the shared UI belongs
-        // to the selected tab. Capture its actual zoom before cancelling zoom work.
         if (tabView.SelectedItem() == tab) { SaveViewState(pdfTab); }
 
         const auto generation = pdfTab->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
         if (m_pendingZoomTab.lock() == pdfTab) { CancelPendingZoomRender(); }
-        if (m_presentedTab.lock() == pdfTab)
+        if (m_presentedTab.lock() == pdfTab || m_pendingLayoutViewSaveTab.lock() == pdfTab)
         {
             CancelPendingViewStateSave();
             m_presentedTab.reset();
@@ -1034,8 +1039,6 @@ namespace winrt::urPDF::implementation
         ReleaseSlotsOutsideRange(pdfTab, 0, -1);
         for (auto& slot : pdfTab->m_renderedPages)
         {
-            // Keep page geometry, but leave no bitmap, error or in-flight request
-            // from the source window for the destination window to inherit.
             slot = PageSlot{ slot.pdfBounds };
             slot.generation = generation;
         }
@@ -1047,7 +1050,8 @@ namespace winrt::urPDF::implementation
         return pdfTab;
     }
 
-    controls::TabViewItem MainWindow::AttachTab(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t index)
+    controls::TabViewItem MainWindow::AttachTab(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t index,
+        controls::TabViewItem const& transferredTab)
     {
         if (m_isClosed || m_isRendering || !pdfTab || !pdfTab->m_doc || !pdfTab->m_layoutLoaded
             || pdfTab->m_documentId == 0 || pdfTab->m_runtime != m_runtime)
@@ -1066,20 +1070,19 @@ namespace winrt::urPDF::implementation
             ? items.GetAt(0).try_as<controls::TabViewItem>() : nullptr;
         const auto insertionIndex = static_cast<uint32_t>(std::clamp(index, 0, static_cast<int32_t>(items.Size())));
 
-        controls::TabViewItem tab;
+        auto tab = transferredTab ? transferredTab : controls::TabViewItem();
+        uint32_t existingIndex;
+        if (items.IndexOf(tab, existingIndex)) { return nullptr; }
         tab.Header(winrt::box_value(pdfTab->m_fileName));
         controls::SymbolIconSource icon;
         icon.Symbol(controls::Symbol::Document);
         tab.IconSource(icon);
 
-        // Inserting the first item can select it immediately, so save the outgoing
-        // view and register the document before changing the TabView collection.
         SaveViewState(m_presentedTab.lock());
         m_openedTabs.emplace(tab, pdfTab);
         try
         {
             items.InsertAt(insertionIndex, tab);
-            // SelectionChanged rebuilds the layout and restores DocumentViewState.
             tabView.SelectedItem(tab);
         }
         catch (...)
@@ -1090,11 +1093,91 @@ namespace winrt::urPDF::implementation
             throw;
         }
 
-        // A new window starts with one empty tab. Replace only that placeholder;
-        // keep explicitly opened empty tabs alongside existing documents.
         uint32_t emptyIndex;
         if (emptyTab && items.IndexOf(emptyTab, emptyIndex)) { items.RemoveAt(emptyIndex); }
         return tab;
+    }
+
+    bool MainWindow::CanReceiveTabFrom(MainWindow& source, controls::TabViewItem const& tab)
+    {
+        return &source != this && !m_isClosed && !m_isRendering && m_runtime == source.m_runtime
+            && !(m_viewStateGuard.IsPending() && !m_pendingLayoutViewSaveTab.expired()
+                && m_viewRestorePhase == ViewRestorePhase::None)
+            && source.CanTransferTab(tab, true);
+    }
+
+    bool MainWindow::TransferTabFrom(MainWindow& source, controls::TabViewItem const& tab, int32_t index)
+    {
+        if (!CanReceiveTabFrom(source, tab)) { return false; }
+        uint32_t originalIndex;
+        if (!source.MainTabView().TabItems().IndexOf(tab, originalIndex)) { return false; }
+        auto pdfTab = source.DetachTabForTransfer(tab, true);
+        if (!pdfTab) { return false; }
+        try
+        {
+            if (AttachTab(pdfTab, index, tab)) { return true; }
+        }
+        catch (...)
+        {
+            source.AttachTab(pdfTab, static_cast<int32_t>(originalIndex), tab);
+            throw;
+        }
+        source.AttachTab(pdfTab, static_cast<int32_t>(originalIndex), tab);
+        return false;
+    }
+
+    void MainWindow::TabView_TabTearOutWindowRequested(controls::TabView const& sender,
+        controls::TabViewTabTearOutWindowRequestedEventArgs const& args)
+    {
+        args.NewWindowId({});
+        const auto tabs = args.Tabs();
+        if (sender != MainTabView() || tabs.size() != 1) { return; }
+        auto tab = tabs[0].try_as<controls::TabViewItem>();
+        if (!CanTransferTab(tab, true)) { return; }
+        auto app = xaml::Application::Current().as<App>();
+        auto window = app->CreateWindow();
+        app->TrackTearOutWindow(tab, window.AppWindow().Id());
+        args.NewWindowId(window.AppWindow().Id());
+    }
+
+    void MainWindow::TabView_TabTearOutRequested(controls::TabView const& sender,
+        controls::TabViewTabTearOutRequestedEventArgs const& args)
+    {
+        const auto tabs = args.Tabs();
+        if (sender != MainTabView() || tabs.size() != 1) { return; }
+        auto app = xaml::Application::Current().as<App>();
+        auto tab = tabs[0].try_as<controls::TabViewItem>();
+        auto destination = app->FindWindow(args.NewWindowId());
+        if (!destination) { destination = app->FindTearOutWindow(tab); }
+        auto source = app->FindWindowForTab(tab);
+        if (!destination || !source) { return; }
+        get_self<MainWindow>(destination)->TransferTabFrom(*get_self<MainWindow>(source), tab, 0);
+    }
+
+    void MainWindow::TabView_ExternalTornOutTabsDropping(controls::TabView const& sender,
+        controls::TabViewExternalTornOutTabsDroppingEventArgs const& args)
+    {
+        args.AllowDrop(false);
+        const auto tabs = args.Tabs();
+        if (sender != MainTabView() || tabs.size() != 1) { return; }
+        auto tab = tabs[0].try_as<controls::TabViewItem>();
+        auto app = xaml::Application::Current().as<App>();
+        auto source = app->FindWindowForTab(tab);
+        if (source && CanReceiveTabFrom(*get_self<MainWindow>(source), tab))
+        {
+            app->TrackTearOutWindow(tab, source.AppWindow().Id());
+            args.AllowDrop(true);
+        }
+    }
+
+    void MainWindow::TabView_ExternalTornOutTabsDropped(controls::TabView const& sender,
+        controls::TabViewExternalTornOutTabsDroppedEventArgs const& args)
+    {
+        const auto tabs = args.Tabs();
+        if (sender != MainTabView() || tabs.size() != 1) { return; }
+        auto tab = tabs[0].try_as<controls::TabViewItem>();
+        auto source = xaml::Application::Current().as<App>()->FindWindowForTab(tab);
+        if (source) { TransferTabFrom(*get_self<MainWindow>(source), tab, args.DropIndex()); }
     }
 
     void MainWindow::CloseTab(controls::TabViewItem const& tab)
@@ -1884,6 +1967,7 @@ namespace winrt::urPDF::implementation
         SaveViewState(m_presentedTab.lock());
         CancelPendingZoomRender();
         m_isRendering = true;
+        UpdateTitleBarPassthroughRegions();
         m_zoomWasEnabled = PdfScrollViewer().ZoomMode() == controls::ZoomMode::Enabled;
         PdfScrollViewer().ZoomMode(controls::ZoomMode::Disabled);
         ZoomInButton().IsEnabled(false);
@@ -1900,6 +1984,7 @@ namespace winrt::urPDF::implementation
         }
         m_zoomWasEnabled = false;
         m_isRendering = false;
+        UpdateTitleBarPassthroughRegions();
         ZoomInButton().IsEnabled(true);
         ZoomOutButton().IsEnabled(true);
         RotateButton().IsEnabled(true);
@@ -2153,7 +2238,6 @@ namespace winrt::urPDF::implementation
 
     bool MainWindow::HasViewGeometry(std::shared_ptr<PdfTabInfo> const& pdfTab)
     {
-        // Geometry readiness is also needed while protected, to decide when protection may end.
         if (!pdfTab || m_isClosed || m_presentedTab.lock() != pdfTab) { return false; }
 
         auto layout = winrt::get_self<winrt::urPDF::implementation::PdfPageLayout>(PagesLayout());
@@ -2216,6 +2300,7 @@ namespace winrt::urPDF::implementation
     {
         if (!IsCurrentViewOperation(pdfTab, operation)) { return; }
         m_viewOperationReady = true;
+        UpdateTitleBarPassthroughRegions();
         QueuePendingViewStateSave();
     }
 
@@ -2383,6 +2468,7 @@ namespace winrt::urPDF::implementation
             SaveViewState(pdfTab);
             if (!m_isRendering) { RenderVisiblePagesAsync(); }
         }
+        UpdateTitleBarPassthroughRegions();
         if (m_dpiRefreshPending) { RequestDpiRefresh(); }
     }
 

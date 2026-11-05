@@ -118,7 +118,6 @@ namespace urpdf
         return m_cache;
     }
 
-    // A failed write keeps the new value for the current session only.
     void AppSettings::SetTheme(AppTheme theme)
     {
         m_cache.theme = theme;

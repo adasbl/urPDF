@@ -48,7 +48,12 @@
                              IsAddTabButtonVisible="False"
                              CanReorderTabs="True"
                              CanDragTabs="True"
+                             CanTearOutTabs="True"
                              AllowDropTabs="True"
+                             TabTearOutWindowRequested="TabView_TabTearOutWindowRequested"
+                             TabTearOutRequested="TabView_TabTearOutRequested"
+                             ExternalTornOutTabsDropping="TabView_ExternalTornOutTabsDropping"
+                             ExternalTornOutTabsDropped="TabView_ExternalTornOutTabsDropped"
                              TabCloseRequested="TabView_TabCloseRequested" 
                              Loaded="TabView_Loaded"  
                              SelectionChanged="TabView_SelectionChanged">
