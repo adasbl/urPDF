@@ -41,6 +41,7 @@ extern "C" {
 #include <winrt/Windows.Graphics.Printing.h>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Microsoft.UI.Dispatching.h>
+#include <winrt/Microsoft.UI.Input.h>
 #include <winrt/Microsoft.UI.Xaml.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 #include <winrt/Microsoft.UI.Xaml.Data.h>
@@ -268,15 +269,10 @@ namespace winrt::urPDF::implementation
         winrt::fire_and_forget OpenPdfInNewWindowAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         void OpenPdfFileAsync(storage::StorageFile const& file);
         winrt::fire_and_forget OpenPdfPathAsync(winrt::hstring path);        
-        // UI-thread query for transfer handlers; bitmap rendering does not block it.
         bool CanDetachTab(controls::TabViewItem const& tab);
-        // Returns null when the tab is absent or its document/view is not ready.
-        // The caller closes an empty source window only after attaching the document.
+        void CloseIfEmpty();
         std::shared_ptr<PdfTabInfo> DetachTab(controls::TabViewItem const& tab);
-        // Accepts a detached document; clamps index to the available tab positions.
-        // Returns null if the document or destination window is not ready.
-        controls::TabViewItem AttachTab(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t index,
-            controls::TabViewItem const& transferredTab = nullptr);
+        controls::TabViewItem AttachTab(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t index, controls::TabViewItem const& transferredTab = nullptr);
         void TabView_TabTearOutWindowRequested(controls::TabView const& sender, controls::TabViewTabTearOutWindowRequestedEventArgs const& args);
         void TabView_TabTearOutRequested(controls::TabView const& sender, controls::TabViewTabTearOutRequestedEventArgs const& args);
         void TabView_ExternalTornOutTabsDropping(controls::TabView const& sender, controls::TabViewExternalTornOutTabsDroppingEventArgs const& args);
@@ -346,6 +342,9 @@ namespace winrt::urPDF::implementation
         bool m_zoomWasEnabled{ false };
         bool m_isVisibleRenderRunning{ false };
         bool m_isClosed{ false };
+        winrt::Microsoft::UI::Input::InputNonClientPointerSource m_moveSizeInput{ nullptr };
+        winrt::event_token m_enteredMoveSizeToken{};
+        winrt::event_token m_exitedMoveSizeToken{};
         std::optional<std::vector<winrt::Windows::Graphics::RectInt32>> m_passthroughRects;
         xaml::XamlRoot m_observedXamlRoot{ nullptr };
         xaml::XamlRoot::Changed_revoker m_xamlRootChangedRevoker;

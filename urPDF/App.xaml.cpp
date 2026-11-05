@@ -5,10 +5,13 @@
 #include "MuPdfRuntime.h"
 
 #include <cstdlib>
+#include <algorithm>
+#include <utility>
 
 #include <winrt/Windows.ApplicationModel.Activation.h>
 #include <winrt/Microsoft.Windows.AppLifecycle.h>
 #include <winrt/Microsoft.UI.Windowing.h>
+#include <winrt/Microsoft.UI.Dispatching.h>
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -78,6 +81,9 @@ namespace winrt::urPDF::implementation
             {
                 std::erase(self->m_windows, sender.as<Window>());
                 std::erase_if(self->m_tearOutWindows, [&](auto const& entry) { return entry.second == id; });
+                self->m_windowsInMoveSize.erase(id.Value);
+                std::erase(self->m_pendingWindowCloses, id);
+                self->SchedulePendingWindowCloses();
                 if (self->m_windows.empty() && self->m_muPdfRuntime)
                 {
                     auto runtime = std::move(self->m_muPdfRuntime);
@@ -120,6 +126,48 @@ namespace winrt::urPDF::implementation
     {
         auto entry = m_tearOutWindows.find(tab);
         return entry != m_tearOutWindows.end() ? FindWindow(entry->second) : nullptr;
+    }
+
+    void App::RequestCloseEmptyWindow(Microsoft::UI::WindowId const& id)
+    {
+        if (std::find(m_pendingWindowCloses.begin(), m_pendingWindowCloses.end(), id) == m_pendingWindowCloses.end())
+        {
+            m_pendingWindowCloses.push_back(id);
+        }
+        SchedulePendingWindowCloses();
+    }
+
+    void App::WindowMoveSizeEntered(Microsoft::UI::WindowId const& id)
+    {
+        m_windowsInMoveSize.insert(id.Value);
+    }
+
+    void App::WindowMoveSizeExited(Microsoft::UI::WindowId const& id)
+    {
+        m_windowsInMoveSize.erase(id.Value);
+        SchedulePendingWindowCloses();
+    }
+
+    void App::SchedulePendingWindowCloses()
+    {
+        if (m_windowCloseQueued || m_pendingWindowCloses.empty() || !m_windowsInMoveSize.empty()) { return; }
+        auto dispatcher = Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
+        m_windowCloseQueued = dispatcher && dispatcher.TryEnqueue(Microsoft::UI::Dispatching::DispatcherQueuePriority::Low,
+            [weakThis = get_weak()]
+            {
+                auto self = weakThis.get();
+                if (!self) { return; }
+                self->m_windowCloseQueued = false;
+                if (!self->m_windowsInMoveSize.empty()) { return; }
+                auto pending = std::exchange(self->m_pendingWindowCloses, {});
+                for (auto const& id : pending)
+                {
+                    if (auto window = self->FindWindow(id))
+                    {
+                        get_self<MainWindow>(window)->CloseIfEmpty();
+                    }
+                }
+            });
     }
 
     void App::ApplySettingsToWindows()

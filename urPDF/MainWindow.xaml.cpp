@@ -383,6 +383,12 @@ namespace winrt::urPDF::implementation
     {
         if (m_isClosed) { return; }
         m_isClosed = true;
+        if (m_moveSizeInput)
+        {
+            if (m_enteredMoveSizeToken.value) { m_moveSizeInput.EnteredMoveSize(m_enteredMoveSizeToken); }
+            if (m_exitedMoveSizeToken.value) { m_moveSizeInput.ExitedMoveSize(m_exitedMoveSizeToken); }
+            m_moveSizeInput = nullptr;
+        }
         m_workCancelled->store(true, std::memory_order_release);
         for (auto const& tabEntry : m_openedTabs)
         {
@@ -895,6 +901,29 @@ namespace winrt::urPDF::implementation
         auto tabView = sender.as<controls::TabView>();
         if (tabView.TabItems().Size() == 0) { TabView_AddButtonClick(tabView, nullptr); }
 
+        // The non-client input source is available after the window/TabView loads.
+        if (!m_moveSizeInput)
+        {
+            const auto windowId = AppWindow().Id();
+            auto input = winrt::Microsoft::UI::Input::InputNonClientPointerSource::GetForWindowId(windowId);
+            if (input)
+            {
+                // This input source does not support weak references/auto_revoke.
+                m_moveSizeInput = input;
+                auto weakApp = xaml::Application::Current().as<App>()->get_weak();
+                m_enteredMoveSizeToken = input.EnteredMoveSize(
+                    [weakApp, windowId](auto const&, auto const&)
+                    {
+                        if (auto app = weakApp.get()) { app->WindowMoveSizeEntered(windowId); }
+                    });
+                m_exitedMoveSizeToken = input.ExitedMoveSize(
+                    [weakApp, windowId](auto const&, auto const&)
+                    {
+                        if (auto app = weakApp.get()) { app->WindowMoveSizeExited(windowId); }
+                    });
+            }
+        }
+
         if (m_pendingFile)
         {
             auto file = m_pendingFile;
@@ -1113,17 +1142,26 @@ namespace winrt::urPDF::implementation
         if (!source.MainTabView().TabItems().IndexOf(tab, originalIndex)) { return false; }
         auto pdfTab = source.DetachTabForTransfer(tab, true);
         if (!pdfTab) { return false; }
+        controls::TabViewItem attached{ nullptr };
         try
         {
-            if (AttachTab(pdfTab, index, tab)) { return true; }
+            attached = AttachTab(pdfTab, index, tab);
         }
         catch (...)
         {
             source.AttachTab(pdfTab, static_cast<int32_t>(originalIndex), tab);
             throw;
         }
-        source.AttachTab(pdfTab, static_cast<int32_t>(originalIndex), tab);
-        return false;
+        if (!attached)
+        {
+            source.AttachTab(pdfTab, static_cast<int32_t>(originalIndex), tab);
+            return false;
+        }
+        if (source.MainTabView().TabItems().Size() == 0)
+        {
+            xaml::Application::Current().as<App>()->RequestCloseEmptyWindow(source.AppWindow().Id());
+        }
+        return true;
     }
 
     void MainWindow::TabView_TabTearOutWindowRequested(controls::TabView const& sender,
@@ -1178,6 +1216,14 @@ namespace winrt::urPDF::implementation
         auto tab = tabs[0].try_as<controls::TabViewItem>();
         auto source = xaml::Application::Current().as<App>()->FindWindowForTab(tab);
         if (source) { TransferTabFrom(*get_self<MainWindow>(source), tab, args.DropIndex()); }
+    }
+
+    void MainWindow::CloseIfEmpty()
+    {
+        if (!m_isClosed && !m_isRendering && !m_loadingTab && MainTabView().TabItems().Size() == 0)
+        {
+            Close();
+        }
     }
 
     void MainWindow::CloseTab(controls::TabViewItem const& tab)
