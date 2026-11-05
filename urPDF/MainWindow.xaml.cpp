@@ -980,19 +980,40 @@ namespace winrt::urPDF::implementation
         CloseTab(args.Tab());
     }
 
-    std::shared_ptr<PdfTabInfo> MainWindow::DetachTab(controls::TabViewItem const& tab)
+    bool MainWindow::CanDetachTab(controls::TabViewItem const& tab)
     {
-        if (!tab || m_isClosed || m_isRendering) { return nullptr; }
+        // m_isRendering protects document loading. m_isVisibleRenderRunning is
+        // deliberately ignored: generations and the document mutex protect renders.
+        if (!tab || m_isClosed || m_isRendering) { return false; }
 
         auto openedTab = m_openedTabs.find(tab);
-        if (openedTab == m_openedTabs.end()) { return nullptr; }
-        auto pdfTab = openedTab->second;
-        if (!pdfTab->m_layoutLoaded
+        if (openedTab == m_openedTabs.end()) { return false; }
+        auto const& pdfTab = openedTab->second;
+        if (!pdfTab->m_layoutLoaded || m_loadingTab == pdfTab
             || (m_viewStateGuard.IsPending() && m_pendingLayoutViewSaveTab.lock() == pdfTab))
         {
-            return nullptr;
+            return false;
         }
 
+        auto tabView = MainTabView();
+        uint32_t index;
+        if (!tabView.TabItems().IndexOf(tab, index)) { return false; }
+        if (tabView.SelectedItem() == tab)
+        {
+            // A selected tab must own the settled shared view before its anchor
+            // can be captured. Inactive tabs use their previously saved view.
+            return m_presentedTab.lock() == pdfTab && m_viewStateGuard.CanSave(pdfTab->m_documentId)
+                && (pdfTab->m_pagecount == 0 || HasViewGeometry(pdfTab));
+        }
+        return true;
+    }
+
+    std::shared_ptr<PdfTabInfo> MainWindow::DetachTab(controls::TabViewItem const& tab)
+    {
+        if (!CanDetachTab(tab)) { return nullptr; }
+
+        auto openedTab = m_openedTabs.find(tab);
+        auto pdfTab = openedTab->second;
         auto tabView = MainTabView();
         uint32_t index;
         if (!tabView.TabItems().IndexOf(tab, index)) { return nullptr; }
