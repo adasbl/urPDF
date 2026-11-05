@@ -271,6 +271,9 @@ namespace winrt::urPDF::implementation
         // Returns null when the tab is absent or its document/view is not ready.
         // The caller closes an empty source window only after attaching the document.
         std::shared_ptr<PdfTabInfo> DetachTab(controls::TabViewItem const& tab);
+        // Accepts a detached document; clamps index to the available tab positions.
+        // Returns null if the document or destination window is not ready.
+        controls::TabViewItem AttachTab(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t index);
         void TabView_AddButtonClick(foundation::IInspectable const& sender, foundation::IInspectable const& args);
         void TabView_TabCloseRequested(foundation::IInspectable const& sender, controls::TabViewTabCloseRequestedEventArgs const& args);
         void TabView_Loaded(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);

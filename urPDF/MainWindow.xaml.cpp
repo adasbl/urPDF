@@ -1026,6 +1026,56 @@ namespace winrt::urPDF::implementation
         return pdfTab;
     }
 
+    controls::TabViewItem MainWindow::AttachTab(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t index)
+    {
+        if (m_isClosed || m_isRendering || !pdfTab || !pdfTab->m_doc || !pdfTab->m_layoutLoaded
+            || pdfTab->m_documentId == 0 || pdfTab->m_runtime != m_runtime)
+        {
+            return nullptr;
+        }
+        if (std::any_of(m_openedTabs.begin(), m_openedTabs.end(),
+            [&](auto const& entry) { return entry.second == pdfTab; }))
+        {
+            return nullptr;
+        }
+
+        auto tabView = MainTabView();
+        auto items = tabView.TabItems();
+        auto emptyTab = m_openedTabs.empty() && items.Size() == 1
+            ? items.GetAt(0).try_as<controls::TabViewItem>() : nullptr;
+        const auto insertionIndex = static_cast<uint32_t>(std::clamp(index, 0, static_cast<int32_t>(items.Size())));
+
+        controls::TabViewItem tab;
+        tab.Header(winrt::box_value(pdfTab->m_fileName));
+        controls::SymbolIconSource icon;
+        icon.Symbol(controls::Symbol::Document);
+        tab.IconSource(icon);
+
+        // Inserting the first item can select it immediately, so save the outgoing
+        // view and register the document before changing the TabView collection.
+        SaveViewState(m_presentedTab.lock());
+        m_openedTabs.emplace(tab, pdfTab);
+        try
+        {
+            items.InsertAt(insertionIndex, tab);
+            // SelectionChanged rebuilds the layout and restores DocumentViewState.
+            tabView.SelectedItem(tab);
+        }
+        catch (...)
+        {
+            m_openedTabs.erase(tab);
+            uint32_t insertedIndex;
+            if (items.IndexOf(tab, insertedIndex)) { items.RemoveAt(insertedIndex); }
+            throw;
+        }
+
+        // A new window starts with one empty tab. Replace only that placeholder;
+        // keep explicitly opened empty tabs alongside existing documents.
+        uint32_t emptyIndex;
+        if (emptyTab && items.IndexOf(emptyTab, emptyIndex)) { items.RemoveAt(emptyIndex); }
+        return tab;
+    }
+
     void MainWindow::CloseTab(controls::TabViewItem const& tab)
     {
         if (!tab) { return; }
