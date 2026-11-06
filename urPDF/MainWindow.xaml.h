@@ -319,6 +319,7 @@ namespace winrt::urPDF::implementation
         int32_t m_pageCounter{ 0 };
         storage::StorageFile m_pendingFile{ nullptr };
         winrt::hstring m_pendingFilePath;
+        bool m_createInitialEmptyTab{ true };
         winrt::event<xaml::Data::PropertyChangedEventHandler> m_propertyChanged;
 
         xaml::Printing::PrintDocument m_printDocument{ nullptr };

@@ -422,7 +422,8 @@ namespace winrt::urPDF::implementation
     MainWindow::MainWindow(urpdf::WindowCreationOptions const& options)
         : m_runtime(xaml::Application::Current().as<App>()->MuPdfRuntime()),
           m_ctx(m_runtime->CloneContext()),
-          m_pendingFile(options.file), m_pendingFilePath(options.filePath)
+          m_pendingFile(options.file), m_pendingFilePath(options.filePath),
+          m_createInitialEmptyTab(options.createInitialEmptyTab)
     {
         InitializeComponent();
 
@@ -899,16 +900,17 @@ namespace winrt::urPDF::implementation
     void MainWindow::TabView_Loaded(foundation::IInspectable const& sender, xaml::RoutedEventArgs const&)
     {
         auto tabView = sender.as<controls::TabView>();
-        if (tabView.TabItems().Size() == 0) { TabView_AddButtonClick(tabView, nullptr); }
+        if (m_createInitialEmptyTab && tabView.TabItems().Size() == 0)
+        {
+            TabView_AddButtonClick(tabView, nullptr);
+        }
 
-        // The non-client input source is available after the window/TabView loads.
         if (!m_moveSizeInput)
         {
             const auto windowId = AppWindow().Id();
             auto input = winrt::Microsoft::UI::Input::InputNonClientPointerSource::GetForWindowId(windowId);
             if (input)
             {
-                // This input source does not support weak references/auto_revoke.
                 m_moveSizeInput = input;
                 auto weakApp = xaml::Application::Current().as<App>()->get_weak();
                 m_enteredMoveSizeToken = input.EnteredMoveSize(
@@ -1173,7 +1175,9 @@ namespace winrt::urPDF::implementation
         auto tab = tabs[0].try_as<controls::TabViewItem>();
         if (!CanTransferTab(tab, true)) { return; }
         auto app = xaml::Application::Current().as<App>();
-        auto window = app->CreateWindow();
+        urpdf::WindowCreationOptions options;
+        options.createInitialEmptyTab = false;
+        auto window = app->CreateWindow(options);
         app->TrackTearOutWindow(tab, window.AppWindow().Id());
         args.NewWindowId(window.AppWindow().Id());
     }
