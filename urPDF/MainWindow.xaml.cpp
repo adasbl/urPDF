@@ -1084,6 +1084,23 @@ namespace winrt::urPDF::implementation
         return pdfTab;
     }
 
+    bool MainWindow::DetachEmptyTab(controls::TabViewItem const& tab)
+    {
+        if (!CanDetachTab(tab) || m_openedTabs.contains(tab)) { return false; }
+
+        auto tabView = MainTabView();
+        uint32_t index;
+        if (!tabView.TabItems().IndexOf(tab, index)) { return false; }
+        if (tabView.SelectedItem() == tab)
+        {
+            CancelPendingZoomRender();
+            CancelPendingViewStateSave();
+            m_presentedTab.reset();
+        }
+        tabView.TabItems().RemoveAt(index);
+        return true;
+    }
+
     controls::TabViewItem MainWindow::AttachTab(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t index,
         controls::TabViewItem const& transferredTab)
     {
@@ -1134,17 +1151,14 @@ namespace winrt::urPDF::implementation
 
     controls::TabViewItem MainWindow::AttachEmptyTab(controls::TabViewItem const& tab, int32_t index)
     {
-        if (!tab || m_isClosed || m_isRendering || m_loadingTab || m_openedTabs.contains(tab)
-            || (m_viewStateGuard.IsPending() && !m_pendingLayoutViewSaveTab.expired()
-                && m_viewRestorePhase == ViewRestorePhase::None))
+        if (!tab || m_isClosed || m_isRendering || m_loadingTab || m_openedTabs.contains(tab) || (m_viewStateGuard.IsPending() && !m_pendingLayoutViewSaveTab.expired() && m_viewRestorePhase == ViewRestorePhase::None))
         {
             return nullptr;
         }
         auto tabView = MainTabView();
         auto items = tabView.TabItems();
         uint32_t existingIndex;
-        if (items.IndexOf(tab, existingIndex)
-            || xaml::Application::Current().as<App>()->FindWindowForTab(tab))
+        if (items.IndexOf(tab, existingIndex) || xaml::Application::Current().as<App>()->FindWindowForTab(tab))
         {
             return nullptr;
         }
@@ -1167,33 +1181,68 @@ namespace winrt::urPDF::implementation
 
     bool MainWindow::CanReceiveTabFrom(MainWindow& source, controls::TabViewItem const& tab)
     {
-        return &source != this && !m_isClosed && !m_isRendering && m_runtime == source.m_runtime
-            && source.m_openedTabs.contains(tab)
-            && !(m_viewStateGuard.IsPending() && !m_pendingLayoutViewSaveTab.expired()
-                && m_viewRestorePhase == ViewRestorePhase::None)
-            && source.CanTransferTab(tab, true);
+        if (&source == this || m_isClosed || m_isRendering || m_loadingTab || m_runtime != source.m_runtime || (m_viewStateGuard.IsPending() && !m_pendingLayoutViewSaveTab.expired() && m_viewRestorePhase == ViewRestorePhase::None) || !source.CanTransferTab(tab, true))
+        {
+            return false;
+        }
+
+        auto app = xaml::Application::Current().as<App>();
+        auto sourceWindow = app->FindWindowForTab(tab);
+        auto destinationWindow = app->FindWindow(AppWindow().Id());
+        return sourceWindow && get_self<MainWindow>(sourceWindow) == &source && destinationWindow && get_self<MainWindow>(destinationWindow) == this;
     }
 
     bool MainWindow::TransferTabFrom(MainWindow& source, controls::TabViewItem const& tab, int32_t index)
     {
         if (!CanReceiveTabFrom(source, tab)) { return false; }
+        auto sourceTabView = source.MainTabView();
         uint32_t originalIndex;
-        if (!source.MainTabView().TabItems().IndexOf(tab, originalIndex)) { return false; }
-        auto pdfTab = source.DetachTabForTransfer(tab, true);
-        if (!pdfTab) { return false; }
+        if (!sourceTabView.TabItems().IndexOf(tab, originalIndex)) { return false; }
+        auto originalSelection = sourceTabView.SelectedItem();
+        const bool isEmptyTab = !source.m_openedTabs.contains(tab);
+        std::shared_ptr<PdfTabInfo> pdfTab;
+        if (isEmptyTab)
+        {
+            if (!source.DetachEmptyTab(tab)) { return false; }
+        }
+        else
+        {
+            pdfTab = source.DetachTabForTransfer(tab, true);
+            if (!pdfTab) { return false; }
+        }
+
+        auto restoreSourceTab = [&]
+        {
+            if (pdfTab) { source.m_openedTabs.emplace(tab, pdfTab); }
+            try
+            {
+                sourceTabView.TabItems().InsertAt(originalIndex, tab);
+            }
+            catch (...)
+            {
+                if (pdfTab) { source.m_openedTabs.erase(tab); }
+                throw;
+            }
+            if (sourceTabView.SelectedItem() != originalSelection)
+            {
+                source.SaveViewState(source.m_presentedTab.lock());
+                sourceTabView.SelectedItem(originalSelection);
+            }
+        };
+
         controls::TabViewItem attached{ nullptr };
         try
         {
-            attached = AttachTab(pdfTab, index, tab);
+            attached = isEmptyTab ? AttachEmptyTab(tab, index) : AttachTab(pdfTab, index, tab);
         }
         catch (...)
         {
-            source.AttachTab(pdfTab, static_cast<int32_t>(originalIndex), tab);
+            restoreSourceTab();
             throw;
         }
         if (!attached)
         {
-            source.AttachTab(pdfTab, static_cast<int32_t>(originalIndex), tab);
+            restoreSourceTab();
             return false;
         }
         if (source.MainTabView().TabItems().Size() == 0)
