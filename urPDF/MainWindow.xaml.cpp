@@ -1132,6 +1132,39 @@ namespace winrt::urPDF::implementation
         return tab;
     }
 
+    controls::TabViewItem MainWindow::AttachEmptyTab(controls::TabViewItem const& tab, int32_t index)
+    {
+        if (!tab || m_isClosed || m_isRendering || m_loadingTab || m_openedTabs.contains(tab)
+            || (m_viewStateGuard.IsPending() && !m_pendingLayoutViewSaveTab.expired()
+                && m_viewRestorePhase == ViewRestorePhase::None))
+        {
+            return nullptr;
+        }
+        auto tabView = MainTabView();
+        auto items = tabView.TabItems();
+        uint32_t existingIndex;
+        if (items.IndexOf(tab, existingIndex)
+            || xaml::Application::Current().as<App>()->FindWindowForTab(tab))
+        {
+            return nullptr;
+        }
+        const auto insertionIndex = static_cast<uint32_t>(std::clamp(index, 0, static_cast<int32_t>(items.Size())));
+
+        SaveViewState(m_presentedTab.lock());
+        try
+        {
+            items.InsertAt(insertionIndex, tab);
+            tabView.SelectedItem(tab);
+        }
+        catch (...)
+        {
+            uint32_t insertedIndex;
+            if (items.IndexOf(tab, insertedIndex)) { items.RemoveAt(insertedIndex); }
+            throw;
+        }
+        return tab;
+    }
+
     bool MainWindow::CanReceiveTabFrom(MainWindow& source, controls::TabViewItem const& tab)
     {
         return &source != this && !m_isClosed && !m_isRendering && m_runtime == source.m_runtime

@@ -273,6 +273,7 @@ namespace winrt::urPDF::implementation
         void CloseIfEmpty();
         std::shared_ptr<PdfTabInfo> DetachTab(controls::TabViewItem const& tab);
         controls::TabViewItem AttachTab(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t index, controls::TabViewItem const& transferredTab = nullptr);
+        controls::TabViewItem AttachEmptyTab(controls::TabViewItem const& tab, int32_t index);
         void TabView_TabTearOutWindowRequested(controls::TabView const& sender, controls::TabViewTabTearOutWindowRequestedEventArgs const& args);
         void TabView_TabTearOutRequested(controls::TabView const& sender, controls::TabViewTabTearOutRequestedEventArgs const& args);
         void TabView_ExternalTornOutTabsDropping(controls::TabView const& sender, controls::TabViewExternalTornOutTabsDroppingEventArgs const& args);
