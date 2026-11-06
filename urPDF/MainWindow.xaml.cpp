@@ -858,7 +858,7 @@ namespace winrt::urPDF::implementation
             {
                 auto tab = item.try_as<controls::TabViewItem>();
                 if (!tab) { continue; }
-                if (tabView.CanTearOutTabs() && CanTransferTab(tab, true)) { continue; }
+                if (tabView.CanTearOutTabs() && m_openedTabs.contains(tab) && CanTransferTab(tab, true)) { continue; }
                 auto tabRect = toRect(tab);
                 if (!tabRect) { continue; }
 
@@ -1017,21 +1017,23 @@ namespace winrt::urPDF::implementation
 
     bool MainWindow::CanTransferTab(controls::TabViewItem const& tab, bool allowViewRestore)
     {
-        if (!tab || m_isClosed || m_isRendering) { return false; }
+        if (!tab || m_isClosed) { return false; }
+
+        auto tabView = MainTabView();
+        uint32_t index;
+        if (!tabView.TabItems().IndexOf(tab, index)) { return false; }
+        if (m_isRendering || m_loadingTab) { return false; }
 
         auto openedTab = m_openedTabs.find(tab);
-        if (openedTab == m_openedTabs.end()) { return false; }
+        if (openedTab == m_openedTabs.end()) { return true; }
         auto const& pdfTab = openedTab->second;
         const bool restoringSavedView = allowViewRestore && m_viewRestorePhase != ViewRestorePhase::None && m_pendingLayoutViewSaveTab.lock() == pdfTab;
-        if (!pdfTab->m_layoutLoaded || m_loadingTab == pdfTab
+        if (!pdfTab->m_layoutLoaded
             || (m_viewStateGuard.IsPending() && m_pendingLayoutViewSaveTab.lock() == pdfTab && !restoringSavedView))
         {
             return false;
         }
 
-        auto tabView = MainTabView();
-        uint32_t index;
-        if (!tabView.TabItems().IndexOf(tab, index)) { return false; }
         if (tabView.SelectedItem() == tab)
         {
             if (restoringSavedView) { return true; }
@@ -1051,6 +1053,7 @@ namespace winrt::urPDF::implementation
         if (!CanTransferTab(tab, allowViewRestore)) { return nullptr; }
 
         auto openedTab = m_openedTabs.find(tab);
+        if (openedTab == m_openedTabs.end()) { return nullptr; }
         auto pdfTab = openedTab->second;
         auto tabView = MainTabView();
         uint32_t index;
@@ -1132,6 +1135,7 @@ namespace winrt::urPDF::implementation
     bool MainWindow::CanReceiveTabFrom(MainWindow& source, controls::TabViewItem const& tab)
     {
         return &source != this && !m_isClosed && !m_isRendering && m_runtime == source.m_runtime
+            && source.m_openedTabs.contains(tab)
             && !(m_viewStateGuard.IsPending() && !m_pendingLayoutViewSaveTab.expired()
                 && m_viewRestorePhase == ViewRestorePhase::None)
             && source.CanTransferTab(tab, true);
@@ -1173,7 +1177,7 @@ namespace winrt::urPDF::implementation
         const auto tabs = args.Tabs();
         if (sender != MainTabView() || tabs.size() != 1) { return; }
         auto tab = tabs[0].try_as<controls::TabViewItem>();
-        if (!CanTransferTab(tab, true)) { return; }
+        if (!CanTransferTab(tab, true) || !m_openedTabs.contains(tab)) { return; }
         auto app = xaml::Application::Current().as<App>();
         urpdf::WindowCreationOptions options;
         options.createInitialEmptyTab = false;
