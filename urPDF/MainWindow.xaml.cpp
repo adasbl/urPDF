@@ -72,6 +72,18 @@ namespace
     constexpr auto ZoomRenderDebounce = std::chrono::milliseconds(200);
     constexpr auto DpiRenderDebounce = std::chrono::milliseconds(200);
 
+    template<typename Element>
+    Element FindVisualDescendant(xaml::DependencyObject const& parent, wchar_t const* name)
+    {
+        for (int32_t i = 0; i < media::VisualTreeHelper::GetChildrenCount(parent); ++i)
+        {
+            auto child = media::VisualTreeHelper::GetChild(parent, i);
+            if (auto element = child.try_as<Element>(); element && element.Name() == name) { return element; }
+            if (auto element = FindVisualDescendant<Element>(child, name)) { return element; }
+        }
+        return nullptr;
+    }
+
     std::filesystem::path ExecutableDirectory()
     {
         std::wstring path(MAX_PATH, L'\0');
@@ -488,6 +500,7 @@ namespace winrt::urPDF::implementation
         {
             if (auto self = weakThis.get())
             {
+                self->UpdateTabStripDropRegion();
                 self->UpdateTitleBarPassthroughRegions();
             }
         });
@@ -815,6 +828,70 @@ namespace winrt::urPDF::implementation
 
 
     // TABVIEW
+    void MainWindow::UpdateTabStripDropRegion()
+    {
+        auto tabView = MainTabView();
+        if (m_isClosed || !tabView.IsLoaded()) { return; }
+        auto list = FindVisualDescendant<controls::ListView>(tabView, L"TabListView");
+        if (!list) { return; }
+        auto grid = media::VisualTreeHelper::GetParent(list).try_as<controls::Grid>();
+        if (!grid || grid.ColumnDefinitions().Size() != 4 || controls::Grid::GetColumn(list) != 1) { return; }
+
+        xaml::FrameworkElement footer{ nullptr };
+        for (auto const& child : grid.Children())
+        {
+            if (auto element = child.try_as<xaml::FrameworkElement>(); element && element.Name() == L"RightContentPresenter")
+            {
+                footer = element;
+                break;
+            }
+        }
+        if (!footer) { return; }
+
+        auto columns = grid.ColumnDefinitions();
+        const double availableWidth = (std::max)(0.0, grid.ActualWidth() - columns.GetAt(0).ActualWidth()
+            - columns.GetAt(2).ActualWidth() - footer.DesiredSize().Width);
+        const auto padding = list.Padding();
+        auto presenter = FindVisualDescendant<controls::ItemsPresenter>(list, L"TabsItemsPresenter");
+        if (!presenter) { return; }
+        auto leadingSpacer = presenter.Header().try_as<xaml::FrameworkElement>();
+        auto trailingSpacer = presenter.Footer().try_as<xaml::FrameworkElement>();
+        const double leadingWidth = leadingSpacer ? leadingSpacer.ActualWidth() : 0.0;
+        const double trailingWidth = trailingSpacer ? trailingSpacer.ActualWidth() : 0.0;
+        double tabsWidth = padding.Left + padding.Right + leadingWidth + trailingWidth;
+        const auto listBounds = list.TransformToVisual(grid).TransformBounds(
+            { 0, 0, static_cast<float>(list.ActualWidth()), static_cast<float>(list.ActualHeight()) });
+        double tabsRight = listBounds.X + padding.Left;
+        for (auto const& item : tabView.TabItems())
+        {
+            if (auto tab = item.try_as<controls::TabViewItem>())
+            {
+                const auto margin = tab.Margin();
+                tabsWidth += tab.ActualWidth() + margin.Left + margin.Right;
+                if (tab.IsLoaded() && tab.ActualWidth() > 0)
+                {
+                    const auto bounds = tab.TransformToVisual(grid).TransformBounds(
+                        { 0, 0, static_cast<float>(tab.ActualWidth()), static_cast<float>(tab.ActualHeight()) });
+                    tabsRight = (std::max)(tabsRight, static_cast<double>(bounds.X + bounds.Width) + margin.Right);
+                }
+            }
+        }
+
+        const bool hasFreeSpace = tabsWidth + 0.5 < availableWidth;
+        const int32_t span = hasFreeSpace ? 3 : 1;
+        if (controls::Grid::GetColumnSpan(list) != span) { controls::Grid::SetColumnSpan(list, span); }
+        auto tabColumn = columns.GetAt(1);
+        if (tabColumn.MinWidth() != 0.0) { tabColumn.MinWidth(0.0); }
+        const double columnWidth = hasFreeSpace
+            ? std::clamp(tabsRight - listBounds.X + trailingWidth + padding.Right, 0.0, availableWidth)
+            : availableWidth;
+        const auto width = tabColumn.Width();
+        if (width.GridUnitType != xaml::GridUnitType::Pixel || std::abs(width.Value - columnWidth) > 0.25)
+        {
+            tabColumn.Width(xaml::GridLengthHelper::FromPixels(columnWidth));
+        }
+    }
+
     void MainWindow::UpdateTitleBarPassthroughRegions()
     {
         if (m_isClosed || !ExtendsContentIntoTitleBar()) { return; }

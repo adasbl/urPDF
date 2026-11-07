@@ -394,6 +394,7 @@ namespace winrt::urPDF::implementation
         void CancelPendingZoomRender();
         void AttachDpiObserver();
         void UpdateTitleBarPassthroughRegions();
+        void UpdateTabStripDropRegion();
         void DetachDpiObserver();
         void RequestDpiRefresh();
         void ApplyPendingDpiRefresh();
