@@ -220,10 +220,7 @@ namespace
         const double centerX = (scrollViewer.HorizontalOffset() + halfViewportWidth) / currentZoom;
         const double centerY = (scrollViewer.VerticalOffset() + halfViewportHeight) / currentZoom;
 
-        scrollViewer.ChangeView(
-            (std::max)(0.0, centerX * targetZoom - halfViewportWidth),
-            (std::max)(0.0, centerY * targetZoom - halfViewportHeight),
-            targetZoom);
+        scrollViewer.ChangeView( (std::max)(0.0, centerX * targetZoom - halfViewportWidth), (std::max)(0.0, centerY * targetZoom - halfViewportHeight), targetZoom);
     }
 
     std::size_t BitmapMemoryBytes(imaging::WriteableBitmap const& bitmap) noexcept
@@ -858,7 +855,7 @@ namespace winrt::urPDF::implementation
             {
                 auto tab = item.try_as<controls::TabViewItem>();
                 if (!tab) { continue; }
-                if (tabView.CanTearOutTabs() && m_openedTabs.contains(tab) && CanTransferTab(tab, true)) { continue; }
+                if (tabView.CanTearOutTabs() && CanTransferTab(tab, true)) { continue; }
                 auto tabRect = toRect(tab);
                 if (!tabRect) { continue; }
 
@@ -1259,7 +1256,7 @@ namespace winrt::urPDF::implementation
         const auto tabs = args.Tabs();
         if (sender != MainTabView() || tabs.size() != 1) { return; }
         auto tab = tabs[0].try_as<controls::TabViewItem>();
-        if (!CanTransferTab(tab, true) || !m_openedTabs.contains(tab)) { return; }
+        if (!CanTransferTab(tab, true)) { return; }
         auto app = xaml::Application::Current().as<App>();
         urpdf::WindowCreationOptions options;
         options.createInitialEmptyTab = false;
