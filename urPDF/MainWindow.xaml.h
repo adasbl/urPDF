@@ -223,8 +223,11 @@ namespace winrt::urPDF::implementation
     class PdfTabInfo
     {
     public:
-        PdfTabInfo(std::shared_ptr<urpdf::MuPdfRuntime> runtime, const std::string& filePath);
+        PdfTabInfo(std::shared_ptr<urpdf::MuPdfRuntime> runtime, std::string documentPath);
         ~PdfTabInfo();
+
+        // Worker thread only, with m_documentMutex held.
+        void OpenDocument();
 
         winrt::hstring m_openedFilePath;
         winrt::hstring m_fileName = L"unknown";
@@ -238,6 +241,7 @@ namespace winrt::urPDF::implementation
         std::shared_ptr<urpdf::MuPdfRuntime> m_runtime;
         urpdf::MuPdfRuntime::Context m_ctx;
         std::mutex m_documentMutex;
+        std::string m_documentPath;
         fz_document* m_doc{ nullptr };
         int m_pagecount{ 0 };
         bool m_layoutLoaded{ false };

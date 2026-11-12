@@ -598,10 +598,14 @@ namespace winrt::urPDF::implementation
 
 
     // PDFTABINFO
-    PdfTabInfo::PdfTabInfo(std::shared_ptr<urpdf::MuPdfRuntime> runtime, const std::string& filePath)
-        : m_runtime(std::move(runtime)), m_ctx(m_runtime->CloneContext())
+    PdfTabInfo::PdfTabInfo(std::shared_ptr<urpdf::MuPdfRuntime> runtime, std::string documentPath)
+        : m_runtime(std::move(runtime)), m_ctx(m_runtime->CloneContext()), m_documentPath(std::move(documentPath))
     {
-        m_doc = urpdf::OpenPdfDocument(m_ctx.get(), filePath.c_str());
+    }
+
+    void PdfTabInfo::OpenDocument()
+    {
+        if (!m_doc) { m_doc = urpdf::OpenPdfDocument(m_ctx.get(), m_documentPath.c_str()); }
     }
 
     PdfTabInfo::~PdfTabInfo()
@@ -1115,7 +1119,7 @@ namespace winrt::urPDF::implementation
     controls::TabViewItem MainWindow::AttachTab(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t index,
         controls::TabViewItem const& transferredTab)
     {
-        if (m_isClosed || m_isRendering || !pdfTab || !pdfTab->m_doc || !pdfTab->m_layoutLoaded
+        if (m_isClosed || m_isRendering || !pdfTab || !pdfTab->m_layoutLoaded || !pdfTab->m_doc
             || pdfTab->m_documentId == 0 || pdfTab->m_runtime != m_runtime)
         {
             return nullptr;
@@ -1603,6 +1607,8 @@ namespace winrt::urPDF::implementation
                     if (cancelled->load(std::memory_order_acquire)) { return result; }
                     urpdf::RunDocumentOperation(pdfTab->m_documentMutex, pdfTab->m_renderGeneration, generation, [&]
                         {
+                            if (cancelled->load(std::memory_order_acquire)) { return; }
+                            pdfTab->OpenDocument();
                             if (cancelled->load(std::memory_order_acquire)) { return; }
                             result.pagecount = urpdf::CountDocumentPages(context.get(), pdfTab->m_doc);
                             result.pageBounds = urpdf::CollectPageBounds(context.get(), pdfTab->m_doc, result.pagecount);
