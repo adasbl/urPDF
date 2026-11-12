@@ -1437,6 +1437,7 @@ namespace winrt::urPDF::implementation
 
     winrt::fire_and_forget MainWindow::EmptyTab_Drop(foundation::IInspectable const&, xaml::DragEventArgs const& args)
     {
+        auto strongThis = get_strong();
         auto deferral = args.GetDeferral();
         auto storageItems = co_await args.DataView().GetStorageItemsAsync();
 
@@ -1448,7 +1449,9 @@ namespace winrt::urPDF::implementation
             if (file && IsPdfFile(file))
             {
                 deferral.Complete();
-                OpenPdfFileAsync(file);
+                urpdf::WindowCreationOptions document;
+                document.file = file;
+                OpenDocument(document);
                 co_return;
             }
         }
@@ -1476,7 +1479,9 @@ namespace winrt::urPDF::implementation
         auto file = co_await PickPdfFileAsync();
         if (!file || m_isClosed) { co_return; }
 
-        OpenPdfFileAsync(file);
+        urpdf::WindowCreationOptions document;
+        document.file = file;
+        OpenDocument(document);
     }
 
     winrt::fire_and_forget MainWindow::OpenPdfInNewWindowAsync(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
