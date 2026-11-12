@@ -88,6 +88,14 @@ function DropInto([IntPtr] $Source, [string] $Name, [IntPtr] $Target) {
     Drag (Center (Find-Tab $Source $Name)) @([int]($last.X + $last.Width + 15), [int]($last.Y + $last.Height / 2))
 }
 
+# Drops onto the left edge of the target's tab at $Index, so the tab lands before it.
+function DropBefore([IntPtr] $Source, [string] $Name, [IntPtr] $Target, [int] $Index) {
+    [DragNative]::MoveWindow($Source, 400, 560, 700, 400, $true) | Out-Null
+    Start-Sleep -Milliseconds 700
+    $tab = @(Get-TabElements $Target)[$Index].Current.BoundingRectangle
+    Drag (Center (Find-Tab $Source $Name)) @([int]($tab.X + 8), [int]($tab.Y + $tab.Height / 2))
+}
+
 function AddEmptyTab([IntPtr] $Window) {
     $plus = [System.Windows.Automation.AutomationElement]::FromHandle($Window).FindFirst([System.Windows.Automation.TreeScope]::Descendants,
         (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::SplitButton)))
@@ -134,7 +142,7 @@ try {
         $last = @(Get-TabElements $w2)[-1].Current.BoundingRectangle
         Drag (Center (Find-Tab $w1 'Alpha.pdf')) @([int]($last.X + $last.Width + 15), [int]($last.Y + $last.Height / 2))
         $tabs2 = @(Get-TabNames $w2)
-        Record 'PDF dropped into window holding a single empty tab keeps that empty tab' (($tabs2 -contains 'Alpha.pdf') -and ($tabs2 -contains 'New tab')) (Describe)
+        Record 'PDF dropped into window holding a single empty tab keeps that empty tab' (($tabs2 -join ',') -eq 'New tab,Alpha.pdf') (Describe)
 
         $script:main.Refresh(); Record 'Process alive after PDF transfer' (!$script:main.HasExited) "windows=$((Get-AppWindows).Count)"
         AddEmptyTab $w1
@@ -143,8 +151,29 @@ try {
         try { DropInto $w1 'New tab' $w2 } catch { Record 'Empty-tab drop step' $false $_.Exception.Message }
         $script:main.Refresh(); Record 'Process alive after empty-tab transfer' (!$script:main.HasExited) "exit=$(if ($script:main.HasExited) { $script:main.ExitCode })"
         $tabs2 = @(Get-TabNames $w2)
-        Record 'Empty tab moved into existing window (no duplicates, source keeps PDF)' ((@($tabs2) -join ',') -eq 'Alpha.pdf,New tab' -and (@(Get-TabNames $w1) -join ',') -eq 'Gamma.pdf') (Describe)
+        Record 'Empty tab moved into existing window (no duplicates, source keeps PDF)' ((@($tabs2) -join ',') -eq 'New tab,Alpha.pdf,New tab' -and (@(Get-TabNames $w1) -join ',') -eq 'Gamma.pdf') (Describe)
     }
+
+    # A new window's startup tab and several empty tabs survive incoming PDFs.
+    Stop-Main | Out-Null
+    Set-OpenInExisting $false
+    Start-Main @(Quote $pdfA)
+    Wait-Until { (Get-AllTabNames) -contains 'Alpha.pdf' } | Out-Null
+    $w1 = @(Get-AppWindows)[0]
+    Start-Secondary @(Quote $pdfC) | Out-Null
+    Wait-Until { (Get-AllTabNames) -contains 'Gamma.pdf' } | Out-Null
+    $w2 = @(Get-AppWindows | Where-Object { $_ -ne $w1 })[0]
+    Start-Secondary @() | Out-Null
+    Wait-Until { (Get-AppWindows).Count -eq 3 } | Out-Null
+    $w3 = @(Get-AppWindows | Where-Object { $_ -ne $w1 -and $_ -ne $w2 })[0]
+    [DragNative]::MoveWindow($w3, 80, 60, 1000, 380, $true) | Out-Null
+    [DragNative]::MoveWindow($w2, 1100, 560, 700, 400, $true) | Out-Null
+    DropInto $w1 'Alpha.pdf' $w3
+    Record 'PDF dropped into a new window keeps its startup tab' ((@(Get-TabNames $w3) -join ',') -eq 'New tab,Alpha.pdf') (Describe)
+    AddEmptyTab $w3
+    DropBefore $w2 'Gamma.pdf' $w3 1
+    $ok = (@(Get-TabNames $w3) -join ',') -eq 'New tab,Gamma.pdf,Alpha.pdf,New tab' -and (Wait-Until { (Get-AppWindows).Count -eq 1 } 5)
+    Record 'PDF dropped between tabs lands at the drop index; all empty tabs stay' $ok (Describe)
 
     $exited = Stop-Main
     Record 'Process exits cleanly after drag scenarios' ($exited -and $script:main.ExitCode -eq 0) "exit $($script:main.ExitCode)"
