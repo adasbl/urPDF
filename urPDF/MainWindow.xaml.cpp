@@ -1446,21 +1446,18 @@ namespace winrt::urPDF::implementation
         auto storageItems = co_await args.DataView().GetStorageItemsAsync();
 
         EmptyTabDropHint().Visibility(xaml::Visibility::Collapsed);
+        deferral.Complete();
 
         for (auto const& item : storageItems)
         {
             auto file = item.try_as<storage::StorageFile>();
             if (file && IsPdfFile(file))
             {
-                deferral.Complete();
                 urpdf::WindowCreationOptions document;
                 document.file = file;
-                OpenDocument(document, targetTab);
-                co_return;
+                OpenDocument(document, std::exchange(targetTab, {}));
             }
         }
-
-        deferral.Complete();
     }
 
 
