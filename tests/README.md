@@ -50,7 +50,10 @@ restore the user settings they change and print a PASS/FAIL table.
 
 - `ActivationSmoke.ps1` starts urPDF the way File Explorer does: settings
   commands, the *Open files from File Explorer in an existing window* setting,
-  redirection to the running instance, busy windows and Unicode paths.
+  redirection to the running instance, busy windows and Unicode paths. It also
+  simulates a MuPDF initialization failure through the
+  `URPDF_SIMULATE_MUPDF_INIT_FAILURE` environment variable, which only Debug
+  builds read.
 - `DragSmoke.ps1` drags tabs with the real mouse: reordering, tear-out of PDF
   and empty tabs, and moving tabs between windows.
 

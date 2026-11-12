@@ -15,6 +15,19 @@ try {
     $process = Start-Process -FilePath $Executable -ArgumentList '--import-settings', (Quote $invalid) -PassThru -Wait
     Record '--import-settings rejects invalid value' ($process.ExitCode -ne 0) "exit $($process.ExitCode)"
 
+    # Debug builds simulate a MuPDF initialization failure when this variable is set.
+    $env:URPDF_SIMULATE_MUPDF_INIT_FAILURE = '1'
+    try { $failed = Start-Process -FilePath $Executable -PassThru }
+    finally { Remove-Item Env:URPDF_SIMULATE_MUPDF_INIT_FAILURE }
+    $shown = Wait-Until { $script:dialogs = @([SmokeNative]::Windows([uint32]$failed.Id, '#32770')); $script:dialogs.Count -ge 1 }
+    foreach ($dialog in $script:dialogs) { [SmokeNative]::PostMessage($dialog, 0x10, [UIntPtr]::Zero, [IntPtr]::Zero) | Out-Null }
+    $exited = $failed.WaitForExit(10000)
+    if (!$exited) { $failed.Kill() }
+    Record 'MuPDF initialization failure shows a message and exits with an error' ($shown -and $exited -and $failed.ExitCode -ne 0) "dialog=$shown; exit=$(if ($exited) { $failed.ExitCode })"
+    Start-Main @(Quote $pdfA)
+    Record 'Launch after a failed initialization becomes the main instance' (Wait-Until { (Get-AllTabNames) -contains 'Alpha.pdf' }) ((Get-AllTabNames) -join ', ')
+    Stop-Main | Out-Null
+
     # Setting disabled: every activation gets its own window in the same process.
     Set-OpenInExisting $false
     Start-Main @(Quote $pdfA)
