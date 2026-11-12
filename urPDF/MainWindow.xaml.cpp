@@ -1192,8 +1192,6 @@ namespace winrt::urPDF::implementation
 
         auto tabView = MainTabView();
         auto items = tabView.TabItems();
-        auto emptyTab = m_openedTabs.empty() && items.Size() == 1
-            ? items.GetAt(0).try_as<controls::TabViewItem>() : nullptr;
         const auto insertionIndex = static_cast<uint32_t>(std::clamp(index, 0, static_cast<int32_t>(items.Size())));
 
         auto tab = transferredTab ? transferredTab : controls::TabViewItem();
@@ -1218,9 +1216,6 @@ namespace winrt::urPDF::implementation
             if (items.IndexOf(tab, insertedIndex)) { items.RemoveAt(insertedIndex); }
             throw;
         }
-
-        uint32_t emptyIndex;
-        if (emptyTab && items.IndexOf(emptyTab, emptyIndex)) { items.RemoveAt(emptyIndex); }
         return tab;
     }
 
