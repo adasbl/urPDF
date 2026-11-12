@@ -62,15 +62,21 @@ namespace
             Drain();
         }
 
-        // UI thread. Activations still queued are dropped.
+        // UI thread. Activations queued now or posted later stay pending until TakePending().
         void Detach() noexcept
         {
             {
                 std::scoped_lock lock{ m_mutex };
                 m_dispatcher = nullptr;
-                m_pending.clear();
             }
             m_handler = nullptr;
+        }
+
+        // Any thread.
+        std::deque<lifecycle::AppActivationArguments> TakePending()
+        {
+            std::scoped_lock lock{ m_mutex };
+            return std::exchange(m_pending, {});
         }
 
     private:
@@ -187,6 +193,66 @@ namespace
         }
         if (path) { documents.emplace_back().filePath = winrt::hstring{ *path }; }
         return documents;
+    }
+
+    void StartUrPdfProcess(std::wstring const& executable, std::wstring_view document)
+    {
+        std::wstring commandLine = L"\"" + executable + L"\"";
+        if (!document.empty())
+        {
+            commandLine += L" \"";
+            commandLine += document;
+            commandLine += L"\"";
+        }
+        STARTUPINFOW startupInfo{};
+        startupInfo.cb = sizeof(startupInfo);
+        PROCESS_INFORMATION processInfo{};
+        winrt::check_bool(::CreateProcessW(executable.c_str(), commandLine.data(), nullptr, nullptr, FALSE, 0,
+            nullptr, nullptr, &startupInfo, &processInfo));
+        ::CloseHandle(processInfo.hThread);
+        ::CloseHandle(processInfo.hProcess);
+    }
+
+    // An activation redirected just before the last window closed reaches this process when it
+    // can no longer open windows, and the redirecting process has already exited. Hand each such
+    // activation to a new urPDF process, which becomes the main instance.
+    void RelaunchUnhandledActivations() noexcept
+    {
+        try
+        {
+            auto pending = Activations().TakePending();
+            if (pending.empty()) { return; }
+
+            std::wstring executable(32768, L'\0');
+            const DWORD length = ::GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+            if (length == 0 || length >= executable.size()) { return; }
+            executable.resize(length);
+
+            for (auto const& args : pending)
+            {
+                try
+                {
+                    auto documents = DocumentsFromActivation(args, false);
+                    if (documents.empty())
+                    {
+                        StartUrPdfProcess(executable, {});
+                        continue;
+                    }
+                    for (auto const& document : documents)
+                    {
+                        StartUrPdfProcess(executable, document.file ? document.file.Path() : document.filePath);
+                    }
+                }
+                catch (...)
+                {
+                    OutputDebugStringW(L"urPDF: failed to relaunch a redirected activation.\n");
+                }
+            }
+        }
+        catch (...)
+        {
+            OutputDebugStringW(L"urPDF: failed to relaunch redirected activations.\n");
+        }
     }
 }
 
@@ -457,6 +523,7 @@ int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         throw;
     }
     StopReceivingActivations(activatedToken);
+    RelaunchUnhandledActivations();
     runtime->Work().Stop();
     runtime->Work().Wait();
 
