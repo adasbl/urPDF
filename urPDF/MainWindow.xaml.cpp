@@ -406,6 +406,7 @@ namespace winrt::urPDF::implementation
         }
         if (m_loadingTab) { ++m_loadingTab->m_renderGeneration; }
         m_loadingTab.reset();
+        m_loadingTargetTab.reset();
         m_openedTabs.clear();
         m_pendingOpens.clear();
         m_ctx.reset();
@@ -434,7 +435,7 @@ namespace winrt::urPDF::implementation
           m_ctx(m_runtime->CloneContext()),
           m_createInitialEmptyTab(options.createInitialEmptyTab)
     {
-        if (options.file || !options.filePath.empty()) { m_pendingOpens.push_back(options); }
+        if (options.file || !options.filePath.empty()) { m_pendingOpens.push_back({ options }); }
         InitializeComponent();
 
         m_zoomRenderTimer = DispatcherQueue().CreateTimer();
@@ -1439,6 +1440,9 @@ namespace winrt::urPDF::implementation
     {
         auto strongThis = get_strong();
         auto deferral = args.GetDeferral();
+        // The drop zone is the start screen of the selected empty tab.
+        winrt::weak_ref<controls::TabViewItem> targetTab;
+        if (auto selectedTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>()) { targetTab = winrt::make_weak(selectedTab); }
         auto storageItems = co_await args.DataView().GetStorageItemsAsync();
 
         EmptyTabDropHint().Visibility(xaml::Visibility::Collapsed);
@@ -1451,7 +1455,7 @@ namespace winrt::urPDF::implementation
                 deferral.Complete();
                 urpdf::WindowCreationOptions document;
                 document.file = file;
-                OpenDocument(document);
+                OpenDocument(document, targetTab);
                 co_return;
             }
         }
@@ -1476,12 +1480,15 @@ namespace winrt::urPDF::implementation
     winrt::fire_and_forget MainWindow::OpenPdfFileAsync(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
     {
         auto strongThis = get_strong();
+        auto selectedTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
+        winrt::weak_ref<controls::TabViewItem> targetTab;
+        if (selectedTab && !m_openedTabs.contains(selectedTab)) { targetTab = winrt::make_weak(selectedTab); }
         auto file = co_await PickPdfFileAsync();
         if (!file || m_isClosed) { co_return; }
 
         urpdf::WindowCreationOptions document;
         document.file = file;
-        OpenDocument(document);
+        OpenDocument(document, targetTab);
     }
 
     winrt::fire_and_forget MainWindow::OpenPdfInNewWindowAsync(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
@@ -1540,7 +1547,7 @@ namespace winrt::urPDF::implementation
 
     // Resolves a queued path; the resolved file goes back to the front of the queue so that
     // requests keep their order even if the window became busy in the meantime.
-    winrt::fire_and_forget MainWindow::OpenPdfPathAsync(winrt::hstring path)
+    winrt::fire_and_forget MainWindow::OpenPdfPathAsync(PendingDocumentOpen request)
     {
         auto strongThis = get_strong();
         m_isResolvingPendingOpen = true;
@@ -1549,7 +1556,7 @@ namespace winrt::urPDF::implementation
         winrt::hstring errorMessage;
         try
         {
-            file = co_await storage::StorageFile::GetFileFromPathAsync(path);
+            file = co_await storage::StorageFile::GetFileFromPathAsync(request.document.filePath);
             if (!IsPdfFile(file))
             {
                 throw winrt::hresult_error(E_INVALIDARG, L"Please select a PDF document.");
@@ -1568,17 +1575,17 @@ namespace winrt::urPDF::implementation
         }
         else
         {
-            urpdf::WindowCreationOptions document;
-            document.file = file;
-            m_pendingOpens.push_front(std::move(document));
+            request.document.file = file;
+            m_pendingOpens.push_front(std::move(request));
         }
         ProcessPendingOpens();
     }
 
-    void MainWindow::OpenDocument(urpdf::WindowCreationOptions const& document)
+    void MainWindow::OpenDocument(urpdf::WindowCreationOptions const& document,
+        std::optional<winrt::weak_ref<controls::TabViewItem>> targetTab)
     {
         if (m_isClosed || (!document.file && document.filePath.empty())) { return; }
-        m_pendingOpens.push_back(document);
+        m_pendingOpens.push_back({ document, std::move(targetTab) });
         ProcessPendingOpens();
     }
 
@@ -1586,15 +1593,15 @@ namespace winrt::urPDF::implementation
     {
         while (!m_isClosed && m_isTabViewLoaded && !m_isRendering && !m_loadingTab && !m_isResolvingPendingOpen && !m_pendingOpens.empty())
         {
-            auto document = std::move(m_pendingOpens.front());
+            auto request = std::move(m_pendingOpens.front());
             m_pendingOpens.pop_front();
-            if (document.file)
+            if (request.document.file)
             {
-                OpenPdfFileAsync(document.file);
+                OpenPdfFileAsync(std::move(request));
             }
             else
             {
-                OpenPdfPathAsync(document.filePath);
+                OpenPdfPathAsync(std::move(request));
             }
         }
     }
@@ -1631,8 +1638,9 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    void MainWindow::OpenPdfFileAsync(storage::StorageFile const& file)
+    void MainWindow::OpenPdfFileAsync(PendingDocumentOpen request)
     {
+        auto const& file = request.document.file;
         if (!TryAcquireRenderingLock()) { return; }
         winrt::hstring errorMessage;
         try
@@ -1646,6 +1654,7 @@ namespace winrt::urPDF::implementation
             const auto openStartedAt = std::chrono::steady_clock::now();
             auto pdfTab = std::make_shared<PdfTabInfo>(m_runtime, winrt::to_string(file.Path()));
             m_loadingTab = pdfTab;
+            m_loadingTargetTab = std::move(request.targetTab);
             pdfTab->m_renderMetrics.openStartedAt = openStartedAt;
             pdfTab->m_documentId = xaml::Application::Current().as<App>()->AllocateDocumentId();
             pdfTab->m_fileName = file.Name();
@@ -1688,6 +1697,7 @@ namespace winrt::urPDF::implementation
         {
             errorMessage = CurrentOpenErrorMessage();
             m_loadingTab.reset();
+            m_loadingTargetTab.reset();
             ReleaseRenderingLock();
         }
         if (!errorMessage.empty()) { ShowOpenErrorAsync(errorMessage); }
@@ -1698,6 +1708,7 @@ namespace winrt::urPDF::implementation
     {
         if (m_isClosed || m_loadingTab != pdfTab) { return; }
         m_loadingTab.reset();
+        auto requestedTarget = std::exchange(m_loadingTargetTab, std::nullopt);
         if (pdfTab->m_renderGeneration.load(std::memory_order_acquire) != generation)
         {
             ReleaseRenderingLock();
@@ -1719,18 +1730,24 @@ namespace winrt::urPDF::implementation
             pdfTab->m_renderedPages = std::move(slots);
             pdfTab->m_layoutLoaded = true;
 
-            auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
-            const bool isCurrentTabEmpty = currentTab && !m_openedTabs.contains(currentTab);
-            auto targetTab = isCurrentTabEmpty ? currentTab : controls::TabViewItem();
-            if (isCurrentTabEmpty)
+            auto targetTab = requestedTarget
+                ? requestedTarget->get()
+                : MainTabView().SelectedItem().try_as<controls::TabViewItem>();
+            uint32_t targetIndex;
+            if (targetTab && (m_openedTabs.contains(targetTab) || !MainTabView().TabItems().IndexOf(targetTab, targetIndex)))
+            {
+                targetTab = nullptr;
+            }
+            if (targetTab)
             {
                 targetTab.Content(nullptr);
             }
             else
             {
+                targetTab = controls::TabViewItem();
                 MainTabView().TabItems().Append(targetTab);
-                MainTabView().SelectedItem(targetTab);
             }
+            if (MainTabView().SelectedItem() != targetTab) { MainTabView().SelectedItem(targetTab); }
             loadingTabItem = targetTab;
             SaveViewState(m_presentedTab.lock());
             targetTab.Header(winrt::box_value(pdfTab->m_fileName));

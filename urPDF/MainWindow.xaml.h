@@ -251,6 +251,15 @@ namespace winrt::urPDF::implementation
     };
 
 
+    struct PendingDocumentOpen
+    {
+        urpdf::WindowCreationOptions document;
+        // Without a value the document fills the empty tab selected when loading completes.
+        // With a value it fills that tab if it is still empty and in this window, or opens a new tab.
+        std::optional<winrt::weak_ref<controls::TabViewItem>> targetTab;
+    };
+
+
     struct MainWindow : MainWindowT<MainWindow>
     {
         MainWindow();
@@ -268,9 +277,8 @@ namespace winrt::urPDF::implementation
 
         winrt::fire_and_forget OpenPdfFileAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         winrt::fire_and_forget OpenPdfInNewWindowAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
-        void OpenPdfFileAsync(storage::StorageFile const& file);
-        winrt::fire_and_forget OpenPdfPathAsync(winrt::hstring path);        
-        void OpenDocument(urpdf::WindowCreationOptions const& document);
+        void OpenDocument(urpdf::WindowCreationOptions const& document,
+            std::optional<winrt::weak_ref<controls::TabViewItem>> targetTab = std::nullopt);
         void BringToFront();
         bool CanDetachTab(controls::TabViewItem const& tab);
         void CloseIfEmpty();
@@ -310,6 +318,8 @@ namespace winrt::urPDF::implementation
 
     private:
         foundation::IAsyncOperation<storage::StorageFile> PickPdfFileAsync();
+        void OpenPdfFileAsync(PendingDocumentOpen request);
+        winrt::fire_and_forget OpenPdfPathAsync(PendingDocumentOpen request);
         winrt::fire_and_forget ShowOpenErrorAsync(winrt::hstring message);
         controls::ContentDialog m_openErrorDialog{ nullptr };
         std::list<winrt::hstring> m_openErrorMessages;
@@ -318,11 +328,12 @@ namespace winrt::urPDF::implementation
         urpdf::MuPdfRuntime::Context m_ctx;
         std::map<controls::TabViewItem, std::shared_ptr<PdfTabInfo>> m_openedTabs;
         std::shared_ptr<PdfTabInfo> m_loadingTab;
+        std::optional<winrt::weak_ref<controls::TabViewItem>> m_loadingTargetTab;
         std::shared_ptr<std::atomic<bool>> m_workCancelled{ std::make_shared<std::atomic<bool>>(false) };
         std::weak_ptr<PdfTabInfo> m_presentedTab;
         int32_t m_pageNumber{ 0 };
         int32_t m_pageCounter{ 0 };
-        std::deque<urpdf::WindowCreationOptions> m_pendingOpens;
+        std::deque<PendingDocumentOpen> m_pendingOpens;
         bool m_isTabViewLoaded{ false };
         bool m_isResolvingPendingOpen{ false };
         bool m_pendingOpensQueued{ false };
