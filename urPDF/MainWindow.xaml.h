@@ -22,6 +22,7 @@ extern "C" {
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <exception>
 #include <functional>
 #include <list>
@@ -321,8 +322,10 @@ namespace winrt::urPDF::implementation
         std::weak_ptr<PdfTabInfo> m_presentedTab;
         int32_t m_pageNumber{ 0 };
         int32_t m_pageCounter{ 0 };
-        storage::StorageFile m_pendingFile{ nullptr };
-        winrt::hstring m_pendingFilePath;
+        std::deque<urpdf::WindowCreationOptions> m_pendingOpens;
+        bool m_isTabViewLoaded{ false };
+        bool m_isResolvingPendingOpen{ false };
+        bool m_pendingOpensQueued{ false };
         bool m_createInitialEmptyTab{ true };
         winrt::event<xaml::Data::PropertyChangedEventHandler> m_propertyChanged;
 
@@ -391,6 +394,8 @@ namespace winrt::urPDF::implementation
         void ScrollToPage(int32_t page);
         bool TryAcquireRenderingLock();
         void ReleaseRenderingLock();
+        void ProcessPendingOpens();
+        void SchedulePendingOpens();
         void UpdateRenderZoom(std::shared_ptr<PdfTabInfo> const& pdfTab, double zoom, bool isIntermediate);
         void ApplyPendingRenderZoom();
         void CancelPendingZoomRender();

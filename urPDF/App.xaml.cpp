@@ -244,11 +244,20 @@ namespace winrt::urPDF::implementation
     {
         if (::urpdf::AppSettings::Instance().Get().openFilesInExistingWindow)
         {
-            if (auto window = LastActiveWindow())
+            auto next = documents.begin();
+            auto window = LastActiveWindow();
+            if (window)
+            {
+                get_self<MainWindow>(window)->BringToFront();
+            }
+            else if (next != documents.end())
+            {
+                window = CreateWindow(*next++);
+            }
+            if (window)
             {
                 auto target = get_self<MainWindow>(window);
-                target->BringToFront();
-                for (auto const& document : documents) { target->OpenDocument(document); }
+                for (; next != documents.end(); ++next) { target->OpenDocument(*next); }
                 return;
             }
         }

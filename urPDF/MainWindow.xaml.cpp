@@ -407,6 +407,7 @@ namespace winrt::urPDF::implementation
         if (m_loadingTab) { ++m_loadingTab->m_renderGeneration; }
         m_loadingTab.reset();
         m_openedTabs.clear();
+        m_pendingOpens.clear();
         m_ctx.reset();
         m_runtime.reset();
         try { if (m_openErrorDialog) { m_openErrorDialog.Hide(); } } catch (...) {}
@@ -431,9 +432,9 @@ namespace winrt::urPDF::implementation
     MainWindow::MainWindow(urpdf::WindowCreationOptions const& options)
         : m_runtime(xaml::Application::Current().as<App>()->MuPdfRuntime()),
           m_ctx(m_runtime->CloneContext()),
-          m_pendingFile(options.file), m_pendingFilePath(options.filePath),
           m_createInitialEmptyTab(options.createInitialEmptyTab)
     {
+        if (options.file || !options.filePath.empty()) { m_pendingOpens.push_back(options); }
         InitializeComponent();
 
         m_zoomRenderTimer = DispatcherQueue().CreateTimer();
@@ -1008,16 +1009,8 @@ namespace winrt::urPDF::implementation
             }
         }
 
-        if (m_pendingFile)
-        {
-            auto file = m_pendingFile;
-            m_pendingFile = nullptr;
-            OpenPdfFileAsync(file);
-        }
-        else if (!m_pendingFilePath.empty())
-        {
-            OpenPdfPathAsync(std::exchange(m_pendingFilePath, {}));
-        }
+        m_isTabViewLoaded = true;
+        ProcessPendingOpens();
     }
 
     void MainWindow::TabView_AddButtonClick(foundation::IInspectable const&, foundation::IInspectable const&)
@@ -1545,9 +1538,12 @@ namespace winrt::urPDF::implementation
         m_openErrorMessages.clear();
     }
 
+    // Resolves a queued path; the resolved file goes back to the front of the queue so that
+    // requests keep their order even if the window became busy in the meantime.
     winrt::fire_and_forget MainWindow::OpenPdfPathAsync(winrt::hstring path)
     {
         auto strongThis = get_strong();
+        m_isResolvingPendingOpen = true;
 
         storage::StorageFile file{ nullptr };
         winrt::hstring errorMessage;
@@ -1564,27 +1560,56 @@ namespace winrt::urPDF::implementation
             errorMessage = CurrentOpenErrorMessage();
         }
 
+        m_isResolvingPendingOpen = false;
+        if (m_isClosed) { co_return; }
         if (!errorMessage.empty())
         {
             ShowOpenErrorAsync(errorMessage);
         }
-        else if (!m_isClosed)
+        else
         {
-            OpenPdfFileAsync(file);
+            urpdf::WindowCreationOptions document;
+            document.file = file;
+            m_pendingOpens.push_front(std::move(document));
         }
+        ProcessPendingOpens();
     }
 
     void MainWindow::OpenDocument(urpdf::WindowCreationOptions const& document)
     {
-        if (m_isClosed) { return; }
-        if (document.file)
+        if (m_isClosed || (!document.file && document.filePath.empty())) { return; }
+        m_pendingOpens.push_back(document);
+        ProcessPendingOpens();
+    }
+
+    void MainWindow::ProcessPendingOpens()
+    {
+        while (!m_isClosed && m_isTabViewLoaded && !m_isRendering && !m_loadingTab && !m_isResolvingPendingOpen && !m_pendingOpens.empty())
         {
-            OpenPdfFileAsync(document.file);
+            auto document = std::move(m_pendingOpens.front());
+            m_pendingOpens.pop_front();
+            if (document.file)
+            {
+                OpenPdfFileAsync(document.file);
+            }
+            else
+            {
+                OpenPdfPathAsync(document.filePath);
+            }
         }
-        else if (!document.filePath.empty())
-        {
-            OpenPdfPathAsync(document.filePath);
-        }
+    }
+
+    void MainWindow::SchedulePendingOpens()
+    {
+        if (m_isClosed || m_pendingOpensQueued || m_pendingOpens.empty()) { return; }
+        m_pendingOpensQueued = DispatcherQueue().TryEnqueue(dispatching::DispatcherQueuePriority::Low,
+            [weakThis = get_weak()]
+            {
+                auto self = weakThis.get();
+                if (!self) { return; }
+                self->m_pendingOpensQueued = false;
+                self->ProcessPendingOpens();
+            });
     }
 
     void MainWindow::BringToFront()
@@ -2239,6 +2264,7 @@ namespace winrt::urPDF::implementation
         ZoomOutButton().IsEnabled(true);
         RotateButton().IsEnabled(true);
         if (m_dpiRefreshPending) { RequestDpiRefresh(); }
+        SchedulePendingOpens();
     }
 
     void MainWindow::RebuildPagesContainer(std::shared_ptr<PdfTabInfo> const& pdfTab, std::vector<PageSlot> const& pages, urpdf::ViewStateGuard::Operation operation)
