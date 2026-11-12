@@ -9,9 +9,12 @@
 #include <cstdlib>
 #include <algorithm>
 #include <deque>
+#include <exception>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -30,6 +33,33 @@ namespace
     namespace dispatching = winrt::Microsoft::UI::Dispatching;
 
     constexpr wchar_t MainInstanceKey[] = L"main";
+    constexpr int StartupFailedExitCode = 1;
+
+    std::shared_ptr<urpdf::MuPdfRuntime> CreateMuPdfRuntime()
+    {
+#ifdef _DEBUG
+        // Lets the smoke tests simulate a MuPDF initialization failure.
+        if (::GetEnvironmentVariableW(L"URPDF_SIMULATE_MUPDF_INIT_FAILURE", nullptr, 0) > 0)
+        {
+            throw std::runtime_error("Simulated MuPDF initialization failure.");
+        }
+#endif
+        return std::make_shared<urpdf::MuPdfRuntime>();
+    }
+
+    // Call from a catch block.
+    void ReportStartupError() noexcept
+    {
+        std::wstring details;
+        try { throw; }
+        catch (std::exception const& error) { details = winrt::to_hstring(error.what()); }
+        catch (...) {}
+
+        std::wstring message = L"urPDF could not start because the PDF engine failed to initialize.";
+        if (!details.empty()) { message += L"\n\n" + details; }
+        OutputDebugStringW((L"urPDF: " + message + L"\n").c_str());
+        ::MessageBoxW(nullptr, message.c_str(), L"urPDF", MB_OK | MB_ICONERROR);
+    }
 
     // Buffers activations redirected to the main instance. AppInstance::Activated is raised
     // on a background thread and may arrive before the UI is ready, so activations are queued
@@ -486,6 +516,19 @@ int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         return *exitCode;
     }
 
+    // Created before this process can become the main instance, so a process that cannot
+    // open documents never receives activations.
+    std::shared_ptr<urpdf::MuPdfRuntime> runtime;
+    try
+    {
+        runtime = CreateMuPdfRuntime();
+    }
+    catch (...)
+    {
+        ReportStartupError();
+        return StartupFailedExitCode;
+    }
+
     bool redirected = false;
     try { redirected = RedirectActivationToMainInstance(__argc, __wargv); }
     catch (...) { OutputDebugStringW(L"urPDF: failed to redirect activation to the main instance.\n"); }
@@ -506,7 +549,6 @@ int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         OutputDebugStringW(L"urPDF: failed to register as the main instance.\n");
     }
 
-    auto runtime = std::make_shared<urpdf::MuPdfRuntime>();
     try
     {
         Application::Start(
