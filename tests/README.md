@@ -17,7 +17,9 @@ cleanup after MuPDF errors. Restore the application's vcpkg dependencies before
 building this project; `urPDF.UnitTests` remains independent of MuPDF.
 The runtime tests also open a one-page PDF and verify document/context cleanup
 after window ownership is released and after a MuPDF error, without executing
-the queued UI callback.
+the queued UI callback. Document loading tests open a PDF from a path with Polish
+characters in tracked background work, as a tab does, and check open errors and
+shutdown while a document is loading.
 
 ## Visual Studio
 
