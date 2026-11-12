@@ -14,6 +14,6 @@ namespace urpdf
     std::optional<std::wstring> DocumentPathFromLaunchArguments(std::wstring_view arguments);
 
     // True when argv names a document by a path relative to the current directory.
-    // Such a launch must stay in its own process instead of being redirected.
+    // Such a launch must not be redirected as is; the path has to be made absolute first.
     bool HasRelativeDocumentPathArgument(int argc, wchar_t const* const* argv);
 }

@@ -140,14 +140,50 @@ namespace
         return activations;
     }
 
+    std::optional<std::wstring> CurrentExecutablePath()
+    {
+        std::wstring executable(32768, L'\0');
+        const DWORD length = ::GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+        if (length == 0 || length >= executable.size()) { return std::nullopt; }
+        executable.resize(length);
+        return executable;
+    }
+
+    void StartUrPdfProcess(std::wstring const& executable, std::wstring_view document)
+    {
+        std::wstring commandLine = L"\"" + executable + L"\"";
+        if (!document.empty())
+        {
+            commandLine += L" \"";
+            commandLine += document;
+            commandLine += L"\"";
+        }
+        STARTUPINFOW startupInfo{};
+        startupInfo.cb = sizeof(startupInfo);
+        PROCESS_INFORMATION processInfo{};
+        winrt::check_bool(::CreateProcessW(executable.c_str(), commandLine.data(), nullptr, nullptr, FALSE, 0,
+            nullptr, nullptr, &startupInfo, &processInfo));
+        ::CloseHandle(processInfo.hThread);
+        ::CloseHandle(processInfo.hProcess);
+    }
+
     // Returns true when the activation was handed to the running main instance and this
     // process should exit.
     bool RedirectActivationToMainInstance(int argc, wchar_t const* const* argv)
     {
         auto mainInstance = lifecycle::AppInstance::FindOrRegisterForKey(MainInstanceKey);
         if (mainInstance.IsCurrent()) { return false; }
-        // The main instance would resolve a relative path against its own working directory.
-        if (urpdf::HasRelativeDocumentPathArgument(argc, argv)) { return false; }
+        // The main instance would resolve a relative path against its own working directory,
+        // so start a process with the absolute path, which then redirects as usual.
+        if (urpdf::HasRelativeDocumentPathArgument(argc, argv))
+        {
+            auto path = urpdf::DocumentPathArgument(argc, argv);
+            auto executable = CurrentExecutablePath();
+            if (!path || !executable) { return false; }
+            ::AllowSetForegroundWindow(mainInstance.ProcessId());
+            StartUrPdfProcess(*executable, *path);
+            return true;
+        }
 
         auto activationArgs = lifecycle::AppInstance::GetCurrent().GetActivatedEventArgs();
         ::AllowSetForegroundWindow(mainInstance.ProcessId());
@@ -226,24 +262,6 @@ namespace
         return documents;
     }
 
-    void StartUrPdfProcess(std::wstring const& executable, std::wstring_view document)
-    {
-        std::wstring commandLine = L"\"" + executable + L"\"";
-        if (!document.empty())
-        {
-            commandLine += L" \"";
-            commandLine += document;
-            commandLine += L"\"";
-        }
-        STARTUPINFOW startupInfo{};
-        startupInfo.cb = sizeof(startupInfo);
-        PROCESS_INFORMATION processInfo{};
-        winrt::check_bool(::CreateProcessW(executable.c_str(), commandLine.data(), nullptr, nullptr, FALSE, 0,
-            nullptr, nullptr, &startupInfo, &processInfo));
-        ::CloseHandle(processInfo.hThread);
-        ::CloseHandle(processInfo.hProcess);
-    }
-
     // An activation redirected just before the last window closed reaches this process when it
     // can no longer open windows, and the redirecting process has already exited. Hand each such
     // activation to a new urPDF process, which becomes the main instance.
@@ -254,10 +272,8 @@ namespace
             auto pending = Activations().TakePending();
             if (pending.empty()) { return; }
 
-            std::wstring executable(32768, L'\0');
-            const DWORD length = ::GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
-            if (length == 0 || length >= executable.size()) { return; }
-            executable.resize(length);
+            auto executable = CurrentExecutablePath();
+            if (!executable) { return; }
 
             for (auto const& args : pending)
             {
@@ -266,12 +282,12 @@ namespace
                     auto documents = DocumentsFromActivation(args, false);
                     if (documents.empty())
                     {
-                        StartUrPdfProcess(executable, {});
+                        StartUrPdfProcess(*executable, {});
                         continue;
                     }
                     for (auto const& document : documents)
                     {
-                        StartUrPdfProcess(executable, document.file ? document.file.Path() : document.filePath);
+                        StartUrPdfProcess(*executable, document.file ? document.file.Path() : document.filePath);
                     }
                 }
                 catch (...)

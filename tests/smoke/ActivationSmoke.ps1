@@ -54,6 +54,10 @@ try {
     $exit = Start-Secondary @(Quote $pdfB)
     $ok = Wait-Until { (Get-AllTabNames) -contains (Split-Path $pdfB -Leaf) }
     Record 'On: file with spaces and Polish characters opens as tab in existing window' ($ok -and (Get-AppWindows).Count -eq 1) "windows=$((Get-AppWindows).Count); tabs=$((Get-AllTabNames) -join ', ')"
+    New-PdfFixture (Join-Path $fixtures 'Relative.pdf')
+    $relative = Start-Process -FilePath $Executable -ArgumentList 'Relative.pdf' -WorkingDirectory $fixtures -PassThru
+    $ok = $relative.WaitForExit(15000) -and (Wait-Until { (Get-AllTabNames) -contains 'Relative.pdf' })
+    Record 'On: relative path is resolved and redirected to the main instance' ($ok -and (Get-AppWindows).Count -eq 1) "tabs=$((Get-AllTabNames) -join ', ')"
     $exit = Start-Secondary @()
     Start-Sleep -Seconds 2
     Record 'On: launch without file does not open another window' ((Get-AppWindows).Count -eq 1) "windows=$((Get-AppWindows).Count)"
@@ -64,7 +68,7 @@ try {
     foreach ($job in $jobs) { $job.WaitForExit(15000) | Out-Null }
     $ok = Wait-Until { $names = Get-AllTabNames; ($names -contains 'Gamma.pdf') -and ($names -contains 'Delta.pdf') }
     $names = Get-AllTabNames
-    Record 'On: simultaneous activations (busy window) are all opened' ($ok -and (Get-AppWindows).Count -eq 1 -and $names.Count -eq 4) "tabs=$($names -join ', ')"
+    Record 'On: simultaneous activations (busy window) are all opened' ($ok -and (Get-AppWindows).Count -eq 1 -and $names.Count -eq 5) "tabs=$($names -join ', ')"
 
     $window = (Get-AppWindows)[0]
     [SmokeNative]::ShowWindow($window, 6) | Out-Null
