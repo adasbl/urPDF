@@ -34,6 +34,7 @@ namespace
 
     constexpr wchar_t MainInstanceKey[] = L"main";
     constexpr int StartupFailedExitCode = 1;
+    constexpr int UnhandledErrorExitCode = 2;
 
     std::shared_ptr<urpdf::MuPdfRuntime> CreateMuPdfRuntime()
     {
@@ -559,10 +560,11 @@ int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     }
     catch (...)
     {
+        OutputDebugStringW(L"urPDF: the application stopped after an unhandled error.\n");
         StopReceivingActivations(activatedToken);
         runtime->Work().Stop();
         runtime->Work().Wait();
-        throw;
+        return UnhandledErrorExitCode;
     }
     StopReceivingActivations(activatedToken);
     RelaunchUnhandledActivations();
