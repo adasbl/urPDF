@@ -2717,7 +2717,7 @@ namespace winrt::urPDF::implementation
         scrollViewer.ChangeView(nullptr, targetOffset, nullptr);
     }
 
-    void MainWindow::PageNumberBox_ValueChanged(controls::NumberBox const& sender, controls::NumberBoxValueChangedEventArgs const& args)
+    void MainWindow::PageNumberBox_ValueChanged(controls::NumberBox const&, controls::NumberBoxValueChangedEventArgs const& args)
     {
         if (std::isnan(args.NewValue())) return;
 
@@ -2739,7 +2739,7 @@ namespace winrt::urPDF::implementation
         }
     }
         
-    void MainWindow::NextPageButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e)
+    void MainWindow::NextPageButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const&)
     {
         auto button = sender.as<controls::Button>();
         button.IsEnabled(false);
@@ -2763,7 +2763,7 @@ namespace winrt::urPDF::implementation
         button.IsEnabled(true);
     }
 
-    void MainWindow::PreviousPageButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e)
+    void MainWindow::PreviousPageButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const&)
     {
         auto button = sender.as<controls::Button>();
         button.IsEnabled(false);
@@ -3061,7 +3061,7 @@ namespace winrt::urPDF::implementation
                 }
             });
 
-        m_printDocument.AddPages([printPages, cancelled, printSize](auto const& sender, xaml::Printing::AddPagesEventArgs const& args)
+        m_printDocument.AddPages([printPages, cancelled, printSize](auto const& sender, xaml::Printing::AddPagesEventArgs const&)
             {
                 if (cancelled->load(std::memory_order_acquire)) { return; }
                 auto senderDoc = sender.template as<xaml::Printing::PrintDocument>();
@@ -3114,7 +3114,7 @@ namespace winrt::urPDF::implementation
 
             co_await showPrintUIOp;
         }
-        catch (winrt::hresult_error const& ex)
+        catch (winrt::hresult_error const&)
         {
             // TODO: printing fails
         }
