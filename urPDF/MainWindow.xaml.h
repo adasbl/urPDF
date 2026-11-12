@@ -269,6 +269,8 @@ namespace winrt::urPDF::implementation
         winrt::fire_and_forget OpenPdfInNewWindowAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         void OpenPdfFileAsync(storage::StorageFile const& file);
         winrt::fire_and_forget OpenPdfPathAsync(winrt::hstring path);        
+        void OpenDocument(urpdf::WindowCreationOptions const& document);
+        void BringToFront();
         bool CanDetachTab(controls::TabViewItem const& tab);
         void CloseIfEmpty();
         std::shared_ptr<PdfTabInfo> DetachTab(controls::TabViewItem const& tab);

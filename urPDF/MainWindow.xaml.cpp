@@ -491,6 +491,14 @@ namespace winrt::urPDF::implementation
             }
         });
 
+        Activated([weakThis = get_weak()](auto const&, xaml::WindowActivatedEventArgs const& args)
+        {
+            if (args.WindowActivationState() == xaml::WindowActivationState::Deactivated) { return; }
+            auto self = weakThis.get();
+            if (!self || self->m_isClosed) { return; }
+            xaml::Application::Current().as<App>()->WindowActivated(*self);
+        });
+
         AppWindow().SetIcon((ExecutableDirectory() / L"Assets" / L"logo.ico").wstring());
 
         ExtendsContentIntoTitleBar(true);
@@ -1563,6 +1571,38 @@ namespace winrt::urPDF::implementation
         else if (!m_isClosed)
         {
             OpenPdfFileAsync(file);
+        }
+    }
+
+    void MainWindow::OpenDocument(urpdf::WindowCreationOptions const& document)
+    {
+        if (m_isClosed) { return; }
+        if (document.file)
+        {
+            OpenPdfFileAsync(document.file);
+        }
+        else if (!document.filePath.empty())
+        {
+            OpenPdfPathAsync(document.filePath);
+        }
+    }
+
+    void MainWindow::BringToFront()
+    {
+        if (m_isClosed) { return; }
+        if (auto presenter = AppWindow().Presenter().try_as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>())
+        {
+            if (presenter.State() == winrt::Microsoft::UI::Windowing::OverlappedPresenterState::Minimized)
+            {
+                presenter.Restore();
+            }
+        }
+        Activate();
+
+        HWND hwnd{ nullptr };
+        if (auto windowNative = this->try_as<::IWindowNative>(); windowNative && SUCCEEDED(windowNative->get_WindowHandle(&hwnd)) && hwnd)
+        {
+            ::SetForegroundWindow(hwnd);
         }
     }
 

@@ -16,6 +16,7 @@
     <ClCompile Include="pch.cpp" />
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
     <ClCompile Include="PdfPageLayout.cpp" />
+    <ClCompile Include="ActivationArguments.cpp" />
     <ClCompile Include="AppSettings.cpp" />
     <ClCompile Include="MuPdfRuntime.cpp" />
     <ClCompile Include="DocumentViewState.cpp" />
@@ -30,6 +31,7 @@
     <ClInclude Include="BackgroundWork.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="PdfPageLayout.h" />
+    <ClInclude Include="ActivationArguments.h" />
     <ClInclude Include="AppSettings.h" />
     <ClInclude Include="MuPdfRuntime.h" />
     <ClInclude Include="WindowCreationOptions.h" />

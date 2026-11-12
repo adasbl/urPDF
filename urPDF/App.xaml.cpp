@@ -1,11 +1,19 @@
 #include "pch.h"
 #include "App.xaml.h"
 #include "MainWindow.xaml.h"
+#include "ActivationArguments.h"
+#include "AppSettings.h"
 #include "CommandLine.h"
 #include "MuPdfRuntime.h"
 
 #include <cstdlib>
 #include <algorithm>
+#include <deque>
+#include <functional>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <thread>
 #include <utility>
 
 #include <winrt/Windows.ApplicationModel.Activation.h>
@@ -15,6 +23,172 @@
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
+
+namespace
+{
+    namespace lifecycle = winrt::Microsoft::Windows::AppLifecycle;
+    namespace dispatching = winrt::Microsoft::UI::Dispatching;
+
+    constexpr wchar_t MainInstanceKey[] = L"main";
+
+    // Buffers activations redirected to the main instance. AppInstance::Activated is raised
+    // on a background thread and may arrive before the UI is ready, so activations are queued
+    // until App attaches and are then handled on the UI thread.
+    class RedirectedActivations
+    {
+    public:
+        using Handler = std::function<void(lifecycle::AppActivationArguments const&)>;
+
+        // Any thread.
+        void Post(lifecycle::AppActivationArguments const& args)
+        {
+            dispatching::DispatcherQueue dispatcher{ nullptr };
+            {
+                std::scoped_lock lock{ m_mutex };
+                m_pending.push_back(args);
+                dispatcher = m_dispatcher;
+            }
+            if (dispatcher) { dispatcher.TryEnqueue([this] { Drain(); }); }
+        }
+
+        // UI thread.
+        void Attach(dispatching::DispatcherQueue const& dispatcher, Handler handler)
+        {
+            m_handler = std::move(handler);
+            {
+                std::scoped_lock lock{ m_mutex };
+                m_dispatcher = dispatcher;
+            }
+            Drain();
+        }
+
+        // UI thread. Activations still queued are dropped.
+        void Detach() noexcept
+        {
+            {
+                std::scoped_lock lock{ m_mutex };
+                m_dispatcher = nullptr;
+                m_pending.clear();
+            }
+            m_handler = nullptr;
+        }
+
+    private:
+        void Drain()
+        {
+            while (m_handler)
+            {
+                lifecycle::AppActivationArguments args{ nullptr };
+                {
+                    std::scoped_lock lock{ m_mutex };
+                    if (m_pending.empty()) { return; }
+                    args = std::move(m_pending.front());
+                    m_pending.pop_front();
+                }
+                auto handler = m_handler;
+                try { handler(args); }
+                catch (...) { OutputDebugStringW(L"urPDF: failed to handle a redirected activation.\n"); }
+            }
+        }
+
+        std::mutex m_mutex;
+        std::deque<lifecycle::AppActivationArguments> m_pending;
+        dispatching::DispatcherQueue m_dispatcher{ nullptr };
+        Handler m_handler;
+    };
+
+    RedirectedActivations& Activations()
+    {
+        static RedirectedActivations activations;
+        return activations;
+    }
+
+    // Returns true when the activation was handed to the running main instance and this
+    // process should exit.
+    bool RedirectActivationToMainInstance(int argc, wchar_t const* const* argv)
+    {
+        auto mainInstance = lifecycle::AppInstance::FindOrRegisterForKey(MainInstanceKey);
+        if (mainInstance.IsCurrent()) { return false; }
+        // The main instance would resolve a relative path against its own working directory.
+        if (urpdf::HasRelativeDocumentPathArgument(argc, argv)) { return false; }
+
+        auto activationArgs = lifecycle::AppInstance::GetCurrent().GetActivatedEventArgs();
+        ::AllowSetForegroundWindow(mainInstance.ProcessId());
+
+        // Blocking the STA thread with .get() is not allowed; wait on a worker thread instead
+        // and keep pumping COM calls while it runs.
+        winrt::handle redirected{ ::CreateEventW(nullptr, TRUE, FALSE, nullptr) };
+        winrt::check_bool(static_cast<bool>(redirected));
+        bool succeeded = false;
+        std::thread worker([&]
+        {
+            try
+            {
+                mainInstance.RedirectActivationToAsync(activationArgs).get();
+                succeeded = true;
+            }
+            catch (...)
+            {
+            }
+            ::SetEvent(redirected.get());
+        });
+        HANDLE handle = redirected.get();
+        DWORD index = 0;
+        ::CoWaitForMultipleObjects(CWMO_DEFAULT, INFINITE, 1, &handle, &index);
+        worker.join();
+        return succeeded;
+    }
+
+    // Stops routing new launches to this process. Called as soon as the last window closes,
+    // because the process may keep running while background MuPDF work finishes.
+    void UnregisterMainInstance() noexcept
+    {
+        try { lifecycle::AppInstance::GetCurrent().UnregisterKey(); } catch (...) {}
+        Activations().Detach();
+    }
+
+    void StopReceivingActivations(winrt::event_token& token) noexcept
+    {
+        UnregisterMainInstance();
+        if (!token) { return; }
+        try { lifecycle::AppInstance::GetCurrent().Activated(token); } catch (...) {}
+        token = {};
+    }
+
+    std::vector<urpdf::WindowCreationOptions> DocumentsFromActivation(lifecycle::AppActivationArguments const& args, bool isInitialLaunch)
+    {
+        std::vector<urpdf::WindowCreationOptions> documents;
+        if (args.Kind() == lifecycle::ExtendedActivationKind::File)
+        {
+            if (auto fileArgs = args.Data().try_as<winrt::Windows::ApplicationModel::Activation::IFileActivatedEventArgs>())
+            {
+                for (auto const& item : fileArgs.Files())
+                {
+                    if (auto file = item.try_as<winrt::Windows::Storage::StorageFile>())
+                    {
+                        documents.emplace_back().file = file;
+                    }
+                }
+            }
+            return documents;
+        }
+
+        std::optional<std::wstring> path;
+        if (isInitialLaunch)
+        {
+            path = urpdf::DocumentPathArgument(__argc, __wargv);
+        }
+        else if (args.Kind() == lifecycle::ExtendedActivationKind::Launch)
+        {
+            if (auto launchArgs = args.Data().try_as<winrt::Windows::ApplicationModel::Activation::ILaunchActivatedEventArgs>())
+            {
+                path = urpdf::DocumentPathFromLaunchArguments(launchArgs.Arguments());
+            }
+        }
+        if (path) { documents.emplace_back().filePath = winrt::hstring{ *path }; }
+        return documents;
+    }
+}
 
 namespace winrt::urPDF::implementation
 {
@@ -53,22 +227,64 @@ namespace winrt::urPDF::implementation
     {
         DispatcherShutdownMode(Microsoft::UI::Xaml::DispatcherShutdownMode::OnLastWindowClose);
 
-        ::urpdf::WindowCreationOptions options;
-        auto activationArgs = winrt::Microsoft::Windows::AppLifecycle::AppInstance::GetCurrent().GetActivatedEventArgs();
-        if (activationArgs.Kind() == winrt::Microsoft::Windows::AppLifecycle::ExtendedActivationKind::File)
-        {
-            auto fileArgs = activationArgs.Data().try_as<winrt::Windows::ApplicationModel::Activation::IFileActivatedEventArgs>();
-            if (fileArgs && fileArgs.Files().Size() > 0)
+        auto activationArgs = lifecycle::AppInstance::GetCurrent().GetActivatedEventArgs();
+        OpenActivationDocuments(DocumentsFromActivation(activationArgs, true));
+
+        Activations().Attach(Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread(),
+            [weakThis = get_weak()](lifecycle::AppActivationArguments const& args)
             {
-                options.file = fileArgs.Files().GetAt(0).try_as<winrt::Windows::Storage::StorageFile>();
+                if (auto self = weakThis.get())
+                {
+                    self->OpenActivationDocuments(DocumentsFromActivation(args, false));
+                }
+            });
+    }
+
+    void App::OpenActivationDocuments(std::vector<::urpdf::WindowCreationOptions> const& documents)
+    {
+        if (::urpdf::AppSettings::Instance().Get().openFilesInExistingWindow)
+        {
+            if (auto window = LastActiveWindow())
+            {
+                auto target = get_self<MainWindow>(window);
+                target->BringToFront();
+                for (auto const& document : documents) { target->OpenDocument(document); }
+                return;
             }
         }
-        else if (auto path = ::urpdf::DocumentPathArgument(__argc, __wargv))
-        {
-            options.filePath = *path;
-        }
 
-        CreateWindow(options);
+        if (documents.empty())
+        {
+            CreateWindow();
+            return;
+        }
+        for (auto const& document : documents) { CreateWindow(document); }
+    }
+
+    void App::WindowActivated(winrt::urPDF::MainWindow const& window)
+    {
+        auto entry = std::find(m_windows.begin(), m_windows.end(), window);
+        if (entry != m_windows.end()) { m_lastActiveWindow = winrt::make_weak(*entry); }
+    }
+
+    winrt::urPDF::MainWindow App::LastActiveWindow() const
+    {
+        auto isAvailable = [this](Window const& window)
+        {
+            return std::find(m_windows.begin(), m_windows.end(), window) != m_windows.end()
+                && std::find(m_pendingWindowCloses.begin(), m_pendingWindowCloses.end(), window.AppWindow().Id()) == m_pendingWindowCloses.end();
+        };
+
+        if (auto window = m_lastActiveWindow.get(); window && isAvailable(window))
+        {
+            return window.as<winrt::urPDF::MainWindow>();
+        }
+        // The last active window was closed and no other urPDF window has been activated since.
+        for (auto window = m_windows.rbegin(); window != m_windows.rend(); ++window)
+        {
+            if (isAvailable(*window)) { return window->as<winrt::urPDF::MainWindow>(); }
+        }
+        return nullptr;
     }
 
     winrt::urPDF::MainWindow App::CreateWindow(::urpdf::WindowCreationOptions const& options)
@@ -79,13 +295,19 @@ namespace winrt::urPDF::implementation
         {
             if (auto self = weakThis.get())
             {
-                std::erase(self->m_windows, sender.as<Window>());
+                auto closedWindow = sender.as<Window>();
+                std::erase(self->m_windows, closedWindow);
+                if (auto lastActive = self->m_lastActiveWindow.get(); !lastActive || lastActive == closedWindow)
+                {
+                    self->m_lastActiveWindow = nullptr;
+                }
                 std::erase_if(self->m_tearOutWindows, [&](auto const& entry) { return entry.second == id; });
                 self->m_windowsInMoveSize.erase(id.Value);
                 std::erase(self->m_pendingWindowCloses, id);
                 self->SchedulePendingWindowCloses();
                 if (self->m_windows.empty() && self->m_muPdfRuntime)
                 {
+                    UnregisterMainInstance();
                     auto runtime = std::move(self->m_muPdfRuntime);
                     runtime->Work().Stop();
                 }
@@ -189,6 +411,26 @@ int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         return *exitCode;
     }
 
+    bool redirected = false;
+    try { redirected = RedirectActivationToMainInstance(__argc, __wargv); }
+    catch (...) { OutputDebugStringW(L"urPDF: failed to redirect activation to the main instance.\n"); }
+    if (redirected) { return 0; }
+
+    // Subscribe before the UI starts so that activations redirected during startup are buffered.
+    winrt::event_token activatedToken{};
+    try
+    {
+        if (lifecycle::AppInstance::FindOrRegisterForKey(MainInstanceKey).IsCurrent())
+        {
+            activatedToken = lifecycle::AppInstance::GetCurrent().Activated(
+                [](auto const&, lifecycle::AppActivationArguments const& args) { Activations().Post(args); });
+        }
+    }
+    catch (...)
+    {
+        OutputDebugStringW(L"urPDF: failed to register as the main instance.\n");
+    }
+
     auto runtime = std::make_shared<urpdf::MuPdfRuntime>();
     try
     {
@@ -200,10 +442,12 @@ int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     }
     catch (...)
     {
+        StopReceivingActivations(activatedToken);
         runtime->Work().Stop();
         runtime->Work().Wait();
         throw;
     }
+    StopReceivingActivations(activatedToken);
     runtime->Work().Stop();
     runtime->Work().Wait();
 
