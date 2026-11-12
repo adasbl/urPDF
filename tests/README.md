@@ -38,5 +38,27 @@ msbuild tests\urPDF.RuntimeTests.vcxproj /p:Configuration=Debug /p:Platform=x64 
 vstest.console out\runtime-tests\x64\Debug\urPDF.RuntimeTests.dll /Platform:x64
 ```
 
+## Smoke tests
+
+The `smoke` folder contains PowerShell scripts that start the unpackaged (MSI)
+Debug build, `out\msi\x64\Debug\bin\urPDF.exe`, and check the result through UI
+Automation. Pass `-Executable` to test another build. Close every running urPDF
+instance first, because a running instance receives the activations. The scripts
+restore the user settings they change and print a PASS/FAIL table.
+
+- `ActivationSmoke.ps1` starts urPDF the way File Explorer does: settings
+  commands, the *Open files from File Explorer in an existing window* setting,
+  redirection to the running instance, busy windows and Unicode paths.
+- `DragSmoke.ps1` drags tabs with the real mouse: reordering, tear-out of PDF
+  and empty tabs, and moving tabs between windows.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tests\smoke\ActivationSmoke.ps1
+powershell -ExecutionPolicy Bypass -File tests\smoke\DragSmoke.ps1
+```
+
+The drag tests take over the mouse and keyboard and need an interactive desktop
+session, so neither script runs in CI.
+
 Build outputs go to the ignored `out` directory. Commit the test sources,
 project, and this README; do not commit the generated DLL, PDB, or object files.
