@@ -164,6 +164,7 @@
     </ClInclude>
     <ClInclude Include="ActivationArguments.h" />
     <ClInclude Include="AppSettings.h" />
+    <ClInclude Include="MuPdfDocument.h" />
     <ClInclude Include="MuPdfRuntime.h" />
     <ClInclude Include="WindowCreationOptions.h" />
     <ClInclude Include="pch.h" />
@@ -207,6 +208,9 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="AppSettings.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="MuPdfDocument.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="MuPdfRuntime.cpp">

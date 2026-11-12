@@ -3,6 +3,7 @@
 // Corresponding
 #include "MainWindow.xaml.h"
 #include "DocumentOperation.h"
+#include "MuPdfDocument.h"
 #if __has_include("MainWindow.g.cpp")
 #include "MainWindow.g.cpp"
 #endif
@@ -160,59 +161,6 @@ namespace
         bool rendered{ false };
     };
 
-    // Keep MuPDF's longjmp-based exceptions inside these calls, away from C++ owners.
-    fz_document* OpenPdfDocument(fz_context* ctx, char const* path)
-    {
-        fz_document* document = nullptr;
-        fz_try(ctx)
-        {
-            document = fz_open_document(ctx, path);
-        }
-        fz_catch(ctx)
-        {
-            int code = 0;
-            throw winrt::hresult_error(E_FAIL, winrt::to_hstring(fz_convert_error(ctx, &code)));
-        }
-        return document;
-    }
-
-    int CountDocumentPages(fz_context* ctx, fz_document* document)
-    {
-        int count = 0;
-        fz_try(ctx)
-        {
-            count = fz_count_pages(ctx, document);
-        }
-        fz_catch(ctx)
-        {
-            int code = 0;
-            throw winrt::hresult_error(E_FAIL, winrt::to_hstring(fz_convert_error(ctx, &code)));
-        }
-        return count;
-    }
-
-    fz_rect LoadPageBounds(fz_context* ctx, fz_document* document, int index)
-    {
-        fz_page* page = nullptr;
-        fz_rect bounds{};
-        fz_var(page);
-        fz_try(ctx)
-        {
-            page = fz_load_page(ctx, document, index);
-            bounds = fz_bound_page(ctx, page);
-        }
-        fz_always(ctx)
-        {
-            fz_drop_page(ctx, page);
-        }
-        fz_catch(ctx)
-        {
-            int code = 0;
-            throw winrt::hresult_error(E_FAIL, winrt::to_hstring(fz_convert_error(ctx, &code)));
-        }
-        return bounds;
-    }
-
     constexpr double PdfRenderScale(double zoom, double dpiScale) noexcept
     {
         return urpdf::DipPerPdfPoint * zoom * dpiScale * urpdf::RenderSupersampling;
@@ -246,19 +194,6 @@ namespace
         }
 
         return static_cast<std::size_t>(bytes);
-    }
-
-    std::vector<fz_rect> CollectPageBounds(fz_context* ctx, fz_document* doc, int pagecount)
-    {
-        std::vector<fz_rect> pageBounds;
-        pageBounds.reserve(pagecount);
-
-        for (int i = 0; i < pagecount; ++i)
-        {
-            pageBounds.push_back(LoadPageBounds(ctx, doc, i));
-        }
-
-        return pageBounds;
     }
 
     bool ValidPageBounds(fz_rect bounds) noexcept
@@ -666,7 +601,7 @@ namespace winrt::urPDF::implementation
     PdfTabInfo::PdfTabInfo(std::shared_ptr<urpdf::MuPdfRuntime> runtime, const std::string& filePath)
         : m_runtime(std::move(runtime)), m_ctx(m_runtime->CloneContext())
     {
-        m_doc = OpenPdfDocument(m_ctx.get(), filePath.c_str());
+        m_doc = urpdf::OpenPdfDocument(m_ctx.get(), filePath.c_str());
     }
 
     PdfTabInfo::~PdfTabInfo()
@@ -1669,8 +1604,8 @@ namespace winrt::urPDF::implementation
                     urpdf::RunDocumentOperation(pdfTab->m_documentMutex, pdfTab->m_renderGeneration, generation, [&]
                         {
                             if (cancelled->load(std::memory_order_acquire)) { return; }
-                            result.pagecount = CountDocumentPages(context.get(), pdfTab->m_doc);
-                            result.pageBounds = CollectPageBounds(context.get(), pdfTab->m_doc, result.pagecount);
+                            result.pagecount = urpdf::CountDocumentPages(context.get(), pdfTab->m_doc);
+                            result.pageBounds = urpdf::CollectPageBounds(context.get(), pdfTab->m_doc, result.pagecount);
                         });
                     return result;
                 },

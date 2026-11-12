@@ -18,6 +18,7 @@
     <ClCompile Include="PdfPageLayout.cpp" />
     <ClCompile Include="ActivationArguments.cpp" />
     <ClCompile Include="AppSettings.cpp" />
+    <ClCompile Include="MuPdfDocument.cpp" />
     <ClCompile Include="MuPdfRuntime.cpp" />
     <ClCompile Include="DocumentViewState.cpp" />
     <ClCompile Include="SettingsStore.cpp" />
@@ -33,6 +34,7 @@
     <ClInclude Include="PdfPageLayout.h" />
     <ClInclude Include="ActivationArguments.h" />
     <ClInclude Include="AppSettings.h" />
+    <ClInclude Include="MuPdfDocument.h" />
     <ClInclude Include="MuPdfRuntime.h" />
     <ClInclude Include="WindowCreationOptions.h" />
     <ClInclude Include="SettingsStore.h" />
