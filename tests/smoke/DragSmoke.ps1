@@ -74,7 +74,7 @@ function Fresh {
     Start-Secondary @(Quote $pdfC) | Out-Null
     Wait-Until { (Get-AllTabNames) -contains 'Gamma.pdf' } | Out-Null
     $script:w1 = @(Get-AppWindows)[0]
-    [DragNative]::MoveWindow($script:w1, 80, 80, 1100, 650, $true) | Out-Null
+    [DragNative]::MoveWindow($script:w1, 80, 80, 1200, 650, $true) | Out-Null
     [DragNative]::SetForegroundWindow($script:w1) | Out-Null
     Start-Sleep -Seconds 1
 }
@@ -91,7 +91,7 @@ function TearOut([IntPtr] $Window, [string] $Name, [switch] $Escape) {
 
 function DropInto([IntPtr] $Source, [string] $Name, [IntPtr] $Target) {
     # Keep both source tabs visible, with room for the system caption buttons.
-    [DragNative]::MoveWindow($Source, 400, 560, 1100, 400, $true) | Out-Null
+    [DragNative]::MoveWindow($Source, 400, 560, 1200, 400, $true) | Out-Null
     Start-Sleep -Milliseconds 700
     $last = @(Get-TabElements $Target)[-1].Current.BoundingRectangle
     Drag (Center (Find-Tab $Source $Name)) @([int]($last.X + $last.Width + 15), [int]($last.Y + $last.Height / 2)) -WhileHeld {
@@ -102,7 +102,7 @@ function DropInto([IntPtr] $Source, [string] $Name, [IntPtr] $Target) {
 
 # Drops onto the left edge of the target's tab at $Index, so the tab lands before it.
 function DropBefore([IntPtr] $Source, [string] $Name, [IntPtr] $Target, [int] $Index) {
-    [DragNative]::MoveWindow($Source, 400, 560, 1100, 400, $true) | Out-Null
+    [DragNative]::MoveWindow($Source, 400, 560, 1200, 400, $true) | Out-Null
     Start-Sleep -Milliseconds 700
     $tab = @(Get-TabElements $Target)[$Index].Current.BoundingRectangle
     Drag (Center (Find-Tab $Source $Name)) @([int]($tab.X + 8), [int]($tab.Y + $tab.Height / 2))
@@ -113,9 +113,7 @@ function AddEmptyTab([IntPtr] $Window) {
     Start-Sleep -Milliseconds 200
     $plus = [System.Windows.Automation.AutomationElement]::FromHandle($Window).FindFirst([System.Windows.Automation.TreeScope]::Descendants,
         (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::SplitButton)))
-    $r = $plus.Current.BoundingRectangle
-    [DragNative]::SetCursorPos([int]($r.X + 12), [int]($r.Y + $r.Height / 2)) | Out-Null
-    [DragNative]::mouse_event(0x2, 0, 0, 0, [UIntPtr]::Zero); [DragNative]::mouse_event(0x4, 0, 0, 0, [UIntPtr]::Zero)
+    $plus.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Seconds 1
 }
 
@@ -128,7 +126,7 @@ function RecordTabWidths([IntPtr] $Window, [string] $Name, [int] $ExpectedCount)
         if ($selection.Current.IsSelected) { $width -= 8.0 * $scale }
         $width
     })
-    $expected = 200.0 * $scale
+    $expected = 240.0 * $scale
     $wrong = @($widths | Where-Object { [double]::IsNaN($_) -or [double]::IsInfinity($_) -or [Math]::Abs($_ - $expected) -gt 1.0 })
     Record $Name ($widths.Count -eq $ExpectedCount -and $wrong.Count -eq 0) "expected=$expected px; actual=$($widths -join ', ')"
 }
@@ -137,7 +135,7 @@ try {
     Set-OpenInExisting $true
 
     Fresh
-    [DragNative]::MoveWindow($w1, 80, 80, 1700, 650, $true) | Out-Null
+    [DragNative]::MoveWindow($w1, 80, 80, 2000, 650, $true) | Out-Null
     $longName = 'A very long PDF document filename that should be truncated instead of widening the tab.pdf'
     $longPdf = Join-Path (Split-Path $pdfA) $longName
     New-PdfFixture $longPdf
@@ -179,11 +177,11 @@ try {
     Record 'Tear out empty tab: new window has exactly that one tab' $ok (Describe)
     if ($new.Count -eq 1) {
         $w2 = $new[0]
-        [DragNative]::MoveWindow($w2, 400, 560, 1100, 400, $true) | Out-Null
+        [DragNative]::MoveWindow($w2, 400, 560, 1200, 400, $true) | Out-Null
         Start-Sleep -Milliseconds 700
         $last = @(Get-TabElements $w2)[-1].Current.BoundingRectangle
         # Keep the target strip visible when the source is activated by the drag.
-        [DragNative]::MoveWindow($w1, 80, 60, 1100, 380, $true) | Out-Null
+        [DragNative]::MoveWindow($w1, 80, 60, 1200, 380, $true) | Out-Null
         Drag (Center (Find-Tab $w1 'Alpha.pdf')) @([int]($last.X + $last.Width - 8), [int]($last.Y + $last.Height / 2))
         $tabs2 = @(Get-TabNames $w2)
         Record 'PDF dropped into window holding a single empty tab keeps that empty tab' (($tabs2 -join ',') -eq 'New tab,Alpha.pdf') (Describe)
@@ -191,7 +189,7 @@ try {
         $script:main.Refresh(); Record 'Process alive after PDF transfer' (!$script:main.HasExited) "windows=$((Get-AppWindows).Count)"
         AddEmptyTab $w1
         $script:main.Refresh(); Record 'Empty tab added in source' (!$script:main.HasExited -and @(Get-TabNames $w1) -contains 'New tab') (Describe)
-        [DragNative]::MoveWindow($w2, 80, 60, 1700, 380, $true) | Out-Null
+        [DragNative]::MoveWindow($w2, 80, 60, 2000, 380, $true) | Out-Null
         try { DropInto $w1 'New tab' $w2 } catch { Record 'Empty-tab drop step' $false $_.Exception.Message }
         $script:main.Refresh(); Record 'Process alive after empty-tab transfer' (!$script:main.HasExited) "exit=$(if ($script:main.HasExited) { $script:main.ExitCode })"
         $tabs2 = @(Get-TabNames $w2)
@@ -210,8 +208,8 @@ try {
     Start-Secondary @() | Out-Null
     Wait-Until { (Get-AppWindows).Count -eq 3 } | Out-Null
     $w3 = @(Get-AppWindows | Where-Object { $_ -ne $w1 -and $_ -ne $w2 })[0]
-    [DragNative]::MoveWindow($w3, 80, 60, 1700, 380, $true) | Out-Null
-    [DragNative]::MoveWindow($w2, 1100, 560, 1100, 400, $true) | Out-Null
+    [DragNative]::MoveWindow($w3, 80, 60, 2000, 380, $true) | Out-Null
+    [DragNative]::MoveWindow($w2, 1100, 560, 1200, 400, $true) | Out-Null
     DropInto $w1 'Alpha.pdf' $w3
     Record 'PDF dropped into a new window keeps its startup tab' ((@(Get-TabNames $w3) -join ',') -eq 'New tab,Alpha.pdf') (Describe)
     AddEmptyTab $w3
