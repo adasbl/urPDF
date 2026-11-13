@@ -55,7 +55,9 @@ restore the user settings they change and print a PASS/FAIL table.
   `URPDF_SIMULATE_MUPDF_INIT_FAILURE` environment variable, which only Debug
   builds read.
 - `DragSmoke.ps1` drags tabs with the real mouse: reordering, tear-out of PDF
-  and empty tabs, and moving tabs between windows.
+  and empty tabs, and moving tabs between windows. It checks that tabs stay in
+  their source window until the mouse is released and that Esc cancels the drag
+  without opening a window.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests\smoke\ActivationSmoke.ps1

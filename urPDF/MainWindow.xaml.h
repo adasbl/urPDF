@@ -284,16 +284,18 @@ namespace winrt::urPDF::implementation
         void OpenDocument(urpdf::WindowCreationOptions const& document,
             std::optional<winrt::weak_ref<controls::TabViewItem>> targetTab = std::nullopt);
         void BringToFront();
+        void UpdateTitleBarPassthroughRegions();
         bool CanDetachTab(controls::TabViewItem const& tab);
         void CloseIfEmpty();
         std::shared_ptr<PdfTabInfo> DetachTab(controls::TabViewItem const& tab);
         bool DetachEmptyTab(controls::TabViewItem const& tab);
         controls::TabViewItem AttachTab(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t index, controls::TabViewItem const& transferredTab = nullptr);
         controls::TabViewItem AttachEmptyTab(controls::TabViewItem const& tab, int32_t index);
-        void TabView_TabTearOutWindowRequested(controls::TabView const& sender, controls::TabViewTabTearOutWindowRequestedEventArgs const& args);
-        void TabView_TabTearOutRequested(controls::TabView const& sender, controls::TabViewTabTearOutRequestedEventArgs const& args);
-        void TabView_ExternalTornOutTabsDropping(controls::TabView const& sender, controls::TabViewExternalTornOutTabsDroppingEventArgs const& args);
-        void TabView_ExternalTornOutTabsDropped(controls::TabView const& sender, controls::TabViewExternalTornOutTabsDroppedEventArgs const& args);
+        void TabView_TabDragStarting(controls::TabView const& sender, controls::TabViewTabDragStartingEventArgs const& args);
+        void TabView_TabDragCompleted(controls::TabView const& sender, controls::TabViewTabDragCompletedEventArgs const& args);
+        void TabView_TabStripDragOver(foundation::IInspectable const& sender, xaml::DragEventArgs const& args);
+        void TabView_TabStripDrop(foundation::IInspectable const& sender, xaml::DragEventArgs const& args);
+        void TabView_TabDroppedOutside(controls::TabView const& sender, controls::TabViewTabDroppedOutsideEventArgs const& args);
         void TabView_AddButtonClick(foundation::IInspectable const& sender, foundation::IInspectable const& args);
         void TabView_TabCloseRequested(foundation::IInspectable const& sender, controls::TabViewTabCloseRequestedEventArgs const& args);
         void TabView_Loaded(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
@@ -365,6 +367,7 @@ namespace winrt::urPDF::implementation
         bool m_zoomWasEnabled{ false };
         bool m_isVisibleRenderRunning{ false };
         bool m_isClosed{ false };
+        winrt::Windows::Graphics::PointInt32 m_tabDragOffset{};
         winrt::Microsoft::UI::Input::InputNonClientPointerSource m_moveSizeInput{ nullptr };
         winrt::event_token m_enteredMoveSizeToken{};
         winrt::event_token m_exitedMoveSizeToken{};
@@ -415,8 +418,6 @@ namespace winrt::urPDF::implementation
         void ApplyPendingRenderZoom();
         void CancelPendingZoomRender();
         void AttachDpiObserver();
-        void UpdateTitleBarPassthroughRegions();
-        void UpdateTabStripDropRegion();
         void DetachDpiObserver();
         void RequestDpiRefresh();
         void ApplyPendingDpiRefresh();

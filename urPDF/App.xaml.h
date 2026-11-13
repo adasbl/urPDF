@@ -6,7 +6,6 @@
 
 #include <cstdint>
 #include <memory>
-#include <map>
 #include <set>
 #include <vector>
 
@@ -43,9 +42,8 @@ namespace winrt::urPDF::implementation
         winrt::urPDF::MainWindow LastActiveWindow() const;
         winrt::urPDF::MainWindow FindWindow(Microsoft::UI::WindowId const& id) const;
         winrt::urPDF::MainWindow FindWindowForTab(Microsoft::UI::Xaml::Controls::TabViewItem const& tab) const;
-        void TrackTearOutWindow(Microsoft::UI::Xaml::Controls::TabViewItem const& tab, Microsoft::UI::WindowId const& id);
-        winrt::urPDF::MainWindow FindTearOutWindow(Microsoft::UI::Xaml::Controls::TabViewItem const& tab) const;
         void RequestCloseEmptyWindow(Microsoft::UI::WindowId const& id);
+        void RefreshTabDragRegions();
         void WindowMoveSizeEntered(Microsoft::UI::WindowId const& id);
         void WindowMoveSizeExited(Microsoft::UI::WindowId const& id);
         void ApplySettingsToWindows();
@@ -58,7 +56,6 @@ namespace winrt::urPDF::implementation
         std::shared_ptr<::urpdf::MuPdfRuntime> m_muPdfRuntime;
         std::vector<winrt::Microsoft::UI::Xaml::Window> m_windows;
         winrt::weak_ref<winrt::Microsoft::UI::Xaml::Window> m_lastActiveWindow;
-        std::map<Microsoft::UI::Xaml::Controls::TabViewItem, Microsoft::UI::WindowId> m_tearOutWindows;
         std::set<std::uint64_t> m_windowsInMoveSize;
         std::vector<Microsoft::UI::WindowId> m_pendingWindowCloses;
         bool m_windowCloseQueued{ false };

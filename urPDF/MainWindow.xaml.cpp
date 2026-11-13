@@ -42,6 +42,7 @@ extern "C" {
 #include <winrt/Windows.Storage.Pickers.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Windows.ApplicationModel.DataTransfer.h>
+#include <winrt/Windows.ApplicationModel.DataTransfer.DragDrop.h>
 #include <winrt/Windows.Graphics.Imaging.h>
 #include <winrt/Windows.Graphics.Printing.h>
 #include <winrt/Windows.System.Threading.h>
@@ -72,6 +73,49 @@ namespace
     constexpr int SlotRetainMarginPages = 3;
     constexpr auto ZoomRenderDebounce = std::chrono::milliseconds(200);
     constexpr auto DpiRenderDebounce = std::chrono::milliseconds(200);
+    constexpr wchar_t TabDragProperty[] = L"urPDF.Tab";
+
+    struct TabDragKeyboardState
+    {
+        HHOOK hook{};
+        bool cancelled{};
+        controls::TabViewItem tab{ nullptr };
+        void Stop()
+        {
+            if (hook) { UnhookWindowsHookEx(std::exchange(hook, nullptr)); }
+        }
+        ~TabDragKeyboardState() { Stop(); }
+    };
+    thread_local TabDragKeyboardState TabDragKeyboard;
+
+    LRESULT CALLBACK TrackTabDragKey(int code, WPARAM key, LPARAM state)
+    {
+        // The OLE drag loop consumes Esc before XAML receives a KeyDown event.
+        if (code >= 0 && key == VK_ESCAPE && !(state & 0x80000000)) { TabDragKeyboard.cancelled = true; }
+        return CallNextHookEx(nullptr, code, key, state);
+    }
+
+    struct EmptyTabContent : winrt::implements<EmptyTabContent, foundation::IStringable>
+    {
+        winrt::hstring ToString() const { return {}; }
+    };
+
+    controls::TabViewItem CreateTabItem()
+    {
+        controls::TabViewItem tab;
+        // Pages live outside TabView. Unique, nonvisual content lets WinUI identify
+        // the dragged tab without reparenting a UI element between windows.
+        tab.Content(winrt::make<EmptyTabContent>());
+        return tab;
+    }
+
+    controls::TabViewItem DraggedTab(xaml::DragEventArgs const& args)
+    {
+        auto properties = args.DataView().Properties();
+        // All app windows share this UI thread. Keep XAML objects here; only
+        // serializable values may travel through the OLE property bag.
+        return properties.HasKey(TabDragProperty) ? TabDragKeyboard.tab : nullptr;
+    }
 
     template<typename Element>
     Element FindVisualDescendant(xaml::DependencyObject const& parent, wchar_t const* name)
@@ -445,7 +489,6 @@ namespace winrt::urPDF::implementation
         {
             if (auto self = weakThis.get())
             {
-                self->UpdateTabStripDropRegion();
                 self->UpdateTitleBarPassthroughRegions();
             }
         });
@@ -777,76 +820,21 @@ namespace winrt::urPDF::implementation
 
 
     // TABVIEW
-    void MainWindow::UpdateTabStripDropRegion()
-    {
-        auto tabView = MainTabView();
-        if (m_isClosed || !tabView.IsLoaded()) { return; }
-        auto list = FindVisualDescendant<controls::ListView>(tabView, L"TabListView");
-        if (!list) { return; }
-        auto grid = media::VisualTreeHelper::GetParent(list).try_as<controls::Grid>();
-        if (!grid || grid.ColumnDefinitions().Size() != 4 || controls::Grid::GetColumn(list) != 1) { return; }
-
-        xaml::FrameworkElement footer{ nullptr };
-        for (auto const& child : grid.Children())
-        {
-            if (auto element = child.try_as<xaml::FrameworkElement>(); element && element.Name() == L"RightContentPresenter")
-            {
-                footer = element;
-                break;
-            }
-        }
-        if (!footer) { return; }
-
-        auto columns = grid.ColumnDefinitions();
-        const double availableWidth = (std::max)(0.0, grid.ActualWidth() - columns.GetAt(0).ActualWidth()
-            - columns.GetAt(2).ActualWidth() - footer.DesiredSize().Width);
-        const auto padding = list.Padding();
-        auto presenter = FindVisualDescendant<controls::ItemsPresenter>(list, L"TabsItemsPresenter");
-        if (!presenter) { return; }
-        auto leadingSpacer = presenter.Header().try_as<xaml::FrameworkElement>();
-        auto trailingSpacer = presenter.Footer().try_as<xaml::FrameworkElement>();
-        const double leadingWidth = leadingSpacer ? leadingSpacer.ActualWidth() : 0.0;
-        const double trailingWidth = trailingSpacer ? trailingSpacer.ActualWidth() : 0.0;
-        double tabsWidth = padding.Left + padding.Right + leadingWidth + trailingWidth;
-        const auto listBounds = list.TransformToVisual(grid).TransformBounds(
-            { 0, 0, static_cast<float>(list.ActualWidth()), static_cast<float>(list.ActualHeight()) });
-        double tabsRight = listBounds.X + padding.Left;
-        for (auto const& item : tabView.TabItems())
-        {
-            if (auto tab = item.try_as<controls::TabViewItem>())
-            {
-                const auto margin = tab.Margin();
-                tabsWidth += tab.ActualWidth() + margin.Left + margin.Right;
-                if (tab.IsLoaded() && tab.ActualWidth() > 0)
-                {
-                    const auto bounds = tab.TransformToVisual(grid).TransformBounds(
-                        { 0, 0, static_cast<float>(tab.ActualWidth()), static_cast<float>(tab.ActualHeight()) });
-                    tabsRight = (std::max)(tabsRight, static_cast<double>(bounds.X + bounds.Width) + margin.Right);
-                }
-            }
-        }
-
-        const bool hasFreeSpace = tabsWidth + 0.5 < availableWidth;
-        const int32_t span = hasFreeSpace ? 3 : 1;
-        if (controls::Grid::GetColumnSpan(list) != span) { controls::Grid::SetColumnSpan(list, span); }
-        auto tabColumn = columns.GetAt(1);
-        if (tabColumn.MinWidth() != 0.0) { tabColumn.MinWidth(0.0); }
-        const double columnWidth = hasFreeSpace
-            ? std::clamp(tabsRight - listBounds.X + trailingWidth + padding.Right, 0.0, availableWidth)
-            : availableWidth;
-        const auto width = tabColumn.Width();
-        if (width.GridUnitType != xaml::GridUnitType::Pixel || std::abs(width.Value - columnWidth) > 0.25)
-        {
-            tabColumn.Width(xaml::GridLengthHelper::FromPixels(columnWidth));
-        }
-    }
-
     void MainWindow::UpdateTitleBarPassthroughRegions()
     {
         if (m_isClosed || !ExtendsContentIntoTitleBar()) { return; }
         auto button = NewTabSplitButton();
         auto root = button.XamlRoot();
         if (!root) { return; }
+
+        // Keep tabs and the add button clear of the system caption buttons.
+        const double rightInset = AppWindow().TitleBar().RightInset() / root.RasterizationScale();
+        auto titleBarMargin = AppTitleBar().Margin();
+        if (titleBarMargin.Right != rightInset)
+        {
+            titleBarMargin.Right = rightInset;
+            AppTitleBar().Margin(titleBarMargin);
+        }
 
         using winrt::Windows::Graphics::RectInt32;
         std::vector<RectInt32> rects;
@@ -877,11 +865,16 @@ namespace winrt::urPDF::implementation
 
             const auto tabView = MainTabView();
             const auto stripRect = toRect(tabView);
+            if (TabDragKeyboard.tab && stripRect)
+            {
+                // Blank strip space is a drop target during a drag; otherwise it
+                // remains caption space for moving the window.
+                rects.push_back(*stripRect);
+            }
             for (auto const& item : tabView.TabItems())
             {
                 auto tab = item.try_as<controls::TabViewItem>();
                 if (!tab) { continue; }
-                if (tabView.CanTearOutTabs() && CanTransferTab(tab, true)) { continue; }
                 auto tabRect = toRect(tab);
                 if (!tabRect) { continue; }
 
@@ -957,7 +950,7 @@ namespace winrt::urPDF::implementation
     {
         auto tabView = MainTabView();
 
-        controls::TabViewItem newTab;
+        auto newTab = CreateTabItem();
 
         newTab.Header(winrt::box_value(L"New tab"));
         controls::SymbolIconSource tabIcon;
@@ -1134,7 +1127,7 @@ namespace winrt::urPDF::implementation
         auto items = tabView.TabItems();
         const auto insertionIndex = static_cast<uint32_t>(std::clamp(index, 0, static_cast<int32_t>(items.Size())));
 
-        auto tab = transferredTab ? transferredTab : controls::TabViewItem();
+        auto tab = transferredTab ? transferredTab : CreateTabItem();
         uint32_t existingIndex;
         if (items.IndexOf(tab, existingIndex)) { return nullptr; }
         tab.Header(winrt::box_value(pdfTab->m_fileName));
@@ -1243,7 +1236,16 @@ namespace winrt::urPDF::implementation
         controls::TabViewItem attached{ nullptr };
         try
         {
-            attached = isEmptyTab ? AttachEmptyTab(tab, index) : AttachTab(pdfTab, index, tab);
+            // OLE may still own the source container in its drag visual. Transfer
+            // document state into a fresh container rather than reparenting it.
+            if (isEmptyTab)
+            {
+                auto incoming = CreateTabItem();
+                incoming.Header(tab.Header());
+                incoming.IconSource(tab.IconSource());
+                attached = AttachEmptyTab(incoming, index);
+            }
+            else { attached = AttachTab(pdfTab, index); }
         }
         catch (...)
         {
@@ -1259,63 +1261,134 @@ namespace winrt::urPDF::implementation
         {
             xaml::Application::Current().as<App>()->RequestCloseEmptyWindow(source.AppWindow().Id());
         }
+        BringToFront();
         return true;
     }
 
-    void MainWindow::TabView_TabTearOutWindowRequested(controls::TabView const& sender,
-        controls::TabViewTabTearOutWindowRequestedEventArgs const& args)
+    void MainWindow::TabView_TabDragStarting(controls::TabView const& sender,
+        controls::TabViewTabDragStartingEventArgs const& args)
     {
-        args.NewWindowId({});
-        const auto tabs = args.Tabs();
-        if (sender != MainTabView() || tabs.size() != 1) { return; }
-        auto tab = tabs[0].try_as<controls::TabViewItem>();
+        auto tab = args.Tab();
+        if (sender != MainTabView() || !CanTransferTab(tab, true))
+        {
+            args.Cancel(true);
+            return;
+        }
+
+        // ListView supplies the tab visual that follows the pointer during the drag.
+        TabDragKeyboard.Stop();
+        TabDragKeyboard.cancelled = false;
+        TabDragKeyboard.tab = tab;
+        xaml::Application::Current().as<App>()->RefreshTabDragRegions();
+        TabDragKeyboard.hook = SetWindowsHookExW(WH_KEYBOARD, TrackTabDragKey, nullptr, GetCurrentThreadId());
+        args.Data().SetData(TabDragProperty, winrt::box_value(true));
+        args.Data().Properties().Insert(TabDragProperty, winrt::box_value(true));
+        args.Data().RequestedOperation(winrt::Windows::ApplicationModel::DataTransfer::DataPackageOperation::Move);
+        POINT cursor{};
+        if (GetCursorPos(&cursor))
+        {
+            const auto position = AppWindow().Position();
+            const auto tabPosition = tab.TransformToVisual(sender).TransformPoint({});
+            const auto scale = tab.XamlRoot().RasterizationScale();
+            // The first tab in the new window replaces this tab's old strip position.
+            const auto firstTab = sender.TabItems().GetAt(0).as<controls::TabViewItem>();
+            const auto firstPosition = firstTab.TransformToVisual(sender).TransformPoint({});
+            m_tabDragOffset = { cursor.x - position.X - static_cast<int32_t>((tabPosition.X - firstPosition.X) * scale),
+                cursor.y - position.Y };
+        }
+    }
+
+    void MainWindow::TabView_TabDragCompleted(controls::TabView const&, controls::TabViewTabDragCompletedEventArgs const&)
+    {
+        TabDragKeyboard.Stop();
+        TabDragKeyboard.tab = nullptr;
+        xaml::Application::Current().as<App>()->RefreshTabDragRegions();
+    }
+
+    void MainWindow::TabView_TabStripDragOver(foundation::IInspectable const&, xaml::DragEventArgs const& args)
+    {
+        auto tab = DraggedTab(args);
+        auto source = xaml::Application::Current().as<App>()->FindWindowForTab(tab);
+        if (!source) { return; }
+        auto sourceWindow = get_self<MainWindow>(source);
+        args.AcceptedOperation((sourceWindow == this || CanReceiveTabFrom(*sourceWindow, tab))
+            ? winrt::Windows::ApplicationModel::DataTransfer::DataPackageOperation::Move
+            : winrt::Windows::ApplicationModel::DataTransfer::DataPackageOperation::None);
+        args.DragUIOverride().IsCaptionVisible(false);
+        args.DragUIOverride().IsGlyphVisible(false);
+        args.Handled(true);
+    }
+
+    void MainWindow::TabView_TabStripDrop(foundation::IInspectable const&, xaml::DragEventArgs const& args)
+    {
+        auto tab = DraggedTab(args);
+        auto source = xaml::Application::Current().as<App>()->FindWindowForTab(tab);
+        if (!source) { return; }
+
+        auto tabView = MainTabView();
+        const auto pointer = args.GetPosition(tabView);
+        int32_t index = 0;
+        for (auto const& item : tabView.TabItems())
+        {
+            auto target = item.as<controls::TabViewItem>();
+            const auto bounds = target.TransformToVisual(tabView).TransformBounds(
+                { 0, 0, static_cast<float>(target.ActualWidth()), static_cast<float>(target.ActualHeight()) });
+            if (pointer.X < bounds.X + bounds.Width / 2) { break; }
+            ++index;
+        }
+        bool moved = false;
+        if (get_self<MainWindow>(source) == this)
+        {
+            // TabView handles ordinary reordering. This also covers its footer.
+            uint32_t oldIndex;
+            auto items = tabView.TabItems();
+            if (items.IndexOf(tab, oldIndex))
+            {
+                const auto newIndex = static_cast<uint32_t>(index) - (oldIndex < static_cast<uint32_t>(index) ? 1 : 0);
+                if (newIndex != oldIndex)
+                {
+                    items.RemoveAt(oldIndex);
+                    items.InsertAt(newIndex, tab);
+                }
+                tabView.SelectedItem(tab);
+                moved = true;
+            }
+        }
+        else { moved = TransferTabFrom(*get_self<MainWindow>(source), tab, index); }
+        args.AcceptedOperation(moved
+            ? winrt::Windows::ApplicationModel::DataTransfer::DataPackageOperation::Move
+            : winrt::Windows::ApplicationModel::DataTransfer::DataPackageOperation::None);
+        args.Handled(true);
+    }
+
+    void MainWindow::TabView_TabDroppedOutside(controls::TabView const& sender,
+        controls::TabViewTabDroppedOutsideEventArgs const& args)
+    {
+        // WinUI also raises this event for a cancelled drag (DropResult == None).
+        if (sender != MainTabView() || TabDragKeyboard.cancelled || (GetAsyncKeyState(VK_ESCAPE) & 0x8000)
+            || (GetAsyncKeyState(VK_LBUTTON) & 0x8000)) { return; }
+        auto tab = args.Tab();
         if (!CanTransferTab(tab, true)) { return; }
+
         auto app = xaml::Application::Current().as<App>();
         urpdf::WindowCreationOptions options;
         options.createInitialEmptyTab = false;
         auto window = app->CreateWindow(options);
-        app->TrackTearOutWindow(tab, window.AppWindow().Id());
-        args.NewWindowId(window.AppWindow().Id());
-    }
-
-    void MainWindow::TabView_TabTearOutRequested(controls::TabView const& sender,
-        controls::TabViewTabTearOutRequestedEventArgs const& args)
-    {
-        const auto tabs = args.Tabs();
-        if (sender != MainTabView() || tabs.size() != 1) { return; }
-        auto app = xaml::Application::Current().as<App>();
-        auto tab = tabs[0].try_as<controls::TabViewItem>();
-        auto destination = app->FindWindow(args.NewWindowId());
-        if (!destination) { destination = app->FindTearOutWindow(tab); }
-        auto source = app->FindWindowForTab(tab);
-        if (!destination || !source) { return; }
-        get_self<MainWindow>(destination)->TransferTabFrom(*get_self<MainWindow>(source), tab, 0);
-    }
-
-    void MainWindow::TabView_ExternalTornOutTabsDropping(controls::TabView const& sender,
-        controls::TabViewExternalTornOutTabsDroppingEventArgs const& args)
-    {
-        args.AllowDrop(false);
-        const auto tabs = args.Tabs();
-        if (sender != MainTabView() || tabs.size() != 1) { return; }
-        auto tab = tabs[0].try_as<controls::TabViewItem>();
-        auto app = xaml::Application::Current().as<App>();
-        auto source = app->FindWindowForTab(tab);
-        if (source && CanReceiveTabFrom(*get_self<MainWindow>(source), tab))
+        try
         {
-            app->TrackTearOutWindow(tab, source.AppWindow().Id());
-            args.AllowDrop(true);
+            POINT cursor{};
+            if (GetCursorPos(&cursor))
+            {
+                window.AppWindow().MoveAndResize({ cursor.x - m_tabDragOffset.X, cursor.y - m_tabDragOffset.Y,
+                    AppWindow().Size().Width, AppWindow().Size().Height });
+            }
+            if (!get_self<MainWindow>(window)->TransferTabFrom(*this, tab, 0)) { window.Close(); }
         }
-    }
-
-    void MainWindow::TabView_ExternalTornOutTabsDropped(controls::TabView const& sender,
-        controls::TabViewExternalTornOutTabsDroppedEventArgs const& args)
-    {
-        const auto tabs = args.Tabs();
-        if (sender != MainTabView() || tabs.size() != 1) { return; }
-        auto tab = tabs[0].try_as<controls::TabViewItem>();
-        auto source = xaml::Application::Current().as<App>()->FindWindowForTab(tab);
-        if (source) { TransferTabFrom(*get_self<MainWindow>(source), tab, args.DropIndex()); }
+        catch (...)
+        {
+            window.Close();
+            throw;
+        }
     }
 
     void MainWindow::CloseIfEmpty()
@@ -1682,7 +1755,7 @@ namespace winrt::urPDF::implementation
             }
             else
             {
-                targetTab = controls::TabViewItem();
+                targetTab = CreateTabItem();
                 MainTabView().TabItems().Append(targetTab);
             }
             if (MainTabView().SelectedItem() != targetTab) { MainTabView().SelectedItem(targetTab); }

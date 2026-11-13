@@ -44,16 +44,20 @@
                     </Grid.ColumnDefinitions>
 
                     <TextBlock Grid.Column="0" Text="UrPDF" VerticalAlignment="Center" Margin="16,0,8,0" FontWeight="SemiBold"/>
-                    <TabView x:Name="MainTabView" Grid.Column="1" HorizontalAlignment="Stretch" 
+                    <TabView x:Name="MainTabView" Grid.Column="1" HorizontalAlignment="Stretch" Background="Transparent"
                              IsAddTabButtonVisible="False"
                              CanReorderTabs="True"
                              CanDragTabs="True"
-                             CanTearOutTabs="True"
+                             CanTearOutTabs="False"
                              AllowDropTabs="True"
-                             TabTearOutWindowRequested="TabView_TabTearOutWindowRequested"
-                             TabTearOutRequested="TabView_TabTearOutRequested"
-                             ExternalTornOutTabsDropping="TabView_ExternalTornOutTabsDropping"
-                             ExternalTornOutTabsDropped="TabView_ExternalTornOutTabsDropped"
+                             AllowDrop="True"
+                             DragOver="TabView_TabStripDragOver"
+                             Drop="TabView_TabStripDrop"
+                             TabDragStarting="TabView_TabDragStarting"
+                             TabDragCompleted="TabView_TabDragCompleted"
+                             TabStripDragOver="TabView_TabStripDragOver"
+                             TabStripDrop="TabView_TabStripDrop"
+                             TabDroppedOutside="TabView_TabDroppedOutside"
                              TabCloseRequested="TabView_TabCloseRequested" 
                              Loaded="TabView_Loaded"  
                              SelectionChanged="TabView_SelectionChanged">

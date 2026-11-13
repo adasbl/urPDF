@@ -11,6 +11,7 @@ using System.Runtime.InteropServices;
 public static class DragNative {
     [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
     [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hwnd, int x, int y, int width, int height, bool repaint);
@@ -37,7 +38,7 @@ function Center($Element) {
     @([int]($r.X + [Math]::Min(40, $r.Width / 2)), [int]($r.Y + $r.Height / 2))
 }
 
-function Drag([int[]] $From, [int[]] $To, [switch] $Escape) {
+function Drag([int[]] $From, [int[]] $To, [switch] $Escape, [scriptblock] $WhileHeld) {
     [DragNative]::SetCursorPos($From[0], $From[1]) | Out-Null
     Start-Sleep -Milliseconds 150
     [DragNative]::mouse_event(0x2, 0, 0, 0, [UIntPtr]::Zero)
@@ -46,11 +47,14 @@ function Drag([int[]] $From, [int[]] $To, [switch] $Escape) {
     for ($i = 1; $i -le $steps; ++$i) {
         $x = [int]($From[0] + ($To[0] - $From[0]) * $i / $steps)
         $y = [int]($From[1] + ($To[1] - $From[1]) * $i / $steps)
-        [DragNative]::SetCursorPos($x, $y) | Out-Null
-        [DragNative]::mouse_event(0x1, 0, 0, 0, [UIntPtr]::Zero)
+        # Inject actual mouse movement: SetCursorPos alone doesn't exercise XAML dragging.
+        $absoluteX = [int](($x - [DragNative]::GetSystemMetrics(76)) * 65535 / ([DragNative]::GetSystemMetrics(78) - 1))
+        $absoluteY = [int](($y - [DragNative]::GetSystemMetrics(77)) * 65535 / ([DragNative]::GetSystemMetrics(79) - 1))
+        [DragNative]::mouse_event(0xC001, $absoluteX, $absoluteY, 0, [UIntPtr]::Zero)
         Start-Sleep -Milliseconds 25
     }
     Start-Sleep -Milliseconds 400
+    if ($WhileHeld) { & $WhileHeld }
     if ($Escape) {
         [DragNative]::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero)
         [DragNative]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero)
@@ -77,15 +81,22 @@ function Fresh {
 function TearOut([IntPtr] $Window, [string] $Name, [switch] $Escape) {
     $before = @(Get-AppWindows)
     $point = Center (Find-Tab $Window $Name)
-    Drag $point @(($point[0] + 250), ($point[1] + 420)) -Escape:$Escape
+    Drag $point @(($point[0] + 250), ($point[1] + 420)) -Escape:$Escape -WhileHeld {
+        Record 'Dragging outside keeps the tab in its source until release' `
+            ((Get-AppWindows).Count -eq $before.Count -and @(Get-TabNames $Window) -contains $Name) (Describe)
+    }
     @(Get-AppWindows | Where-Object { $before -notcontains $_ })
 }
 
 function DropInto([IntPtr] $Source, [string] $Name, [IntPtr] $Target) {
-    [DragNative]::MoveWindow($Source, 400, 560, 700, 400, $true) | Out-Null
+    # Keep both source tabs visible, with room for the system caption buttons.
+    [DragNative]::MoveWindow($Source, 400, 560, 1100, 400, $true) | Out-Null
     Start-Sleep -Milliseconds 700
     $last = @(Get-TabElements $Target)[-1].Current.BoundingRectangle
-    Drag (Center (Find-Tab $Source $Name)) @([int]($last.X + $last.Width + 15), [int]($last.Y + $last.Height / 2))
+    Drag (Center (Find-Tab $Source $Name)) @([int]($last.X + $last.Width + 15), [int]($last.Y + $last.Height / 2)) -WhileHeld {
+        Record 'Hovering over another strip keeps the tab in its source until release' `
+            (@(Get-TabNames $Source) -contains $Name) (Describe)
+    }
 }
 
 # Drops onto the left edge of the target's tab at $Index, so the tab lands before it.
@@ -97,6 +108,8 @@ function DropBefore([IntPtr] $Source, [string] $Name, [IntPtr] $Target, [int] $I
 }
 
 function AddEmptyTab([IntPtr] $Window) {
+    [DragNative]::SetForegroundWindow($Window) | Out-Null
+    Start-Sleep -Milliseconds 200
     $plus = [System.Windows.Automation.AutomationElement]::FromHandle($Window).FindFirst([System.Windows.Automation.TreeScope]::Descendants,
         (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::SplitButton)))
     $r = $plus.Current.BoundingRectangle
@@ -127,8 +140,8 @@ try {
 
     Fresh
     $new = TearOut $w1 'Gamma.pdf' -Escape
-    $all = @(Get-AllTabNames)
-    Record 'Esc during tear-out: no lost or duplicated tab' ((($all | Sort-Object) -join ',') -eq 'Alpha.pdf,Gamma.pdf') "$(Describe) (new windows: $($new.Count))"
+    Record 'Esc cancels tear-out without creating a window or moving the tab' `
+        ($new.Count -eq 0 -and (Get-AppWindows).Count -eq 1 -and ((@(Get-TabNames $w1) | Sort-Object) -join ',') -eq 'Alpha.pdf,Gamma.pdf') (Describe)
 
     Fresh
     AddEmptyTab $w1
@@ -140,7 +153,9 @@ try {
         [DragNative]::MoveWindow($w2, 400, 560, 700, 400, $true) | Out-Null
         Start-Sleep -Milliseconds 700
         $last = @(Get-TabElements $w2)[-1].Current.BoundingRectangle
-        Drag (Center (Find-Tab $w1 'Alpha.pdf')) @([int]($last.X + $last.Width + 15), [int]($last.Y + $last.Height / 2))
+        # Keep the target strip visible when the source is activated by the drag.
+        [DragNative]::MoveWindow($w1, 80, 60, 1100, 380, $true) | Out-Null
+        Drag (Center (Find-Tab $w1 'Alpha.pdf')) @([int]($last.X + $last.Width - 8), [int]($last.Y + $last.Height / 2))
         $tabs2 = @(Get-TabNames $w2)
         Record 'PDF dropped into window holding a single empty tab keeps that empty tab' (($tabs2 -join ',') -eq 'New tab,Alpha.pdf') (Describe)
 
@@ -184,3 +199,4 @@ finally {
     Restore-Settings
     Write-Results
 }
+if (@($results | Where-Object Result -eq 'FAIL').Count) { exit 1 }

@@ -423,7 +423,6 @@ namespace winrt::urPDF::implementation
                 {
                     self->m_lastActiveWindow = nullptr;
                 }
-                std::erase_if(self->m_tearOutWindows, [&](auto const& entry) { return entry.second == id; });
                 self->m_windowsInMoveSize.erase(id.Value);
                 std::erase(self->m_pendingWindowCloses, id);
                 self->SchedulePendingWindowCloses();
@@ -461,17 +460,6 @@ namespace winrt::urPDF::implementation
         return nullptr;
     }
 
-    void App::TrackTearOutWindow(Microsoft::UI::Xaml::Controls::TabViewItem const& tab, Microsoft::UI::WindowId const& id)
-    {
-        if (tab && FindWindow(id)) { m_tearOutWindows.insert_or_assign(tab, id); }
-    }
-
-    winrt::urPDF::MainWindow App::FindTearOutWindow(Microsoft::UI::Xaml::Controls::TabViewItem const& tab) const
-    {
-        auto entry = m_tearOutWindows.find(tab);
-        return entry != m_tearOutWindows.end() ? FindWindow(entry->second) : nullptr;
-    }
-
     void App::RequestCloseEmptyWindow(Microsoft::UI::WindowId const& id)
     {
         if (std::find(m_pendingWindowCloses.begin(), m_pendingWindowCloses.end(), id) == m_pendingWindowCloses.end())
@@ -479,6 +467,14 @@ namespace winrt::urPDF::implementation
             m_pendingWindowCloses.push_back(id);
         }
         SchedulePendingWindowCloses();
+    }
+
+    void App::RefreshTabDragRegions()
+    {
+        for (auto const& window : m_windows)
+        {
+            get_self<MainWindow>(window.as<winrt::urPDF::MainWindow>())->UpdateTitleBarPassthroughRegions();
+        }
     }
 
     void App::WindowMoveSizeEntered(Microsoft::UI::WindowId const& id)
