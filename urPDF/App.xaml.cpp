@@ -39,7 +39,6 @@ namespace
     std::shared_ptr<urpdf::MuPdfRuntime> CreateMuPdfRuntime()
     {
 #ifdef _DEBUG
-        // Lets the smoke tests simulate a MuPDF initialization failure.
         if (::GetEnvironmentVariableW(L"URPDF_SIMULATE_MUPDF_INIT_FAILURE", nullptr, 0) > 0)
         {
             throw std::runtime_error("Simulated MuPDF initialization failure.");
@@ -48,7 +47,6 @@ namespace
         return std::make_shared<urpdf::MuPdfRuntime>();
     }
 
-    // Call from a catch block.
     void ReportStartupError() noexcept
     {
         std::wstring details;
@@ -61,10 +59,7 @@ namespace
         OutputDebugStringW((L"urPDF: " + message + L"\n").c_str());
         ::MessageBoxW(nullptr, message.c_str(), L"urPDF", MB_OK | MB_ICONERROR);
     }
-
-    // Buffers activations redirected to the main instance. AppInstance::Activated is raised
-    // on a background thread and may arrive before the UI is ready, so activations are queued
-    // until App attaches and are then handled on the UI thread.
+    
     class RedirectedActivations
     {
     public:
@@ -167,14 +162,10 @@ namespace
         ::CloseHandle(processInfo.hProcess);
     }
 
-    // Returns true when the activation was handed to the running main instance and this
-    // process should exit.
     bool RedirectActivationToMainInstance(int argc, wchar_t const* const* argv)
     {
         auto mainInstance = lifecycle::AppInstance::FindOrRegisterForKey(MainInstanceKey);
         if (mainInstance.IsCurrent()) { return false; }
-        // The main instance would resolve a relative path against its own working directory,
-        // so start a process with the absolute path, which then redirects as usual.
         if (urpdf::HasRelativeDocumentPathArgument(argc, argv))
         {
             auto path = urpdf::DocumentPathArgument(argc, argv);
@@ -188,8 +179,6 @@ namespace
         auto activationArgs = lifecycle::AppInstance::GetCurrent().GetActivatedEventArgs();
         ::AllowSetForegroundWindow(mainInstance.ProcessId());
 
-        // Blocking the STA thread with .get() is not allowed; wait on a worker thread instead
-        // and keep pumping COM calls while it runs.
         winrt::handle redirected{ ::CreateEventW(nullptr, TRUE, FALSE, nullptr) };
         winrt::check_bool(static_cast<bool>(redirected));
         bool succeeded = false;
@@ -212,8 +201,6 @@ namespace
         return succeeded;
     }
 
-    // Stops routing new launches to this process. Called as soon as the last window closes,
-    // because the process may keep running while background MuPDF work finishes.
     void UnregisterMainInstance() noexcept
     {
         try { lifecycle::AppInstance::GetCurrent().UnregisterKey(); } catch (...) {}
@@ -262,9 +249,6 @@ namespace
         return documents;
     }
 
-    // An activation redirected just before the last window closed reaches this process when it
-    // can no longer open windows, and the redirecting process has already exited. Hand each such
-    // activation to a new urPDF process, which becomes the main instance.
     void RelaunchUnhandledActivations() noexcept
     {
         try
@@ -401,7 +385,7 @@ namespace winrt::urPDF::implementation
         {
             return window.as<winrt::urPDF::MainWindow>();
         }
-        // The last active window was closed and no other urPDF window has been activated since.
+
         for (auto window = m_windows.rbegin(); window != m_windows.rend(); ++window)
         {
             if (isAvailable(*window)) { return window->as<winrt::urPDF::MainWindow>(); }
@@ -529,8 +513,6 @@ int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         return *exitCode;
     }
 
-    // Created before this process can become the main instance, so a process that cannot
-    // open documents never receives activations.
     std::shared_ptr<urpdf::MuPdfRuntime> runtime;
     try
     {
@@ -547,7 +529,6 @@ int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     catch (...) { OutputDebugStringW(L"urPDF: failed to redirect activation to the main instance.\n"); }
     if (redirected) { return 0; }
 
-    // Subscribe before the UI starts so that activations redirected during startup are buffered.
     winrt::event_token activatedToken{};
     try
     {

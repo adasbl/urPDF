@@ -10,7 +10,9 @@
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
                 <!-- Other merged dictionaries here -->
             </ResourceDictionary.MergedDictionaries>
-            <!-- Other app resources here -->
+            <!-- TabView uses these limits when calculating widths and overflow. -->
+            <x:Double x:Key="TabViewItemMinWidth">200</x:Double>
+            <x:Double x:Key="TabViewItemMaxWidth">200</x:Double>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

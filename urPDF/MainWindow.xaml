@@ -48,6 +48,7 @@
                              IsAddTabButtonVisible="False"
                              CanReorderTabs="True"
                              CanDragTabs="True"
+                             TabWidthMode="Equal"
                              CanTearOutTabs="False"
                              AllowDropTabs="True"
                              AllowDrop="True"
@@ -63,6 +64,10 @@
                              SelectionChanged="TabView_SelectionChanged">
                         <TabView.Resources>
                             <ResourceDictionary>
+                                <Style TargetType="TabViewItem">
+                                    <Setter Property="MinWidth" Value="{StaticResource TabViewItemMinWidth}"/>
+                                    <Setter Property="MaxWidth" Value="{StaticResource TabViewItemMaxWidth}"/>
+                                </Style>
                                 
                                 <Style TargetType="primitives:TabViewListView">
                                     <Setter Property="ItemContainerTransitions">

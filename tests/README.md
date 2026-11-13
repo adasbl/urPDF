@@ -58,6 +58,8 @@ restore the user settings they change and print a PASS/FAIL table.
   and empty tabs, and moving tabs between windows. It checks that tabs stay in
   their source window until the mouse is released and that Esc cancels the drag
   without opening a window.
+  Tab widths are checked for short and long filenames, empty and selected tabs,
+  and tabs moved to a new window, accounting for Windows DPI scaling.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests\smoke\ActivationSmoke.ps1

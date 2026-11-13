@@ -226,7 +226,6 @@ namespace winrt::urPDF::implementation
         PdfTabInfo(std::shared_ptr<urpdf::MuPdfRuntime> runtime, std::string documentPath);
         ~PdfTabInfo();
 
-        // Worker thread only, with m_documentMutex held.
         void OpenDocument();
 
         winrt::hstring m_openedFilePath;
@@ -258,8 +257,6 @@ namespace winrt::urPDF::implementation
     struct PendingDocumentOpen
     {
         urpdf::WindowCreationOptions document;
-        // Without a value the document fills the empty tab selected when loading completes.
-        // With a value it fills that tab if it is still empty and in this window, or opens a new tab.
         std::optional<winrt::weak_ref<controls::TabViewItem>> targetTab;
     };
 
@@ -281,8 +278,7 @@ namespace winrt::urPDF::implementation
 
         winrt::fire_and_forget OpenPdfFileAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         winrt::fire_and_forget OpenPdfInNewWindowAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
-        void OpenDocument(urpdf::WindowCreationOptions const& document,
-            std::optional<winrt::weak_ref<controls::TabViewItem>> targetTab = std::nullopt);
+        void OpenDocument(urpdf::WindowCreationOptions const& document, std::optional<winrt::weak_ref<controls::TabViewItem>> targetTab = std::nullopt);
         void BringToFront();
         void UpdateTitleBarPassthroughRegions();
         bool CanDetachTab(controls::TabViewItem const& tab);
@@ -391,11 +387,8 @@ namespace winrt::urPDF::implementation
         bool TransferTabFrom(MainWindow& source, controls::TabViewItem const& tab, int32_t index);
         std::shared_ptr<PdfTabInfo> DetachTabForTransfer(controls::TabViewItem const& tab, bool allowViewRestore);
         void ShutdownMuPdfWork() noexcept;
-        void CompleteDocumentOpen(std::shared_ptr<PdfTabInfo> const& pdfTab, std::uint64_t generation,
-            int pagecount, std::vector<fz_rect> pageBounds, std::exception_ptr error);
-        void CompletePageRender(std::weak_ptr<PdfTabInfo> const& weakTab, PageRenderMetrics metrics,
-            winrt::Windows::Graphics::Imaging::SoftwareBitmap const& bitmap, bool rendered,
-            std::exception_ptr error, bool scheduleNext = true);
+        void CompleteDocumentOpen(std::shared_ptr<PdfTabInfo> const& pdfTab, std::uint64_t generation, int pagecount, std::vector<fz_rect> pageBounds, std::exception_ptr error);
+        void CompletePageRender(std::weak_ptr<PdfTabInfo> const& weakTab, PageRenderMetrics metrics, winrt::Windows::Graphics::Imaging::SoftwareBitmap const& bitmap, bool rendered, std::exception_ptr error, bool scheduleNext = true);
         void ReadViewGeometry(std::shared_ptr<PdfTabInfo> const& pdfTab, std::vector<urpdf::PageRect>& pages, urpdf::ViewportGeometry& viewport);
         std::optional<int32_t> VisiblePageNumber(std::shared_ptr<PdfTabInfo> const& pdfTab);
         std::optional<urpdf::DocumentViewState> CaptureViewState(std::shared_ptr<PdfTabInfo> const& pdfTab);

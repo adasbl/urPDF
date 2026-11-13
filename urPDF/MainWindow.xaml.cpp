@@ -90,7 +90,6 @@ namespace
 
     LRESULT CALLBACK TrackTabDragKey(int code, WPARAM key, LPARAM state)
     {
-        // The OLE drag loop consumes Esc before XAML receives a KeyDown event.
         if (code >= 0 && key == VK_ESCAPE && !(state & 0x80000000)) { TabDragKeyboard.cancelled = true; }
         return CallNextHookEx(nullptr, code, key, state);
     }
@@ -103,8 +102,6 @@ namespace
     controls::TabViewItem CreateTabItem()
     {
         controls::TabViewItem tab;
-        // Pages live outside TabView. Unique, nonvisual content lets WinUI identify
-        // the dragged tab without reparenting a UI element between windows.
         tab.Content(winrt::make<EmptyTabContent>());
         return tab;
     }
@@ -112,8 +109,6 @@ namespace
     controls::TabViewItem DraggedTab(xaml::DragEventArgs const& args)
     {
         auto properties = args.DataView().Properties();
-        // All app windows share this UI thread. Keep XAML objects here; only
-        // serializable values may travel through the OLE property bag.
         return properties.HasKey(TabDragProperty) ? TabDragKeyboard.tab : nullptr;
     }
 
@@ -827,7 +822,6 @@ namespace winrt::urPDF::implementation
         auto root = button.XamlRoot();
         if (!root) { return; }
 
-        // Keep tabs and the add button clear of the system caption buttons.
         const double rightInset = AppWindow().TitleBar().RightInset() / root.RasterizationScale();
         auto titleBarMargin = AppTitleBar().Margin();
         if (titleBarMargin.Right != rightInset)
@@ -867,8 +861,6 @@ namespace winrt::urPDF::implementation
             const auto stripRect = toRect(tabView);
             if (TabDragKeyboard.tab && stripRect)
             {
-                // Blank strip space is a drop target during a drag; otherwise it
-                // remains caption space for moving the window.
                 rects.push_back(*stripRect);
             }
             for (auto const& item : tabView.TabItems())
@@ -1236,8 +1228,6 @@ namespace winrt::urPDF::implementation
         controls::TabViewItem attached{ nullptr };
         try
         {
-            // OLE may still own the source container in its drag visual. Transfer
-            // document state into a fresh container rather than reparenting it.
             if (isEmptyTab)
             {
                 auto incoming = CreateTabItem();
@@ -1275,7 +1265,6 @@ namespace winrt::urPDF::implementation
             return;
         }
 
-        // ListView supplies the tab visual that follows the pointer during the drag.
         TabDragKeyboard.Stop();
         TabDragKeyboard.cancelled = false;
         TabDragKeyboard.tab = tab;
@@ -1290,7 +1279,6 @@ namespace winrt::urPDF::implementation
             const auto position = AppWindow().Position();
             const auto tabPosition = tab.TransformToVisual(sender).TransformPoint({});
             const auto scale = tab.XamlRoot().RasterizationScale();
-            // The first tab in the new window replaces this tab's old strip position.
             const auto firstTab = sender.TabItems().GetAt(0).as<controls::TabViewItem>();
             const auto firstPosition = firstTab.TransformToVisual(sender).TransformPoint({});
             m_tabDragOffset = { cursor.x - position.X - static_cast<int32_t>((tabPosition.X - firstPosition.X) * scale),
@@ -1339,7 +1327,6 @@ namespace winrt::urPDF::implementation
         bool moved = false;
         if (get_self<MainWindow>(source) == this)
         {
-            // TabView handles ordinary reordering. This also covers its footer.
             uint32_t oldIndex;
             auto items = tabView.TabItems();
             if (items.IndexOf(tab, oldIndex))
@@ -1364,7 +1351,6 @@ namespace winrt::urPDF::implementation
     void MainWindow::TabView_TabDroppedOutside(controls::TabView const& sender,
         controls::TabViewTabDroppedOutsideEventArgs const& args)
     {
-        // WinUI also raises this event for a cancelled drag (DropResult == None).
         if (sender != MainTabView() || TabDragKeyboard.cancelled || (GetAsyncKeyState(VK_ESCAPE) & 0x8000)
             || (GetAsyncKeyState(VK_LBUTTON) & 0x8000)) { return; }
         auto tab = args.Tab();
@@ -1452,7 +1438,6 @@ namespace winrt::urPDF::implementation
     {
         auto strongThis = get_strong();
         auto deferral = args.GetDeferral();
-        // The drop zone is the start screen of the selected empty tab.
         winrt::weak_ref<controls::TabViewItem> targetTab;
         if (auto selectedTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>()) { targetTab = winrt::make_weak(selectedTab); }
         auto storageItems = co_await args.DataView().GetStorageItemsAsync();
@@ -1554,8 +1539,6 @@ namespace winrt::urPDF::implementation
         m_openErrorMessages.clear();
     }
 
-    // Resolves a queued path; the resolved file goes back to the front of the queue so that
-    // requests keep their order even if the window became busy in the meantime.
     winrt::fire_and_forget MainWindow::OpenPdfPathAsync(PendingDocumentOpen request)
     {
         auto strongThis = get_strong();

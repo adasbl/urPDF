@@ -12,6 +12,7 @@ public static class DragNative {
     [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
     [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hwnd, int x, int y, int width, int height, bool repaint);
@@ -101,7 +102,7 @@ function DropInto([IntPtr] $Source, [string] $Name, [IntPtr] $Target) {
 
 # Drops onto the left edge of the target's tab at $Index, so the tab lands before it.
 function DropBefore([IntPtr] $Source, [string] $Name, [IntPtr] $Target, [int] $Index) {
-    [DragNative]::MoveWindow($Source, 400, 560, 700, 400, $true) | Out-Null
+    [DragNative]::MoveWindow($Source, 400, 560, 1100, 400, $true) | Out-Null
     Start-Sleep -Milliseconds 700
     $tab = @(Get-TabElements $Target)[$Index].Current.BoundingRectangle
     Drag (Center (Find-Tab $Source $Name)) @([int]($tab.X + 8), [int]($tab.Y + $tab.Height / 2))
@@ -118,8 +119,35 @@ function AddEmptyTab([IntPtr] $Window) {
     Start-Sleep -Seconds 1
 }
 
+function RecordTabWidths([IntPtr] $Window, [string] $Name, [int] $ExpectedCount) {
+    $scale = [DragNative]::GetDpiForWindow($Window) / 96.0
+    $widths = @(Get-TabElements $Window | ForEach-Object {
+        $width = $_.Current.BoundingRectangle.Width
+        $selection = $_.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+        # UIA includes WinUI's selected-tab corner flares, 4 DIPs on each side.
+        if ($selection.Current.IsSelected) { $width -= 8.0 * $scale }
+        $width
+    })
+    $expected = 200.0 * $scale
+    $wrong = @($widths | Where-Object { [double]::IsNaN($_) -or [double]::IsInfinity($_) -or [Math]::Abs($_ - $expected) -gt 1.0 })
+    Record $Name ($widths.Count -eq $ExpectedCount -and $wrong.Count -eq 0) "expected=$expected px; actual=$($widths -join ', ')"
+}
+
 try {
     Set-OpenInExisting $true
+
+    Fresh
+    [DragNative]::MoveWindow($w1, 80, 80, 1700, 650, $true) | Out-Null
+    $longName = 'A very long PDF document filename that should be truncated instead of widening the tab.pdf'
+    $longPdf = Join-Path (Split-Path $pdfA) $longName
+    New-PdfFixture $longPdf
+    Start-Secondary @(Quote $longPdf) | Out-Null
+    Wait-Until { (Get-AllTabNames) -contains $longName } | Out-Null
+    AddEmptyTab $w1
+    RecordTabWidths $w1 'Short, long and empty tabs have the same fixed width' 4
+    (Find-Tab $w1 $longName).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    Start-Sleep -Milliseconds 500
+    RecordTabWidths $w1 'Selecting a long filename does not change tab widths' 4
 
     Fresh
     $alpha = Center (Find-Tab $w1 'Alpha.pdf')
@@ -133,6 +161,7 @@ try {
     $ok = $new.Count -eq 1 -and (@(Get-TabNames $new[0]) -join ',') -eq 'Gamma.pdf' -and (@(Get-TabNames $w1) -join ',') -eq 'Alpha.pdf'
     Record 'Tear out PDF tab into a new window (one tab, no duplicates)' $ok (Describe)
     if ($new.Count -eq 1) {
+        RecordTabWidths $new[0] 'Torn-out tab retains its fixed width' 1
         DropInto $new[0] 'Gamma.pdf' $w1
         $ok = (Wait-Until { (Get-AppWindows).Count -eq 1 } 5) -and (@(Get-TabNames $w1) -join ',') -eq 'Alpha.pdf,Gamma.pdf'
         Record 'Move last tab into existing window at drop index; empty source closes' $ok (Describe)
@@ -150,7 +179,7 @@ try {
     Record 'Tear out empty tab: new window has exactly that one tab' $ok (Describe)
     if ($new.Count -eq 1) {
         $w2 = $new[0]
-        [DragNative]::MoveWindow($w2, 400, 560, 700, 400, $true) | Out-Null
+        [DragNative]::MoveWindow($w2, 400, 560, 1100, 400, $true) | Out-Null
         Start-Sleep -Milliseconds 700
         $last = @(Get-TabElements $w2)[-1].Current.BoundingRectangle
         # Keep the target strip visible when the source is activated by the drag.
@@ -162,7 +191,7 @@ try {
         $script:main.Refresh(); Record 'Process alive after PDF transfer' (!$script:main.HasExited) "windows=$((Get-AppWindows).Count)"
         AddEmptyTab $w1
         $script:main.Refresh(); Record 'Empty tab added in source' (!$script:main.HasExited -and @(Get-TabNames $w1) -contains 'New tab') (Describe)
-        [DragNative]::MoveWindow($w2, 80, 60, 1000, 380, $true) | Out-Null
+        [DragNative]::MoveWindow($w2, 80, 60, 1700, 380, $true) | Out-Null
         try { DropInto $w1 'New tab' $w2 } catch { Record 'Empty-tab drop step' $false $_.Exception.Message }
         $script:main.Refresh(); Record 'Process alive after empty-tab transfer' (!$script:main.HasExited) "exit=$(if ($script:main.HasExited) { $script:main.ExitCode })"
         $tabs2 = @(Get-TabNames $w2)
@@ -181,8 +210,8 @@ try {
     Start-Secondary @() | Out-Null
     Wait-Until { (Get-AppWindows).Count -eq 3 } | Out-Null
     $w3 = @(Get-AppWindows | Where-Object { $_ -ne $w1 -and $_ -ne $w2 })[0]
-    [DragNative]::MoveWindow($w3, 80, 60, 1000, 380, $true) | Out-Null
-    [DragNative]::MoveWindow($w2, 1100, 560, 700, 400, $true) | Out-Null
+    [DragNative]::MoveWindow($w3, 80, 60, 1700, 380, $true) | Out-Null
+    [DragNative]::MoveWindow($w2, 1100, 560, 1100, 400, $true) | Out-Null
     DropInto $w1 'Alpha.pdf' $w3
     Record 'PDF dropped into a new window keeps its startup tab' ((@(Get-TabNames $w3) -join ',') -eq 'New tab,Alpha.pdf') (Describe)
     AddEmptyTab $w3
