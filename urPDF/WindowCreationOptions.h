@@ -9,5 +9,6 @@ namespace urpdf
         winrt::Windows::Storage::StorageFile file{ nullptr };
         winrt::hstring filePath;
         bool createInitialEmptyTab{ true };
+        bool deferPresentation{ false };
     };
 }

@@ -35,6 +35,7 @@ extern "C" {
 
 // Windows SDK / WinRT
 #include <shobjidl_core.h>
+#include <dwmapi.h>
 #include <MemoryBuffer.h>
 #include <printmanagerinterop.h>
 #include <microsoft.ui.xaml.window.h>
@@ -52,6 +53,8 @@ extern "C" {
 #include <winrt/Microsoft.UI.Windowing.h>
 #include <winrt/Microsoft.UI.Input.h>
 #include <winrt/Windows.UI.Xaml.Interop.h>
+
+#pragma comment(lib, "dwmapi.lib")
 
 
 namespace xaml        = winrt::Microsoft::UI::Xaml;
@@ -377,6 +380,8 @@ namespace winrt::urPDF::implementation
     {
         if (m_isClosed) { return; }
         m_isClosed = true;
+        m_firstFrameRenderedRevoker.revoke();
+        CloseTransferredSourceWindow();
         if (m_moveSizeInput)
         {
             if (m_enteredMoveSizeToken.value) { m_moveSizeInput.EnteredMoveSize(m_enteredMoveSizeToken); }
@@ -1260,7 +1265,8 @@ namespace winrt::urPDF::implementation
         }
         if (source.MainTabView().TabItems().Size() == 0)
         {
-            xaml::Application::Current().as<App>()->RequestCloseEmptyWindow(source.AppWindow().Id());
+            if (m_presentationPending) { m_sourceWindowToClose = source.AppWindow().Id(); }
+            else { xaml::Application::Current().as<App>()->RequestCloseEmptyWindow(source.AppWindow().Id()); }
         }
         BringToFront();
         return true;
@@ -1379,6 +1385,7 @@ namespace winrt::urPDF::implementation
         auto app = xaml::Application::Current().as<App>();
         urpdf::WindowCreationOptions options;
         options.createInitialEmptyTab = false;
+        options.deferPresentation = true;
         auto window = app->CreateWindow(options);
         try
         {
@@ -1388,7 +1395,9 @@ namespace winrt::urPDF::implementation
                 window.AppWindow().MoveAndResize({ cursor.x - m_tabDragOffset.X, cursor.y - m_tabDragOffset.Y,
                     AppWindow().Size().Width, AppWindow().Size().Height });
             }
-            if (!get_self<MainWindow>(window)->TransferTabFrom(*this, tab, 0)) { window.Close(); }
+            auto destination = get_self<MainWindow>(window);
+            if (!destination->TransferTabFrom(*this, tab, 0)) { window.Close(); }
+            else { destination->ShowPreparedWindow(); }
         }
         catch (...)
         {
@@ -1631,9 +1640,78 @@ namespace winrt::urPDF::implementation
             });
     }
 
-    void MainWindow::BringToFront()
+    void MainWindow::PrepareForDeferredPresentation()
+    {
+        HWND hwnd{};
+        auto native = this->try_as<::IWindowNative>();
+        if (!native) { throw winrt::hresult_no_interface(); }
+        winrt::check_hresult(native->get_WindowHandle(&hwnd));
+        const BOOL cloak = TRUE;
+        winrt::check_hresult(DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, &cloak, sizeof(cloak)));
+        m_presentationPending = true;
+    }
+
+    void MainWindow::ShowPreparedWindow()
     {
         if (m_isClosed) { return; }
+        if (!m_presentationPending) { BringToFront(); return; }
+
+        // A cloaked window is still composed by DWM. Wait for its initialized
+        // XAML tree to render before making the native window visible to users.
+        m_firstFrameRenderedRevoker = media::CompositionTarget::Rendered(winrt::auto_revoke,
+            [weakThis = get_weak()](auto const&, auto const&)
+            {
+                auto self = weakThis.get();
+                if (!self || self->m_isClosed || !self->MainWindowUI().IsLoaded()
+                    || self->MainWindowUI().ActualWidth() <= 0) { return; }
+                self->m_firstFrameRenderedRevoker.revoke();
+                self->DispatcherQueue().TryEnqueue([weakThis]
+                    {
+                        if (auto window = weakThis.get()) { window->CompleteDeferredPresentation(); }
+                    });
+            });
+        Activate();
+    }
+
+    winrt::fire_and_forget MainWindow::CompleteDeferredPresentation()
+    {
+        auto lifetime = get_strong();
+        if (m_isClosed || !m_presentationPending) { co_return; }
+        try
+        {
+            co_await media::CompositionTarget::GetCompositorForCurrentThread().RequestCommitAsync();
+        }
+        catch (winrt::hresult_error const&)
+        {
+            // Closing the window can dispose its compositor during the await.
+            if (m_isClosed) { co_return; }
+        }
+        if (m_isClosed) { co_return; }
+        // Submit the rendered surface before removing the compositor's cloak.
+        DwmFlush();
+        HWND hwnd{};
+        auto native = this->try_as<::IWindowNative>();
+        if (!native) { throw winrt::hresult_no_interface(); }
+        winrt::check_hresult(native->get_WindowHandle(&hwnd));
+        const BOOL cloak = FALSE;
+        winrt::check_hresult(DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, &cloak, sizeof(cloak)));
+        m_presentationPending = false;
+        BringToFront();
+        DwmFlush();
+        CloseTransferredSourceWindow();
+    }
+
+    void MainWindow::CloseTransferredSourceWindow()
+    {
+        if (auto source = std::exchange(m_sourceWindowToClose, std::nullopt))
+        {
+            xaml::Application::Current().as<App>()->RequestCloseEmptyWindow(*source);
+        }
+    }
+
+    void MainWindow::BringToFront()
+    {
+        if (m_isClosed || m_presentationPending) { return; }
         if (auto presenter = AppWindow().Presenter().try_as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>())
         {
             if (presenter.State() == winrt::Microsoft::UI::Windowing::OverlappedPresenterState::Minimized)

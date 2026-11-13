@@ -60,10 +60,14 @@ restore the user settings they change and print a PASS/FAIL table.
   without opening a window.
   Tab widths are checked for short and long filenames, empty and selected tabs,
   and tabs moved to a new window, accounting for Windows DPI scaling.
+  With `-CheckPresentation`, it also samples the desktop output when torn-out
+  windows first appear, checking for black startup frames and verifying that
+  tearing out the last tab replaces and closes its source window.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests\smoke\ActivationSmoke.ps1
 powershell -ExecutionPolicy Bypass -File tests\smoke\DragSmoke.ps1
+powershell -ExecutionPolicy Bypass -File tests\smoke\DragSmoke.ps1 -CheckPresentation
 ```
 
 The drag tests take over the mouse and keyboard and need an interactive desktop

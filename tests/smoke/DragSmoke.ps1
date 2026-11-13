@@ -1,9 +1,16 @@
 ﻿# Drags tabs with the real mouse between urPDF windows (MSI variant).
 # Takes over the mouse and keyboard; do not touch them while the script runs.
-param([string] $Executable = "$PSScriptRoot/../../out/msi/x64/Debug/bin/urPDF.exe")
+param(
+    [string] $Executable = "$PSScriptRoot/../../out/msi/x64/Debug/bin/urPDF.exe",
+    [switch] $CheckPresentation
+)
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/SmokeLib.ps1"
 Assert-NoRunningInstance
+if ($CheckPresentation) {
+    Add-Type -Path "$PSScriptRoot/WindowPresentationCapture.cs" -ReferencedAssemblies System.Drawing
+    [WindowPresentationCapture]::OutputDirectory = Join-Path $PSScriptRoot '../../out/presentation-frames'
+}
 
 Add-Type @'
 using System;
@@ -67,6 +74,19 @@ function Drag([int[]] $From, [int[]] $To, [switch] $Escape, [scriptblock] $While
 
 function Describe { (Get-AppWindows | ForEach-Object { '[' + ((Get-TabNames $_) -join ', ') + ']' }) -join ' ' }
 
+function Wait-PdfReady([IntPtr] $Window) {
+    $windowRoot = [System.Windows.Automation.AutomationElement]::FromHandle($Window)
+    $pageFieldCondition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Spinner)
+    if (!(Wait-Until {
+        $pageField = $windowRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $pageFieldCondition)
+        if ($null -eq $pageField) { return $false }
+        $pageField.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value -eq 1
+    })) {
+        throw 'The one-page PDF fixture did not finish loading.'
+    }
+}
+
 function Fresh {
     if ($script:main -and !$script:main.HasExited) { Stop-Main | Out-Null }
     Start-Main @(Quote $pdfA)
@@ -77,14 +97,26 @@ function Fresh {
     [DragNative]::MoveWindow($script:w1, 80, 80, 1200, 650, $true) | Out-Null
     [DragNative]::SetForegroundWindow($script:w1) | Out-Null
     Start-Sleep -Seconds 1
+    Wait-PdfReady $script:w1
 }
 
 function TearOut([IntPtr] $Window, [string] $Name, [switch] $Escape) {
     $before = @(Get-AppWindows)
     $point = Center (Find-Tab $Window $Name)
-    Drag $point @(($point[0] + 250), ($point[1] + 420)) -Escape:$Escape -WhileHeld {
-        Record 'Dragging outside keeps the tab in its source until release' `
-            ((Get-AppWindows).Count -eq $before.Count -and @(Get-TabNames $Window) -contains $Name) (Describe)
+    if ($CheckPresentation) { [WindowPresentationCapture]::Start([uint32]$script:main.Id, [IntPtr[]]$before) }
+    try {
+        Drag $point @(($point[0] + 250), ($point[1] + 420)) -Escape:$Escape -WhileHeld {
+            Record 'Dragging outside keeps the tab in its source until release' `
+                ((Get-AppWindows).Count -eq $before.Count -and @(Get-TabNames $Window) -contains $Name) (Describe)
+        }
+    }
+    finally {
+        if ($CheckPresentation) { $frames = @([WindowPresentationCapture]::Stop()) }
+    }
+    if ($CheckPresentation -and !$Escape) {
+        $ok = $frames.Count -eq 1 -and $frames[0].VisibleSamples -gt 0 -and $frames[0].BlackSamples -eq 0
+        $detail = ($frames | ForEach-Object { "visible=$($_.VisibleSamples), black=$($_.BlackSamples), cloaked=$($_.CloakedSamples)" }) -join '; '
+        Record "Torn-out '$Name' window has no sampled black startup frames" $ok $detail
     }
     @(Get-AppWindows | Where-Object { $before -notcontains $_ })
 }
@@ -93,6 +125,7 @@ function DropInto([IntPtr] $Source, [string] $Name, [IntPtr] $Target) {
     # Keep both source tabs visible, with room for the system caption buttons.
     [DragNative]::MoveWindow($Source, 400, 560, 1200, 400, $true) | Out-Null
     Start-Sleep -Milliseconds 700
+    if ($Name -ne 'New tab') { Wait-PdfReady $Source }
     $last = @(Get-TabElements $Target)[-1].Current.BoundingRectangle
     Drag (Center (Find-Tab $Source $Name)) @([int]($last.X + $last.Width + 15), [int]($last.Y + $last.Height / 2)) -WhileHeld {
         Record 'Hovering over another strip keeps the tab in its source until release' `
@@ -104,6 +137,7 @@ function DropInto([IntPtr] $Source, [string] $Name, [IntPtr] $Target) {
 function DropBefore([IntPtr] $Source, [string] $Name, [IntPtr] $Target, [int] $Index) {
     [DragNative]::MoveWindow($Source, 400, 560, 1200, 400, $true) | Out-Null
     Start-Sleep -Milliseconds 700
+    if ($Name -ne 'New tab') { Wait-PdfReady $Source }
     $tab = @(Get-TabElements $Target)[$Index].Current.BoundingRectangle
     Drag (Center (Find-Tab $Source $Name)) @([int]($tab.X + 8), [int]($tab.Y + $tab.Height / 2))
 }
@@ -111,15 +145,25 @@ function DropBefore([IntPtr] $Source, [string] $Name, [IntPtr] $Target, [int] $I
 function AddEmptyTab([IntPtr] $Window) {
     [DragNative]::SetForegroundWindow($Window) | Out-Null
     Start-Sleep -Milliseconds 200
-    $plus = [System.Windows.Automation.AutomationElement]::FromHandle($Window).FindFirst([System.Windows.Automation.TreeScope]::Descendants,
-        (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::SplitButton)))
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($Window)
+    $splitButtonCondition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::SplitButton)
+    if (!(Wait-Until { $null -ne $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $splitButtonCondition) })) {
+        throw 'New tab button did not become available.'
+    }
+    $plus = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $splitButtonCondition)
     $plus.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Seconds 1
 }
 
 function RecordTabWidths([IntPtr] $Window, [string] $Name, [int] $ExpectedCount) {
     $scale = [DragNative]::GetDpiForWindow($Window) / 96.0
-    $widths = @(Get-TabElements $Window | ForEach-Object {
+    $tabSnapshot = @{ Tabs = @() }
+    Wait-Until {
+        $tabSnapshot.Tabs = @(Get-TabElements $Window)
+        $tabSnapshot.Tabs.Count -eq $ExpectedCount
+    } | Out-Null
+    $widths = @($tabSnapshot.Tabs | ForEach-Object {
         $width = $_.Current.BoundingRectangle.Width
         $selection = $_.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
         # UIA includes WinUI's selected-tab corner flares, 4 DIPs on each side.
@@ -158,6 +202,15 @@ try {
     $new = TearOut $w1 'Gamma.pdf'
     $ok = $new.Count -eq 1 -and (@(Get-TabNames $new[0]) -join ',') -eq 'Gamma.pdf' -and (@(Get-TabNames $w1) -join ',') -eq 'Alpha.pdf'
     Record 'Tear out PDF tab into a new window (one tab, no duplicates)' $ok (Describe)
+    if ($CheckPresentation -and $new.Count -eq 1) {
+        $oldSource = $new[0]
+        [DragNative]::MoveWindow($oldSource, 80, 80, 1200, 650, $true) | Out-Null
+        [DragNative]::SetForegroundWindow($oldSource) | Out-Null
+        Start-Sleep -Milliseconds 500
+        $new = @(TearOut $oldSource 'Gamma.pdf')
+        $ok = $new.Count -eq 1 -and (Get-AppWindows) -notcontains $oldSource -and @(Get-TabNames $new[0]) -contains 'Gamma.pdf'
+        Record 'Last-tab tear-out shows its replacement and closes the empty source' $ok (Describe)
+    }
     if ($new.Count -eq 1) {
         RecordTabWidths $new[0] 'Torn-out tab retains its fixed width' 1
         DropInto $new[0] 'Gamma.pdf' $w1

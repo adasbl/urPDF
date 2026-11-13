@@ -418,8 +418,9 @@ namespace winrt::urPDF::implementation
                 }
             }
         });
+        if (options.deferPresentation) { get_self<MainWindow>(window)->PrepareForDeferredPresentation(); }
         m_windows.push_back(window);
-        window.Activate();
+        if (!options.deferPresentation) { window.Activate(); }
         return window;
     }
 

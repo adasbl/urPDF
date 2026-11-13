@@ -280,6 +280,8 @@ namespace winrt::urPDF::implementation
         winrt::fire_and_forget OpenPdfInNewWindowAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         void OpenDocument(urpdf::WindowCreationOptions const& document, std::optional<winrt::weak_ref<controls::TabViewItem>> targetTab = std::nullopt);
         void BringToFront();
+        void PrepareForDeferredPresentation();
+        void ShowPreparedWindow();
         void UpdateTitleBarPassthroughRegions();
         bool CanDetachTab(controls::TabViewItem const& tab);
         void CloseIfEmpty();
@@ -363,6 +365,9 @@ namespace winrt::urPDF::implementation
         bool m_zoomWasEnabled{ false };
         bool m_isVisibleRenderRunning{ false };
         bool m_isClosed{ false };
+        bool m_presentationPending{ false };
+        xaml::Media::CompositionTarget::Rendered_revoker m_firstFrameRenderedRevoker;
+        std::optional<winrt::Microsoft::UI::WindowId> m_sourceWindowToClose;
         winrt::Windows::Graphics::PointInt32 m_tabDragOffset{};
         winrt::Microsoft::UI::Input::InputNonClientPointerSource m_moveSizeInput{ nullptr };
         winrt::event_token m_enteredMoveSizeToken{};
@@ -382,6 +387,8 @@ namespace winrt::urPDF::implementation
         foundation::Collections::IObservableVector<foundation::IInspectable> m_pageRepeaterItems{ nullptr };
 
         void CloseTab(controls::TabViewItem const& tab);
+        winrt::fire_and_forget CompleteDeferredPresentation();
+        void CloseTransferredSourceWindow();
         bool CanTransferTab(controls::TabViewItem const& tab, bool allowViewRestore);
         bool CanReceiveTabFrom(MainWindow& source, controls::TabViewItem const& tab);
         bool TransferTabFrom(MainWindow& source, controls::TabViewItem const& tab, int32_t index);
