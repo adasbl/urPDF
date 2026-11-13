@@ -2873,6 +2873,7 @@ namespace winrt::urPDF::implementation
 
     void MainWindow::PageNumberBox_ValueChanged(controls::NumberBox const&, controls::NumberBoxValueChangedEventArgs const& args)
     {
+        if (m_viewStateGuard.IsPending()) return;
         if (std::isnan(args.NewValue())) return;
 
         int32_t newPage = static_cast<int32_t>(std::round(args.NewValue()));
