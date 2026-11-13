@@ -112,6 +112,17 @@ namespace
         return properties.HasKey(TabDragProperty) ? TabDragKeyboard.tab : nullptr;
     }
 
+    bool IsTabListDrag(xaml::DragEventArgs const& args)
+    {
+        auto element = args.OriginalSource().try_as<xaml::DependencyObject>();
+        while (element)
+        {
+            if (element.try_as<controls::Primitives::TabViewListView>()) { return true; }
+            element = media::VisualTreeHelper::GetParent(element);
+        }
+        return false;
+    }
+
     template<typename Element>
     Element FindVisualDescendant(xaml::DependencyObject const& parent, wchar_t const* name)
     {
@@ -1259,7 +1270,12 @@ namespace winrt::urPDF::implementation
         controls::TabViewTabDragStartingEventArgs const& args)
     {
         auto tab = args.Tab();
-        if (sender != MainTabView() || !CanTransferTab(tab, true))
+        auto tabView = MainTabView();
+        uint32_t index;
+        // Reordering does not transfer document ownership. View-state transfer
+        // checks belong at the drop, after the selection has settled.
+        if (sender != tabView || !tab || m_isClosed || m_isRendering || m_loadingTab
+            || !tabView.TabItems().IndexOf(tab, index))
         {
             args.Cancel(true);
             return;
@@ -1299,6 +1315,7 @@ namespace winrt::urPDF::implementation
         auto source = xaml::Application::Current().as<App>()->FindWindowForTab(tab);
         if (!source) { return; }
         auto sourceWindow = get_self<MainWindow>(source);
+        if (sourceWindow == this && IsTabListDrag(args)) { return; }
         args.AcceptedOperation((sourceWindow == this || CanReceiveTabFrom(*sourceWindow, tab))
             ? winrt::Windows::ApplicationModel::DataTransfer::DataPackageOperation::Move
             : winrt::Windows::ApplicationModel::DataTransfer::DataPackageOperation::None);
@@ -1312,12 +1329,15 @@ namespace winrt::urPDF::implementation
         auto tab = DraggedTab(args);
         auto source = xaml::Application::Current().as<App>()->FindWindowForTab(tab);
         if (!source) { return; }
+        const bool reordering = get_self<MainWindow>(source) == this;
+        if (reordering && IsTabListDrag(args)) { return; }
 
         auto tabView = MainTabView();
         const auto pointer = args.GetPosition(tabView);
         int32_t index = 0;
         for (auto const& item : tabView.TabItems())
         {
+            if (reordering && item == tab) { continue; }
             auto target = item.as<controls::TabViewItem>();
             const auto bounds = target.TransformToVisual(tabView).TransformBounds(
                 { 0, 0, static_cast<float>(target.ActualWidth()), static_cast<float>(target.ActualHeight()) });
@@ -1325,13 +1345,13 @@ namespace winrt::urPDF::implementation
             ++index;
         }
         bool moved = false;
-        if (get_self<MainWindow>(source) == this)
+        if (reordering)
         {
             uint32_t oldIndex;
             auto items = tabView.TabItems();
             if (items.IndexOf(tab, oldIndex))
             {
-                const auto newIndex = static_cast<uint32_t>(index) - (oldIndex < static_cast<uint32_t>(index) ? 1 : 0);
+                const auto newIndex = static_cast<uint32_t>(index);
                 if (newIndex != oldIndex)
                 {
                     items.RemoveAt(oldIndex);
