@@ -4,8 +4,11 @@
 #include "MainWindow.g.h"
 
 // Project
+#include "DocumentViewState.h"
+#include "MuPdfRuntime.h"
 #include "PdfPageLayout.h"
 #include "PdfRenderScale.h"
+#include "WindowCreationOptions.h"
 
 // External libraries
 extern "C" {
@@ -19,6 +22,8 @@ extern "C" {
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <exception>
 #include <functional>
 #include <list>
 #include <memory>
@@ -32,11 +37,16 @@ extern "C" {
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Graphics.h>
+#include <winrt/Windows.Graphics.Imaging.h>
+#include <winrt/Windows.Graphics.Printing.h>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Microsoft.UI.Dispatching.h>
+#include <winrt/Microsoft.UI.Input.h>
 #include <winrt/Microsoft.UI.Xaml.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 #include <winrt/Microsoft.UI.Xaml.Data.h>
+#include <winrt/Microsoft.UI.Xaml.Media.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <winrt/Microsoft.UI.Xaml.Printing.h>
 
@@ -213,21 +223,27 @@ namespace winrt::urPDF::implementation
     class PdfTabInfo
     {
     public:
-        PdfTabInfo(fz_context* m_ctx, const std::string& filePath);
+        PdfTabInfo(std::shared_ptr<urpdf::MuPdfRuntime> runtime, std::string documentPath);
         ~PdfTabInfo();
+
+        void OpenDocument();
 
         winrt::hstring m_openedFilePath;
         winrt::hstring m_fileName = L"unknown";
         std::vector<PageSlot> m_renderedPages;
         int32_t m_currentPageIndex = { 1 };
-        double m_uiZoom{ 1.0 };
+        urpdf::DocumentViewState m_viewState{};
+        bool m_hasViewAnchor{ false };
         double m_renderZoom{ 1.0 };
-        int m_currentRotation = { 0 };
         std::atomic<std::uint64_t> m_renderGeneration{ 0 };
         
-        fz_context* m_ctx{ nullptr };
+        std::shared_ptr<urpdf::MuPdfRuntime> m_runtime;
+        urpdf::MuPdfRuntime::Context m_ctx;
+        std::mutex m_documentMutex;
+        std::string m_documentPath;
         fz_document* m_doc{ nullptr };
         int m_pagecount{ 0 };
+        bool m_layoutLoaded{ false };
         std::vector<fz_rect> m_pageBounds;
         std::uint64_t m_documentId{ 0 };
         std::uint64_t m_slotBitmapReuses{ 0 };
@@ -238,9 +254,17 @@ namespace winrt::urPDF::implementation
     };
 
 
+    struct PendingDocumentOpen
+    {
+        urpdf::WindowCreationOptions document;
+        std::optional<winrt::weak_ref<controls::TabViewItem>> targetTab;
+    };
+
+
     struct MainWindow : MainWindowT<MainWindow>
     {
         MainWindow();
+        explicit MainWindow(urpdf::WindowCreationOptions const& options);
         ~MainWindow();
 
         int32_t DisplayPageNumber();
@@ -253,8 +277,23 @@ namespace winrt::urPDF::implementation
         void LoadSettings();
 
         winrt::fire_and_forget OpenPdfFileAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
-        winrt::fire_and_forget OpenPdfFileAsync(storage::StorageFile const& file);
-        winrt::fire_and_forget OpenPdfPathAsync(winrt::hstring path);        
+        winrt::fire_and_forget OpenPdfInNewWindowAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
+        void OpenDocument(urpdf::WindowCreationOptions const& document, std::optional<winrt::weak_ref<controls::TabViewItem>> targetTab = std::nullopt);
+        void BringToFront();
+        void PrepareForDeferredPresentation();
+        void ShowPreparedWindow();
+        void UpdateTitleBarPassthroughRegions();
+        bool CanDetachTab(controls::TabViewItem const& tab);
+        void CloseIfEmpty();
+        std::shared_ptr<PdfTabInfo> DetachTab(controls::TabViewItem const& tab);
+        bool DetachEmptyTab(controls::TabViewItem const& tab);
+        controls::TabViewItem AttachTab(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t index, controls::TabViewItem const& transferredTab = nullptr);
+        controls::TabViewItem AttachEmptyTab(controls::TabViewItem const& tab, int32_t index);
+        void TabView_TabDragStarting(controls::TabView const& sender, controls::TabViewTabDragStartingEventArgs const& args);
+        void TabView_TabDragCompleted(controls::TabView const& sender, controls::TabViewTabDragCompletedEventArgs const& args);
+        void TabView_TabStripDragOver(foundation::IInspectable const& sender, xaml::DragEventArgs const& args);
+        void TabView_TabStripDrop(foundation::IInspectable const& sender, xaml::DragEventArgs const& args);
+        void TabView_TabDroppedOutside(controls::TabView const& sender, controls::TabViewTabDroppedOutsideEventArgs const& args);
         void TabView_AddButtonClick(foundation::IInspectable const& sender, foundation::IInspectable const& args);
         void TabView_TabCloseRequested(foundation::IInspectable const& sender, controls::TabViewTabCloseRequestedEventArgs const& args);
         void TabView_Loaded(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
@@ -262,10 +301,7 @@ namespace winrt::urPDF::implementation
         void EmptyTab_DragOver(foundation::IInspectable const& sender, xaml::DragEventArgs const& args);
         void EmptyTab_DragLeave(foundation::IInspectable const& sender, xaml::DragEventArgs const& args);
         winrt::fire_and_forget EmptyTab_Drop(foundation::IInspectable const& sender, xaml::DragEventArgs const& args);
-        foundation::IAsyncAction RenderSinglePageAsync(std::shared_ptr<PdfTabInfo> PdfTabInfo);
-        foundation::IAsyncAction RenderMultiPageAsync(std::shared_ptr<PdfTabInfo> PdfTab);
-        foundation::IAsyncAction LoadDocumentLayoutAsync(std::shared_ptr<PdfTabInfo> PdfTab);
-        winrt::fire_and_forget RenderVisiblePagesAsync();
+        void RenderVisiblePagesAsync();
         winrt::fire_and_forget PdfScrollViewer_ViewChanged(foundation::IInspectable const& sender, controls::ScrollViewerViewChangedEventArgs const& args);
         void PagesRepeater_ElementPrepared(foundation::IInspectable const& sender, controls::ItemsRepeaterElementPreparedEventArgs const& args);
         void PagesRepeater_ElementClearing(foundation::IInspectable const& sender, controls::ItemsRepeaterElementClearingEventArgs const& args);
@@ -285,25 +321,58 @@ namespace winrt::urPDF::implementation
         void PropertyChanged(winrt::event_token const& token) noexcept;
 
     private:
-        std::array<std::mutex, FZ_LOCK_MAX> m_mupdfMutexes;
-        fz_locks_context m_mupdfLocks{};
-        fz_context* m_ctx{ nullptr };
+        foundation::IAsyncOperation<storage::StorageFile> PickPdfFileAsync();
+        void OpenPdfFileAsync(PendingDocumentOpen request);
+        winrt::fire_and_forget OpenPdfPathAsync(PendingDocumentOpen request);
+        winrt::fire_and_forget ShowOpenErrorAsync(winrt::hstring message);
+        controls::ContentDialog m_openErrorDialog{ nullptr };
+        std::list<winrt::hstring> m_openErrorMessages;
+
+        std::shared_ptr<urpdf::MuPdfRuntime> m_runtime;
+        urpdf::MuPdfRuntime::Context m_ctx;
         std::map<controls::TabViewItem, std::shared_ptr<PdfTabInfo>> m_openedTabs;
+        std::shared_ptr<PdfTabInfo> m_loadingTab;
+        std::optional<winrt::weak_ref<controls::TabViewItem>> m_loadingTargetTab;
+        std::shared_ptr<std::atomic<bool>> m_workCancelled{ std::make_shared<std::atomic<bool>>(false) };
+        std::weak_ptr<PdfTabInfo> m_presentedTab;
         int32_t m_pageNumber{ 0 };
         int32_t m_pageCounter{ 0 };
-        storage::StorageFile m_pendingFile{ nullptr };
-        winrt::hstring m_pendingFilePath;
+        std::deque<PendingDocumentOpen> m_pendingOpens;
+        bool m_isTabViewLoaded{ false };
+        bool m_isResolvingPendingOpen{ false };
+        bool m_pendingOpensQueued{ false };
+        bool m_createInitialEmptyTab{ true };
         winrt::event<xaml::Data::PropertyChangedEventHandler> m_propertyChanged;
 
         xaml::Printing::PrintDocument m_printDocument{ nullptr };
+        winrt::Windows::Graphics::Printing::PrintManager m_printManager{ nullptr };
         winrt::event_token m_printTaskRequestedToken{};
         bool m_isRendering{ false };
-        bool m_isRestoringTabView{ false };
+        urpdf::ViewStateGuard m_viewStateGuard;
+        bool m_isViewChanging{ false };
+        std::weak_ptr<PdfTabInfo> m_pendingLayoutViewSaveTab;
+        std::optional<double> m_pendingLayoutViewOffsetX;
+        std::optional<double> m_pendingLayoutViewOffsetY;
+        std::optional<double> m_pendingLayoutViewZoom;
+        std::optional<std::array<double, 10>> m_pendingViewSnapshot;
+        enum class ViewRestorePhase { None, Layout, Zoom, Offsets };
+        ViewRestorePhase m_viewRestorePhase{ ViewRestorePhase::None };
+        std::optional<urpdf::DocumentViewState> m_pendingRestoreState;
+        bool m_pendingRestoreHasAnchor{ false };
+        bool m_viewOperationReady{ false };
+        bool m_layoutViewSaveQueued{ false };
+        xaml::Media::CompositionTarget::Rendering_revoker m_viewStateRenderingRevoker;
         bool m_zoomWasEnabled{ false };
-        bool m_bookViewMode{ false };
         bool m_isVisibleRenderRunning{ false };
-        bool m_visibleRenderRequested{ false };
         bool m_isClosed{ false };
+        bool m_presentationPending{ false };
+        xaml::Media::CompositionTarget::Rendered_revoker m_firstFrameRenderedRevoker;
+        std::optional<winrt::Microsoft::UI::WindowId> m_sourceWindowToClose;
+        winrt::Windows::Graphics::PointInt32 m_tabDragOffset{};
+        winrt::Microsoft::UI::Input::InputNonClientPointerSource m_moveSizeInput{ nullptr };
+        winrt::event_token m_enteredMoveSizeToken{};
+        winrt::event_token m_exitedMoveSizeToken{};
+        std::optional<std::vector<winrt::Windows::Graphics::RectInt32>> m_passthroughRects;
         xaml::XamlRoot m_observedXamlRoot{ nullptr };
         xaml::XamlRoot::Changed_revoker m_xamlRootChangedRevoker;
         dispatching::DispatcherQueueTimer m_dpiRenderTimer{ nullptr };
@@ -314,12 +383,37 @@ namespace winrt::urPDF::implementation
         bool m_zoomIsIntermediate{ false };
         bool m_zoomDebounceElapsed{ false };
         int m_layoutRotation{ 0 };
-        std::uint64_t m_nextDocumentId{ 1 };
         PageBitmapCache m_pageBitmapCache{ 256ull * 1024ull * 1024ull };
         foundation::Collections::IObservableVector<foundation::IInspectable> m_pageRepeaterItems{ nullptr };
 
+        void CloseTab(controls::TabViewItem const& tab);
+        winrt::fire_and_forget CompleteDeferredPresentation();
+        void CloseTransferredSourceWindow();
+        bool CanTransferTab(controls::TabViewItem const& tab, bool allowViewRestore);
+        bool CanReceiveTabFrom(MainWindow& source, controls::TabViewItem const& tab);
+        bool TransferTabFrom(MainWindow& source, controls::TabViewItem const& tab, int32_t index);
+        std::shared_ptr<PdfTabInfo> DetachTabForTransfer(controls::TabViewItem const& tab, bool allowViewRestore);
+        void ShutdownMuPdfWork() noexcept;
+        void CompleteDocumentOpen(std::shared_ptr<PdfTabInfo> const& pdfTab, std::uint64_t generation, int pagecount, std::vector<fz_rect> pageBounds, std::exception_ptr error);
+        void CompletePageRender(std::weak_ptr<PdfTabInfo> const& weakTab, PageRenderMetrics metrics, winrt::Windows::Graphics::Imaging::SoftwareBitmap const& bitmap, bool rendered, std::exception_ptr error, bool scheduleNext = true);
+        void ReadViewGeometry(std::shared_ptr<PdfTabInfo> const& pdfTab, std::vector<urpdf::PageRect>& pages, urpdf::ViewportGeometry& viewport);
+        std::optional<int32_t> VisiblePageNumber(std::shared_ptr<PdfTabInfo> const& pdfTab);
+        std::optional<urpdf::DocumentViewState> CaptureViewState(std::shared_ptr<PdfTabInfo> const& pdfTab);
+        void SaveViewState(std::shared_ptr<PdfTabInfo> const& pdfTab);
+        bool HasViewGeometry(std::shared_ptr<PdfTabInfo> const& pdfTab);
+        void UpdatePageCounter(std::shared_ptr<PdfTabInfo> const& pdfTab);
+        void RestoreViewState(std::shared_ptr<PdfTabInfo> const& pdfTab);
+        urpdf::ViewStateGuard::Operation DeferViewStateSave(std::shared_ptr<PdfTabInfo> const& pdfTab);
+        bool IsCurrentViewOperation(std::shared_ptr<PdfTabInfo> const& pdfTab, urpdf::ViewStateGuard::Operation operation);
+        void FinishViewStateChange(std::shared_ptr<PdfTabInfo> const& pdfTab, urpdf::ViewStateGuard::Operation operation);
+        void CancelPendingViewStateSave();
+        void QueuePendingViewStateSave();
+        void AdvanceViewStateChange(std::shared_ptr<PdfTabInfo> const& pdfTab, urpdf::ViewStateGuard::Operation operation);
+        void ScrollToPage(int32_t page);
         bool TryAcquireRenderingLock();
         void ReleaseRenderingLock();
+        void ProcessPendingOpens();
+        void SchedulePendingOpens();
         void UpdateRenderZoom(std::shared_ptr<PdfTabInfo> const& pdfTab, double zoom, bool isIntermediate);
         void ApplyPendingRenderZoom();
         void CancelPendingZoomRender();
@@ -327,7 +421,7 @@ namespace winrt::urPDF::implementation
         void DetachDpiObserver();
         void RequestDpiRefresh();
         void ApplyPendingDpiRefresh();
-        void RebuildPagesContainer(std::vector<PageSlot> const& pages);
+        void RebuildPagesContainer(std::shared_ptr<PdfTabInfo> const& pdfTab, std::vector<PageSlot> const& pages, urpdf::ViewStateGuard::Operation operation);
         void ConfigurePageElement(xaml::UIElement const& element, std::size_t pageIndex);
         void TryRecordFirstVisiblePage(std::shared_ptr<PdfTabInfo> const& PdfTab);
         std::vector<PageRenderRequest> BuildRenderQueue(int32_t pageCount, PageViewRange& viewRange);

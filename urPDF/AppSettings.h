@@ -21,6 +21,7 @@ namespace urpdf
     {
         AppTheme theme{ AppTheme::Default };
         Backdrop backdrop{ Backdrop::None };
+        bool openFilesInExistingWindow{ false };
     };
 
     std::wstring_view ToString(AppTheme theme) noexcept;
@@ -41,6 +42,7 @@ namespace urpdf
         SettingsData Get() const noexcept;
         void SetTheme(AppTheme theme);
         void SetBackdrop(Backdrop backdrop);
+        void SetOpenFilesInExistingWindow(bool enabled);
 
         std::wstring ExportJson() const;
         bool ImportJson(std::wstring_view text);

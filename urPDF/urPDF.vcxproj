@@ -162,9 +162,16 @@
       <DependentUpon>AboutPage.xaml</DependentUpon>
       <SubType>Code</SubType>
     </ClInclude>
+    <ClInclude Include="ActivationArguments.h" />
     <ClInclude Include="AppSettings.h" />
+    <ClInclude Include="MuPdfDocument.h" />
+    <ClInclude Include="MuPdfRuntime.h" />
+    <ClInclude Include="WindowCreationOptions.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="PdfRenderScale.h" />
+    <ClInclude Include="DocumentViewState.h" />
+    <ClInclude Include="DocumentOperation.h" />
+    <ClInclude Include="BackgroundWork.h" />
     <ClInclude Include="App.xaml.h">
       <DependentUpon>App.xaml</DependentUpon>
     </ClInclude>
@@ -197,7 +204,19 @@
       <DependentUpon>AboutPage.xaml</DependentUpon>
       <SubType>Code</SubType>
     </ClCompile>
+    <ClCompile Include="ActivationArguments.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="AppSettings.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="MuPdfDocument.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="MuPdfRuntime.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="DocumentViewState.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="pch.cpp">
