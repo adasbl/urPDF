@@ -3,6 +3,7 @@
 
 // Standard C++
 #include <cmath>
+#include <limits>
 #include <utility>
 
 // Windows SDK / WinRT
@@ -19,6 +20,85 @@ namespace urpdf
         constexpr std::wstring_view SchemaVersionKey = L"schemaVersion";
         constexpr std::wstring_view ThemeKey = L"AppTheme";
         constexpr std::wstring_view BackdropKey = L"Transparency";
+        constexpr std::wstring_view WindowStateKey = L"WindowState";
+        constexpr std::wstring_view WindowStartupModeKey = L"WindowStartupMode";
+
+        bool IsValid(WindowState const& state) noexcept
+        {
+            return (!state.normalSize || (state.normalSize->width > 0 && state.normalSize->height > 0))
+                && (!state.normalPosition || (state.normalSize && !state.normalPosition->monitorDevice.empty()));
+        }
+
+        json::JsonObject WindowStateJson(WindowState const& state)
+        {
+            json::JsonObject root;
+            root.SetNamedValue(L"maximized", json::JsonValue::CreateBooleanValue(state.maximized));
+            if (state.normalSize)
+            {
+                root.SetNamedValue(L"normalWidth", json::JsonValue::CreateNumberValue(state.normalSize->width));
+                root.SetNamedValue(L"normalHeight", json::JsonValue::CreateNumberValue(state.normalSize->height));
+            }
+            if (state.normalPosition)
+            {
+                root.SetNamedValue(L"normalOffsetX", json::JsonValue::CreateNumberValue(state.normalPosition->x));
+                root.SetNamedValue(L"normalOffsetY", json::JsonValue::CreateNumberValue(state.normalPosition->y));
+                root.SetNamedValue(L"monitorDevice", json::JsonValue::CreateStringValue(state.normalPosition->monitorDevice));
+            }
+            return root;
+        }
+
+        std::optional<std::int32_t> ParseDimension(json::IJsonValue const& value)
+        {
+            if (value.ValueType() != json::JsonValueType::Number) { return std::nullopt; }
+            const double number = value.GetNumber();
+            if (!std::isfinite(number) || number <= 0
+                || number > (std::numeric_limits<std::int32_t>::max)() || number != std::floor(number))
+            {
+                return std::nullopt;
+            }
+            return static_cast<std::int32_t>(number);
+        }
+
+        std::optional<WindowState> ParseWindowState(json::IJsonValue const& value)
+        {
+            if (value.ValueType() != json::JsonValueType::Object) { return std::nullopt; }
+            auto root = value.GetObject();
+            if (!root.HasKey(L"maximized")) { return std::nullopt; }
+            auto maximized = root.GetNamedValue(L"maximized");
+            if (maximized.ValueType() != json::JsonValueType::Boolean) { return std::nullopt; }
+
+            WindowState state;
+            state.maximized = maximized.GetBoolean();
+            if (root.HasKey(L"normalWidth") || root.HasKey(L"normalHeight"))
+            {
+                if (!root.HasKey(L"normalWidth") || !root.HasKey(L"normalHeight")) { return std::nullopt; }
+                auto width = ParseDimension(root.GetNamedValue(L"normalWidth"));
+                auto height = ParseDimension(root.GetNamedValue(L"normalHeight"));
+                if (!width || !height) { return std::nullopt; }
+                state.normalSize = WindowSize{ *width, *height };
+            }
+            if (root.HasKey(L"normalOffsetX") || root.HasKey(L"normalOffsetY") || root.HasKey(L"monitorDevice"))
+            {
+                if (!state.normalSize || !root.HasKey(L"normalOffsetX")
+                    || !root.HasKey(L"normalOffsetY") || !root.HasKey(L"monitorDevice")) { return std::nullopt; }
+                auto x = root.GetNamedValue(L"normalOffsetX");
+                auto y = root.GetNamedValue(L"normalOffsetY");
+                auto device = root.GetNamedValue(L"monitorDevice");
+                if (x.ValueType() != json::JsonValueType::Number || y.ValueType() != json::JsonValueType::Number
+                    || device.ValueType() != json::JsonValueType::String || device.GetString().empty()) { return std::nullopt; }
+                const auto validCoordinate = [](double number)
+                {
+                    return std::isfinite(number) && number == std::floor(number)
+                        && number >= (std::numeric_limits<std::int32_t>::min)()
+                        && number <= (std::numeric_limits<std::int32_t>::max)();
+                };
+                if (!validCoordinate(x.GetNumber()) || !validCoordinate(y.GetNumber())) { return std::nullopt; }
+                state.normalPosition = WindowPosition{ static_cast<std::int32_t>(x.GetNumber()),
+                    static_cast<std::int32_t>(y.GetNumber()), std::wstring{ device.GetString() } };
+            }
+            return state;
+        }
+
         constexpr std::wstring_view OpenFilesInExistingWindowKey = L"OpenFilesInExistingWindow";
 
         std::wstring_view ToString(bool value) noexcept
@@ -88,6 +168,24 @@ namespace urpdf
         return std::nullopt;
     }
 
+    std::wstring_view ToString(WindowStartupMode mode) noexcept
+    {
+        switch (mode)
+        {
+        case WindowStartupMode::Maximized: return L"Maximized";
+        case WindowStartupMode::Normal: return L"Normal";
+        default: return L"RememberLastState";
+        }
+    }
+
+    std::optional<WindowStartupMode> ParseWindowStartupMode(std::wstring_view text) noexcept
+    {
+        if (text == L"RememberLastState") { return WindowStartupMode::RememberLastState; }
+        if (text == L"Maximized") { return WindowStartupMode::Maximized; }
+        if (text == L"Normal") { return WindowStartupMode::Normal; }
+        return std::nullopt;
+    }
+
     std::optional<Backdrop> ParseBackdrop(std::wstring_view text) noexcept
     {
         if (text == L"None") { return Backdrop::None; }
@@ -107,13 +205,25 @@ namespace urpdf
         {
             m_cache.backdrop = ParseBackdrop(*text).value_or(m_cache.backdrop);
         }
+        if (auto text = m_store->Read(WindowStateKey))
+        {
+            json::JsonObject root{ nullptr };
+            if (json::JsonObject::TryParse(*text, root))
+            {
+                m_cache.windowState = ParseWindowState(root).value_or(m_cache.windowState);
+            }
+        }
+        if (auto text = m_store->Read(WindowStartupModeKey))
+        {
+            m_cache.windowStartupMode = ParseWindowStartupMode(*text).value_or(m_cache.windowStartupMode);
+        }
         if (auto text = m_store->Read(OpenFilesInExistingWindowKey))
         {
             m_cache.openFilesInExistingWindow = ParseBool(*text).value_or(m_cache.openFilesInExistingWindow);
         }
     }
 
-    SettingsData AppSettings::Get() const noexcept
+    SettingsData AppSettings::Get() const
     {
         return m_cache;
     }
@@ -145,6 +255,8 @@ namespace urpdf
         root.SetNamedValue(SchemaVersionKey, json::JsonValue::CreateNumberValue(SettingsSchemaVersion));
         root.SetNamedValue(ThemeKey, json::JsonValue::CreateStringValue(ToString(m_cache.theme)));
         root.SetNamedValue(BackdropKey, json::JsonValue::CreateStringValue(ToString(m_cache.backdrop)));
+        root.SetNamedValue(WindowStateKey, WindowStateJson(m_cache.windowState));
+        root.SetNamedValue(WindowStartupModeKey, json::JsonValue::CreateStringValue(ToString(m_cache.windowStartupMode)));
         root.SetNamedValue(OpenFilesInExistingWindowKey, json::JsonValue::CreateBooleanValue(m_cache.openFilesInExistingWindow));
         return std::wstring{ root.Stringify() };
     }
@@ -164,9 +276,18 @@ namespace urpdf
         }
 
         SettingsData imported = m_cache;
-        if (!TryReadImportedValue(root, ThemeKey, ParseAppTheme, imported.theme) || !TryReadImportedValue(root, BackdropKey, ParseBackdrop, imported.backdrop) || !TryReadImportedBool(root, OpenFilesInExistingWindowKey, imported.openFilesInExistingWindow))
+        if (!TryReadImportedValue(root, ThemeKey, ParseAppTheme, imported.theme)
+            || !TryReadImportedValue(root, BackdropKey, ParseBackdrop, imported.backdrop)
+            || !TryReadImportedValue(root, WindowStartupModeKey, ParseWindowStartupMode, imported.windowStartupMode)
+            || !TryReadImportedBool(root, OpenFilesInExistingWindowKey, imported.openFilesInExistingWindow))
         {
             return false;
+        }
+        if (root.HasKey(WindowStateKey))
+        {
+            auto state = ParseWindowState(root.GetNamedValue(WindowStateKey));
+            if (!state) { return false; }
+            imported.windowState = *state;
         }
 
         try
@@ -189,5 +310,22 @@ namespace urpdf
         m_store->Write(ThemeKey, ToString(settings.theme));
         m_store->Write(BackdropKey, ToString(settings.backdrop));
         m_store->Write(OpenFilesInExistingWindowKey, ToString(settings.openFilesInExistingWindow));
+        m_store->Write(WindowStateKey, WindowStateJson(settings.windowState).Stringify());
+        m_store->Write(WindowStartupModeKey, ToString(settings.windowStartupMode));
+    }
+
+    void AppSettings::SetWindowState(WindowState const& state)
+    {
+        if (!IsValid(state)) { return; }
+        m_cache.windowState = state;
+        try { m_store->Write(WindowStateKey, WindowStateJson(state).Stringify()); }
+        catch (...) {}
+    }
+
+    void AppSettings::SetWindowStartupMode(WindowStartupMode mode)
+    {
+        m_cache.windowStartupMode = mode;
+        try { m_store->Write(WindowStartupModeKey, ToString(mode)); }
+        catch (...) {}
     }
 }

@@ -4,6 +4,7 @@
 #include "MainWindow.g.h"
 
 // Project
+#include "AppSettings.h"
 #include "DocumentViewState.h"
 #include "MuPdfRuntime.h"
 #include "PdfPageLayout.h"
@@ -42,6 +43,7 @@ extern "C" {
 #include <winrt/Windows.Graphics.Printing.h>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Microsoft.UI.Dispatching.h>
+#include <winrt/Microsoft.UI.Windowing.h>
 #include <winrt/Microsoft.UI.Input.h>
 #include <winrt/Microsoft.UI.Xaml.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
@@ -365,6 +367,10 @@ namespace winrt::urPDF::implementation
         bool m_zoomWasEnabled{ false };
         bool m_isVisibleRenderRunning{ false };
         bool m_isClosed{ false };
+        urpdf::WindowState m_windowState;
+        winrt::Microsoft::UI::Windowing::AppWindow m_observedAppWindow{ nullptr };
+        winrt::event_token m_windowChangedToken{};
+        winrt::event_token m_windowClosingToken{};
         bool m_presentationPending{ false };
         xaml::Media::CompositionTarget::Rendered_revoker m_firstFrameRenderedRevoker;
         std::optional<winrt::Microsoft::UI::WindowId> m_sourceWindowToClose;
@@ -411,6 +417,11 @@ namespace winrt::urPDF::implementation
         void AdvanceViewStateChange(std::shared_ptr<PdfTabInfo> const& pdfTab, urpdf::ViewStateGuard::Operation operation);
         void ScrollToPage(int32_t page);
         bool TryAcquireRenderingLock();
+        void RestoreWindowState();
+        void TrackWindowState();
+        void StopTrackingWindowState() noexcept;
+        void CaptureWindowState();
+        void SaveWindowState();
         void ReleaseRenderingLock();
         void ProcessPendingOpens();
         void SchedulePendingOpens();

@@ -10,6 +10,7 @@
 
 // Project
 #include "AppSettings.h"
+#include "WindowPlacement.h"
 #include "App.xaml.h"
 #include "PdfRenderScale.h"
 #include "SettingsPage.h"
@@ -380,6 +381,7 @@ namespace winrt::urPDF::implementation
     {
         if (m_isClosed) { return; }
         m_isClosed = true;
+        try { StopTrackingWindowState(); } catch (...) {}
         m_firstFrameRenderedRevoker.revoke();
         CloseTransferredSourceWindow();
         if (m_moveSizeInput)
@@ -479,6 +481,7 @@ namespace winrt::urPDF::implementation
         {
             if (auto self = weakThis.get())
             {
+                self->SaveWindowState();
                 self->ShutdownMuPdfWork();
             }
         });
@@ -505,6 +508,124 @@ namespace winrt::urPDF::implementation
         });
 
         LoadSettings();
+
+        // Torn-out tabs receive their placement from the drag operation.
+        if (!options.deferPresentation) { RestoreWindowState(); }
+        TrackWindowState();
+    }
+
+
+    void MainWindow::RestoreWindowState()
+    {
+        const auto settings = urpdf::AppSettings::Instance().Get();
+        m_windowState = settings.windowState;
+
+        auto nativeWindow = try_as<::IWindowNative>();
+        HWND hwnd{};
+        if (!nativeWindow || FAILED(nativeWindow->get_WindowHandle(&hwnd))) { return; }
+
+        RECT defaultBounds{};
+        MONITORINFO monitorInfo{};
+        monitorInfo.cbSize = sizeof(monitorInfo);
+        if (!GetWindowRect(hwnd, &defaultBounds)) { return; }
+        HMONITOR monitor = settings.windowState.normalPosition
+            ? urpdf::FindWindowMonitor(settings.windowState.normalPosition->monitorDevice) : nullptr;
+        if (!monitor) { monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST); }
+        if (!GetMonitorInfoW(monitor, &monitorInfo))
+        {
+            monitorInfo.rcWork = defaultBounds;
+        }
+
+        const auto placement = urpdf::ResolveWindowStartupPlacement(settings, defaultBounds, monitorInfo.rcWork);
+        auto appWindow = AppWindow();
+        auto presenter = appWindow.Presenter().try_as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>();
+        if (!presenter) { return; }
+        if (presenter.State() != winrt::Microsoft::UI::Windowing::OverlappedPresenterState::Restored)
+        {
+            presenter.Restore(false);
+        }
+
+        const auto& bounds = placement.normalBounds;
+        appWindow.MoveAndResize({ static_cast<int32_t>(bounds.left), static_cast<int32_t>(bounds.top),
+            static_cast<int32_t>(bounds.right - bounds.left), static_cast<int32_t>(bounds.bottom - bounds.top) });
+        const auto size = appWindow.Size();
+        m_windowState.normalSize = urpdf::WindowSize{ size.Width, size.Height };
+        m_windowState.maximized = placement.maximized;
+        if (placement.maximized) { presenter.Maximize(); }
+    }
+
+    void MainWindow::TrackWindowState()
+    {
+        StopTrackingWindowState();
+        CaptureWindowState();
+
+        // AppWindow does not support the weak references required by auto_revoke.
+        // Keep the event source alive and remove the handlers explicitly.
+        m_observedAppWindow = AppWindow();
+        m_windowChangedToken = m_observedAppWindow.Changed(
+            [weakThis = get_weak()](auto const&, auto const&)
+            {
+                if (auto self = weakThis.get(); self && !self->m_isClosed)
+                {
+                    self->CaptureWindowState();
+                }
+            });
+
+        m_windowClosingToken = m_observedAppWindow.Closing(
+            [weakThis = get_weak()](auto const&, auto const&)
+            {
+                if (auto self = weakThis.get())
+                {
+                    self->CaptureWindowState();
+                    self->SaveWindowState();
+                }
+            });
+    }
+
+    void MainWindow::StopTrackingWindowState() noexcept
+    {
+        if (m_observedAppWindow)
+        {
+            if (m_windowChangedToken)
+            {
+                m_observedAppWindow.Changed(std::exchange(m_windowChangedToken, {}));
+            }
+            if (m_windowClosingToken)
+            {
+                m_observedAppWindow.Closing(std::exchange(m_windowClosingToken, {}));
+            }
+            m_observedAppWindow = nullptr;
+        }
+    }
+
+    void MainWindow::CaptureWindowState()
+    {
+        auto nativeWindow = try_as<::IWindowNative>();
+        HWND hwnd{};
+        if (!nativeWindow || FAILED(nativeWindow->get_WindowHandle(&hwnd))) { return; }
+
+        WINDOWPLACEMENT placement{};
+        placement.length = sizeof(placement);
+        if (GetWindowPlacement(hwnd, &placement))
+        {
+            urpdf::UpdateWindowStateFromPlacement(m_windowState, placement);
+            MONITORINFOEXW monitor{};
+            monitor.cbSize = sizeof(monitor);
+            if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor))
+            {
+                const bool toolWindow = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) != 0;
+                urpdf::UpdateWindowPositionFromPlacement(m_windowState, placement, monitor, toolWindow);
+            }
+        }
+    }
+
+    void MainWindow::SaveWindowState()
+    {
+        auto& settings = urpdf::AppSettings::Instance();
+        if (settings.Get().windowState != m_windowState)
+        {
+            settings.SetWindowState(m_windowState);
+        }
     }
 
 

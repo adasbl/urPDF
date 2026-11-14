@@ -164,6 +164,7 @@
     </ClInclude>
     <ClInclude Include="ActivationArguments.h" />
     <ClInclude Include="AppSettings.h" />
+    <ClInclude Include="WindowPlacement.h" />
     <ClInclude Include="MuPdfDocument.h" />
     <ClInclude Include="MuPdfRuntime.h" />
     <ClInclude Include="WindowCreationOptions.h" />
