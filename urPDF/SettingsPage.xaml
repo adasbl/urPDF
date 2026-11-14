@@ -76,7 +76,7 @@
 
                 <StackPanel Spacing="12">
                     <TextBlock Text="Updates" Style="{StaticResource SubtitleTextBlockStyle}"/>
-                    <TextBlock Text="urPDF - Version 0.2.0" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    <TextBlock Text="urPDF - Version 0.2.1" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                     <Button x:Name="Button" Click="ClickHandler" Content="Check for updates" Style="{StaticResource AccentButtonStyle}"/>
                 </StackPanel>
 
