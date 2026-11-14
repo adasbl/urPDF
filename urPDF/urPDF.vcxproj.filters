@@ -16,17 +16,28 @@
     <ClCompile Include="pch.cpp" />
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
     <ClCompile Include="PdfPageLayout.cpp" />
+    <ClCompile Include="ActivationArguments.cpp" />
     <ClCompile Include="AppSettings.cpp" />
+    <ClCompile Include="MuPdfDocument.cpp" />
+    <ClCompile Include="MuPdfRuntime.cpp" />
+    <ClCompile Include="DocumentViewState.cpp" />
     <ClCompile Include="SettingsStore.cpp" />
     <ClCompile Include="CommandLine.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
     <ClInclude Include="PdfRenderScale.h" />
+    <ClInclude Include="DocumentViewState.h" />
+    <ClInclude Include="DocumentOperation.h" />
+    <ClInclude Include="BackgroundWork.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="PdfPageLayout.h" />
+    <ClInclude Include="ActivationArguments.h" />
     <ClInclude Include="AppSettings.h" />
     <ClInclude Include="WindowPlacement.h" />
+    <ClInclude Include="MuPdfDocument.h" />
+    <ClInclude Include="MuPdfRuntime.h" />
+    <ClInclude Include="WindowCreationOptions.h" />
     <ClInclude Include="SettingsStore.h" />
     <ClInclude Include="CommandLine.h" />
   </ItemGroup>

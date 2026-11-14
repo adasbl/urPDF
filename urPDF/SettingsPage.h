@@ -31,7 +31,7 @@ namespace winrt::urPDF::implementation
         void ThemeSelection_SelectionChanged(foundation::IInspectable const& sender, controls::SelectionChangedEventArgs const& /* e */);
         void TransparencySelection_SelectionChanged(foundation::IInspectable const& sender, controls::SelectionChangedEventArgs const& /* e */);
         void WindowStartupModeSelection_SelectionChanged(foundation::IInspectable const& sender, controls::SelectionChangedEventArgs const&);
-        void ToggleSwitch_Toggled(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
+        void OpenFilesInExistingWindowToggle_Toggled(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& /* args */);
         void LoadSavedSettings();
         void BackButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
 

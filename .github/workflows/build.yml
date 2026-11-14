@@ -158,23 +158,30 @@ jobs:
       - name: Stage and check self-contained MSI payload
         run: ./scripts/stage-msi-payload.ps1 -Configuration Release -Platform x64
 
-      - name: Build unit tests
+      - name: Build unit and runtime tests
         run: |
-          & $env:MSBUILD_PATH tests/urPDF.Tests.vcxproj /m /nologo /verbosity:minimal `
+          & $env:MSBUILD_PATH tests/urPDF.UnitTests.vcxproj /m /nologo /verbosity:minimal `
               /p:Configuration=Release /p:Platform=x64 `
-              /bl:out/ci/logs/tests.binlog
+              /bl:out/ci/logs/unit-tests.binlog
           if ($LASTEXITCODE -ne 0) { throw 'Unit test build failed.' }
 
-      - name: Run unit tests
-        run: |
-          & $env:VSTEST_PATH out/tests/x64/Release/urPDF.Tests.dll /Platform:x64 `
-              '/Logger:trx;LogFileName=urPDF.Tests.trx' `
-              /ResultsDirectory:out/ci/test-results
-          if ($LASTEXITCODE -ne 0) { throw 'Unit tests failed.' }
+          & $env:MSBUILD_PATH tests/urPDF.RuntimeTests.vcxproj /m /nologo /verbosity:minimal `
+              /p:Configuration=Release /p:Platform=x64 `
+              "/p:VcpkgRoot=$env:VCPKG_ROOT" /p:VcpkgTriplet=x64-windows `
+              /p:VcpkgManifestInstall=false /bl:out/ci/logs/runtime-tests.binlog
+          if ($LASTEXITCODE -ne 0) { throw 'Runtime test build failed.' }
 
-          $report = [xml](Get-Content -LiteralPath out/ci/test-results/urPDF.Tests.trx -Raw)
+      - name: Run unit and runtime tests
+        run: |
+          & $env:VSTEST_PATH out/unit-tests/x64/Release/urPDF.UnitTests.dll `
+              out/runtime-tests/x64/Release/urPDF.RuntimeTests.dll /Platform:x64 `
+              '/Logger:trx;LogFileName=urPDF.TestResults.trx' `
+              /ResultsDirectory:out/ci/test-results
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
+
+          $report = [xml](Get-Content -LiteralPath out/ci/test-results/urPDF.TestResults.trx -Raw)
           if ([int]$report.TestRun.ResultSummary.Counters.executed -eq 0) {
-              throw 'No unit tests were executed.'
+              throw 'No tests were executed.'
           }
 
       - name: Build MSI installer
@@ -216,7 +223,7 @@ jobs:
       - name: Summarize test results
         if: always()
         run: |
-          $reportPath = 'out/ci/test-results/urPDF.Tests.trx'
+          $reportPath = 'out/ci/test-results/urPDF.TestResults.trx'
           if (Test-Path -LiteralPath $reportPath) {
               $report = [xml](Get-Content -LiteralPath $reportPath -Raw)
               $counters = $report.TestRun.ResultSummary.Counters

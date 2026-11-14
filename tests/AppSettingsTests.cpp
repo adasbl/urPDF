@@ -48,11 +48,12 @@ namespace urPDFTests
         return urpdf::AppSettings{ std::make_unique<InMemorySettingsStore>(std::move(values)) };
     }
 
-    void AssertSettings(urpdf::AppSettings const& settings, urpdf::AppTheme theme, urpdf::Backdrop backdrop)
+    void AssertSettings(urpdf::AppSettings const& settings, urpdf::AppTheme theme, urpdf::Backdrop backdrop, bool openFilesInExistingWindow = false)
     {
         const auto data = settings.Get();
         Assert::IsTrue(data.theme == theme);
         Assert::IsTrue(data.backdrop == backdrop);
+        Assert::AreEqual(openFilesInExistingWindow, data.openFilesInExistingWindow);
     }
 
     void AssertWindowSettings(urpdf::AppSettings const& settings, urpdf::WindowState const& state,
@@ -492,13 +493,15 @@ namespace urPDFTests
             const urpdf::WindowState state{ urpdf::WindowSize{ 1200, 800 }, true };
             source.SetWindowState(state);
             source.SetWindowStartupMode(urpdf::WindowStartupMode::Normal);
+            source.SetOpenFilesInExistingWindow(true);
 
             auto values = std::make_shared<Values>();
             auto target = MakeSettings(values);
             Assert::IsTrue(target.ImportJson(source.ExportJson()));
-            AssertSettings(target, urpdf::AppTheme::Dark, urpdf::Backdrop::MicaAlt);
+            AssertSettings(target, urpdf::AppTheme::Dark, urpdf::Backdrop::MicaAlt, true);
             AssertWindowSettings(target, state, urpdf::WindowStartupMode::Normal);
             auto reloaded = MakeSettings(values);
+            AssertSettings(reloaded, urpdf::AppTheme::Dark, urpdf::Backdrop::MicaAlt, true);
             AssertWindowSettings(reloaded, state, urpdf::WindowStartupMode::Normal);
         }
 
@@ -559,10 +562,22 @@ namespace urPDFTests
         {
             auto values = std::make_shared<Values>();
             auto settings = MakeSettings(values);
-            Assert::IsTrue(settings.ImportJson(LR"({"schemaVersion":1,"AppTheme":"Light","Transparency":"Mica"})"));
+            Assert::IsTrue(settings.ImportJson(LR"({"schemaVersion":1,"AppTheme":"Light","Transparency":"Mica","OpenFilesInExistingWindow":true})"));
 
             auto reloaded = MakeSettings(values);
-            AssertSettings(reloaded, urpdf::AppTheme::Light, urpdf::Backdrop::Mica);
+            AssertSettings(reloaded, urpdf::AppTheme::Light, urpdf::Backdrop::Mica, true);
+        }
+
+        TEST_METHOD(OpenFilesInExistingWindowPersistsToStore)
+        {
+            auto values = std::make_shared<Values>();
+            auto settings = MakeSettings(values);
+            AssertSettings(settings, urpdf::AppTheme::Default, urpdf::Backdrop::None, false);
+
+            settings.SetOpenFilesInExistingWindow(true);
+
+            auto reloaded = MakeSettings(values);
+            AssertSettings(reloaded, urpdf::AppTheme::Default, urpdf::Backdrop::None, true);
         }
 
         TEST_METHOD(MissingKeyKeepsCurrentValue)
@@ -593,6 +608,8 @@ namespace urPDFTests
                 LR"({"schemaVersion":1.5,"AppTheme":"Dark"})",
                 LR"({"schemaVersion":1,"AppTheme":"Purple","Transparency":"Mica"})",
                 LR"({"schemaVersion":1,"AppTheme":"Dark","Transparency":3})",
+                LR"({"schemaVersion":1,"AppTheme":"Dark","OpenFilesInExistingWindow":"true"})",
+                LR"({"schemaVersion":1,"AppTheme":"Dark","OpenFilesInExistingWindow":1})",
             };
 
             for (auto json : invalidImports)

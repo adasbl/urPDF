@@ -10,7 +10,7 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{5D8F0CD9-376A-49D2-83A0-9B07E1C0E5F1}</ProjectGuid>
-    <ProjectName>urPDF.Tests</ProjectName>
+    <ProjectName>urPDF.UnitTests</ProjectName>
     <RootNamespace>urPDFTests</RootNamespace>
     <Keyword>Win32Proj</Keyword>
     <ProjectSubType>NativeUnitTestProject</ProjectSubType>
@@ -30,9 +30,9 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <PropertyGroup>
-    <OutDir>$(MSBuildThisFileDirectory)..\out\tests\$(Platform)\$(Configuration)\</OutDir>
+    <OutDir>$(MSBuildThisFileDirectory)..\out\unit-tests\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(OutDir)obj\</IntDir>
-    <TargetName>urPDF.Tests</TargetName>
+    <TargetName>urPDF.UnitTests</TargetName>
     <IncludePath>$(VCInstallDir)Auxiliary\VS\UnitTest\include;$(IncludePath)</IncludePath>
     <LibraryPath>$(VCInstallDir)Auxiliary\VS\UnitTest\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
@@ -55,8 +55,15 @@
     <ClCompile Include="PdfRenderScaleTests.cpp" />
     <ClCompile Include="PdfBitmapLimitsTests.cpp" />
     <ClCompile Include="AppSettingsTests.cpp" />
+    <ClCompile Include="DocumentViewStateTests.cpp" />
+    <ClCompile Include="DocumentOperationTests.cpp" />
+    <ClCompile Include="BackgroundWorkTests.cpp" />
     <ClCompile Include="..\urPDF\AppSettings.cpp" />
+    <ClCompile Include="..\urPDF\DocumentViewState.cpp" />
     <ClInclude Include="..\urPDF\PdfRenderScale.h" />
+    <ClInclude Include="..\urPDF\DocumentViewState.h" />
+    <ClInclude Include="..\urPDF\DocumentOperation.h" />
+    <ClInclude Include="..\urPDF\BackgroundWork.h" />
     <ClInclude Include="..\urPDF\AppSettings.h" />
     <ClInclude Include="..\urPDF\WindowPlacement.h" />
     <ClInclude Include="..\urPDF\SettingsStore.h" />

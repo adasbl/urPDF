@@ -15,6 +15,7 @@
 #include <cstdint>
 
 // Windows SDK / WinRT
+#include <wil/resource.h>
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Microsoft.UI.Xaml.h>
@@ -53,18 +54,12 @@ namespace winrt::urPDF::implementation
         m_backRequestedEvent(*this, nullptr);
     }
 
-    void SettingsPage::ToggleSwitch_Toggled(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args)
+    void SettingsPage::OpenFilesInExistingWindowToggle_Toggled(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& /* args */)
     {
-        auto toggleSwitch = sender.as<controls::ToggleSwitch>();
+        if (m_isInitializing == true) { return; }
 
-        if (toggleSwitch.IsOn())
-        {
-            // TODO
-        }
-        else
-        {
-            // TODO
-        }
+        auto toggleSwitch = sender.as<controls::ToggleSwitch>();
+        urpdf::AppSettings::Instance().SetOpenFilesInExistingWindow(toggleSwitch.IsOn());
     }
 
     void SettingsPage::ThemeSelection_SelectionChanged(foundation::IInspectable const& sender, controls::SelectionChangedEventArgs const& e)
@@ -145,10 +140,18 @@ namespace winrt::urPDF::implementation
 
     void SettingsPage::LoadSavedSettings()
     {
+        const bool wasInitializing = m_isInitializing;
+        m_isInitializing = true;
+        auto restoreInitializing = wil::scope_exit([this, wasInitializing]
+        {
+            m_isInitializing = wasInitializing;
+        });
+
         auto settings = urpdf::AppSettings::Instance().Get();
 
         ThemeComboBox().SelectedIndex(static_cast<int32_t>(settings.theme));
         TransparencyComboBox().SelectedIndex(static_cast<int32_t>(settings.backdrop));
         WindowStartupModeComboBox().SelectedIndex(static_cast<int32_t>(settings.windowStartupMode));
+        OpenFilesInExistingWindowToggle().IsOn(settings.openFilesInExistingWindow);
     }
 }
