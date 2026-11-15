@@ -56,12 +56,15 @@
     <ClCompile Include="PdfBitmapLimitsTests.cpp" />
     <ClCompile Include="AppSettingsTests.cpp" />
     <ClCompile Include="DocumentViewStateTests.cpp" />
+    <ClCompile Include="PageLayoutGeometryTests.cpp" />
     <ClCompile Include="DocumentOperationTests.cpp" />
     <ClCompile Include="BackgroundWorkTests.cpp" />
     <ClCompile Include="..\urPDF\AppSettings.cpp" />
     <ClCompile Include="..\urPDF\DocumentViewState.cpp" />
+    <ClCompile Include="..\urPDF\PageLayoutGeometry.cpp" />
     <ClInclude Include="..\urPDF\PdfRenderScale.h" />
     <ClInclude Include="..\urPDF\DocumentViewState.h" />
+    <ClInclude Include="..\urPDF\PageLayoutGeometry.h" />
     <ClInclude Include="..\urPDF\DocumentOperation.h" />
     <ClInclude Include="..\urPDF\BackgroundWork.h" />
     <ClInclude Include="..\urPDF\AppSettings.h" />

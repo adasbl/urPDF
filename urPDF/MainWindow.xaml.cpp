@@ -3233,7 +3233,6 @@ namespace winrt::urPDF::implementation
     {
         auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         std::shared_ptr<PdfTabInfo> pdfInfo;
-        int currentPage = 1;
 
         if (currentTab)
         {
@@ -3241,7 +3240,6 @@ namespace winrt::urPDF::implementation
             if (openedTab != m_openedTabs.end())
             {
                 pdfInfo = openedTab->second;
-                currentPage = pdfInfo->m_currentPageIndex;
             }
         }
 
@@ -3251,23 +3249,17 @@ namespace winrt::urPDF::implementation
         }
 
         SaveViewState(pdfInfo);
-        const auto operation = DeferViewStateSave(pdfInfo);
         pdfInfo->m_viewState.bookView = !pdfInfo->m_viewState.bookView;
-
-        RebuildPagesContainer(pdfInfo, pdfInfo->m_renderedPages, operation);
-
-        const int pagesPerRow = pdfInfo->m_viewState.bookView ? 2 : 1;
-        const int totalRows = (pdfInfo->m_pagecount + pagesPerRow - 1) / pagesPerRow;
-        const int targetRow = totalRows > 0 ? (std::min)((currentPage - 1) / pagesPerRow, totalRows - 1) : 0;
-        PdfScrollViewer().UpdateLayout();
-
-        const double scrollPercentage = totalRows > 1 ? static_cast<double>(targetRow) / (totalRows - 1) : 0.0;
-        const double targetOffset = scrollPercentage * PdfScrollViewer().ScrollableHeight();
-
-        m_pendingLayoutViewOffsetY = targetOffset;
-        PdfScrollViewer().ChangeView(nullptr, targetOffset, nullptr, true);
-        FinishViewStateChange(pdfInfo, operation);
-        RenderVisiblePagesAsync();
+        if (!pdfInfo->m_hasViewAnchor)
+        {
+            pdfInfo->m_viewState.anchorPage = pdfInfo->m_currentPageIndex;
+            pdfInfo->m_viewState.anchorX = 0.0;
+            pdfInfo->m_viewState.anchorY = 0.0;
+            pdfInfo->m_viewState.viewportX = 0.0;
+            pdfInfo->m_viewState.viewportY = 0.0;
+            pdfInfo->m_hasViewAnchor = true;
+        }
+        RestoreViewState(pdfInfo);
     }
 
     // PRINT

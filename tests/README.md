@@ -10,6 +10,13 @@ They require Visual Studio 2026's C++ toolset `v145` and Windows SDK
 is explicitly disabled for this project, so local vcpkg installations do not
 affect the tests.
 
+`PageLayoutGeometryTests.cpp` uses the same pure layout calculation as the
+WinUI `PdfPageLayout` adapter. It checks page scaling, alignment and row spacing,
+then captures and restores view anchors across column changes on that generated
+geometry. Cases cover mixed page sizes, swapped dimensions after rotation,
+right-hand and unpaired pages, zoom, horizontal scrolling, centered content,
+and the available scroll range at document boundaries.
+
 The separate `urPDF.RuntimeTests` project loads the same MuPDF installation as
 the application. It checks shared resources and locks, runtime lifetime, and
 concurrent context cloning, transferring prepared contexts to workers, and
