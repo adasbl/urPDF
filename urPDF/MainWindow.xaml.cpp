@@ -3250,6 +3250,15 @@ namespace winrt::urPDF::implementation
 
         SaveViewState(pdfInfo);
         pdfInfo->m_viewState.bookView = !pdfInfo->m_viewState.bookView;
+        if (!pdfInfo->m_hasViewAnchor)
+        {
+            pdfInfo->m_viewState.anchorPage = pdfInfo->m_currentPageIndex;
+            pdfInfo->m_viewState.anchorX = 0.0;
+            pdfInfo->m_viewState.anchorY = 0.0;
+            pdfInfo->m_viewState.viewportX = 0.0;
+            pdfInfo->m_viewState.viewportY = 0.0;
+            pdfInfo->m_hasViewAnchor = true;
+        }
         RestoreViewState(pdfInfo);
     }
 
