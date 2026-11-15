@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <windows.h>
 
 namespace urpdf
@@ -77,6 +78,40 @@ namespace urpdf
 
         return { { static_cast<LONG>(left), static_cast<LONG>(top),
             static_cast<LONG>(left + width), static_cast<LONG>(top + height) }, maximized };
+    }
+
+    inline std::optional<RECT> ResolveTabTearOutPlacement(RECT const& normalBounds,
+        RECT const& workArea, POINT cursor, POINT dragOffset) noexcept
+    {
+        const std::int64_t availableWidth = static_cast<std::int64_t>(workArea.right) - workArea.left;
+        const std::int64_t availableHeight = static_cast<std::int64_t>(workArea.bottom) - workArea.top;
+        if (availableWidth <= 0 || availableHeight <= 0
+            || availableWidth > (std::numeric_limits<std::int32_t>::max)()
+            || availableHeight > (std::numeric_limits<std::int32_t>::max)())
+        {
+            return std::nullopt;
+        }
+
+        std::int64_t width = static_cast<std::int64_t>(normalBounds.right) - normalBounds.left;
+        std::int64_t height = static_cast<std::int64_t>(normalBounds.bottom) - normalBounds.top;
+        if (width <= 0 || height <= 0 || (width >= availableWidth && height >= availableHeight))
+        {
+            // An always-maximized window may have no useful restore size.
+            width = (std::max)(std::int64_t{ 1 }, availableWidth * 3 / 4);
+            height = (std::max)(std::int64_t{ 1 }, availableHeight * 3 / 4);
+        }
+        width = (std::min)(width, availableWidth);
+        height = (std::min)(height, availableHeight);
+
+        const auto offsetX = std::clamp<std::int64_t>(dragOffset.x, 0, width - 1);
+        const auto offsetY = std::clamp<std::int64_t>(dragOffset.y, 0, height - 1);
+        const auto left = std::clamp<std::int64_t>(static_cast<std::int64_t>(cursor.x) - offsetX,
+            workArea.left, workArea.right - width);
+        const auto top = std::clamp<std::int64_t>(static_cast<std::int64_t>(cursor.y) - offsetY,
+            workArea.top, workArea.bottom - height);
+
+        return RECT{ static_cast<LONG>(left), static_cast<LONG>(top),
+            static_cast<LONG>(left + width), static_cast<LONG>(top + height) };
     }
 
     inline void UpdateWindowPositionFromPlacement(WindowState& state, WINDOWPLACEMENT const& placement,

@@ -16,6 +16,13 @@ Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 public static class DragNative {
+    [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] public struct MonitorInfo {
+        public uint Size;
+        public Rect Monitor, Work;
+        public uint Flags;
+    }
     [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
@@ -24,6 +31,21 @@ public static class DragNative {
     [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hwnd, int x, int y, int width, int height, bool repaint);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out Rect bounds);
+    [DllImport("user32.dll")] private static extern IntPtr MonitorFromPoint(Point point, uint flags);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool GetMonitorInfoW(IntPtr monitor, ref MonitorInfo info);
+    public static Rect Bounds(IntPtr hwnd) {
+        Rect bounds;
+        if (!GetWindowRect(hwnd, out bounds)) { throw new InvalidOperationException("Cannot read window bounds."); }
+        return bounds;
+    }
+    public static Rect WorkAreaAt(int x, int y) {
+        var info = new MonitorInfo { Size = (uint)Marshal.SizeOf(typeof(MonitorInfo)) };
+        if (!GetMonitorInfoW(MonitorFromPoint(new Point { X = x, Y = y }, 2), ref info)) {
+            throw new InvalidOperationException("Cannot read monitor work area.");
+        }
+        return info.Work;
+    }
 }
 '@
 [DragNative]::SetThreadDpiAwarenessContext([IntPtr](-4)) | Out-Null
@@ -94,18 +116,20 @@ function Fresh {
     Start-Secondary @(Quote $pdfC) | Out-Null
     Wait-Until { (Get-AllTabNames) -contains 'Gamma.pdf' } | Out-Null
     $script:w1 = @(Get-AppWindows)[0]
+    [SmokeNative]::ShowWindow($script:w1, 9) | Out-Null
     [DragNative]::MoveWindow($script:w1, 80, 80, 1200, 650, $true) | Out-Null
     [DragNative]::SetForegroundWindow($script:w1) | Out-Null
     Start-Sleep -Seconds 1
     Wait-PdfReady $script:w1
 }
 
-function TearOut([IntPtr] $Window, [string] $Name, [switch] $Escape) {
+function TearOut([IntPtr] $Window, [string] $Name, [switch] $Escape, [int[]] $DropPoint) {
     $before = @(Get-AppWindows)
     $point = Center (Find-Tab $Window $Name)
+    if (!$DropPoint) { $DropPoint = @(($point[0] + 250), ($point[1] + 420)) }
     if ($CheckPresentation) { [WindowPresentationCapture]::Start([uint32]$script:main.Id, [IntPtr[]]$before) }
     try {
-        Drag $point @(($point[0] + 250), ($point[1] + 420)) -Escape:$Escape -WhileHeld {
+        Drag $point $DropPoint -Escape:$Escape -WhileHeld {
             Record 'Dragging outside keeps the tab in its source until release' `
                 ((Get-AppWindows).Count -eq $before.Count -and @(Get-TabNames $Window) -contains $Name) (Describe)
         }
@@ -118,7 +142,16 @@ function TearOut([IntPtr] $Window, [string] $Name, [switch] $Escape) {
         $detail = ($frames | ForEach-Object { "visible=$($_.VisibleSamples), black=$($_.BlackSamples), cloaked=$($_.CloakedSamples)" }) -join '; '
         Record "Torn-out '$Name' window has no sampled black startup frames" $ok $detail
     }
-    @(Get-AppWindows | Where-Object { $before -notcontains $_ })
+    $newWindows = @(Get-AppWindows | Where-Object { $before -notcontains $_ })
+    foreach ($newWindow in $newWindows) {
+        $bounds = [DragNative]::Bounds($newWindow)
+        $work = [DragNative]::WorkAreaAt($DropPoint[0], $DropPoint[1])
+        $fits = $bounds.Left -ge $work.Left -and $bounds.Top -ge $work.Top -and `
+            $bounds.Right -le $work.Right -and $bounds.Bottom -le $work.Bottom
+        Record "Torn-out '$Name' window fits the drop monitor work area" $fits `
+            "window=($($bounds.Left),$($bounds.Top),$($bounds.Right),$($bounds.Bottom)); work=($($work.Left),$($work.Top),$($work.Right),$($work.Bottom))"
+    }
+    $newWindows
 }
 
 function DropInto([IntPtr] $Source, [string] $Name, [IntPtr] $Target) {
@@ -197,6 +230,28 @@ try {
     Drag $alpha @([int]($gamma.X + $gamma.Width - 10), $alpha[1])
     $order = @(Get-TabNames $w1)
     Record 'Reorder PDF tabs inside the strip' ($order[0] -eq 'Gamma.pdf' -and $order[1] -eq 'Alpha.pdf') ($order -join ', ')
+
+    foreach ($maximized in @($false, $true)) {
+        Fresh
+        $bounds = [DragNative]::Bounds($w1)
+        $work = [DragNative]::WorkAreaAt($bounds.Left + 100, $bounds.Top + 100)
+        [DragNative]::MoveWindow($w1, $work.Left + 50, $work.Top + 50, `
+            [int](($work.Right - $work.Left) * 0.6), [int](($work.Bottom - $work.Top) * 0.6), $true) | Out-Null
+        Start-Sleep -Milliseconds 500
+        $restored = [DragNative]::Bounds($w1)
+        if ($maximized) {
+            [SmokeNative]::ShowWindow($w1, 3) | Out-Null
+            Start-Sleep -Milliseconds 700
+        }
+        $new = @(TearOut $w1 'Gamma.pdf' -DropPoint @(($work.Right - 2), ($work.Bottom - 2)))
+        $sameSize = $false
+        if ($new.Count -eq 1) {
+            $tornOut = [DragNative]::Bounds($new[0])
+            $sameSize = ($tornOut.Right - $tornOut.Left) -eq ($restored.Right - $restored.Left) -and `
+                ($tornOut.Bottom - $tornOut.Top) -eq ($restored.Bottom - $restored.Top)
+        }
+        Record "Tear-out near screen edge preserves restore size (maximized=$maximized)" $sameSize (Describe)
+    }
 
     Fresh
     $new = TearOut $w1 'Gamma.pdf'

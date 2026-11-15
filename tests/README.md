@@ -17,6 +17,10 @@ geometry. Cases cover mixed page sizes, swapped dimensions after rotation,
 right-hand and unpaired pages, zoom, horizontal scrolling, centered content,
 and the available scroll range at document boundaries.
 
+`WindowPlacementTests.cpp` checks torn-out tab placement using restored bounds,
+including screen edges, smaller monitors, negative coordinates, taskbar offsets,
+fallback sizes, and drag offsets larger than the destination window.
+
 The separate `urPDF.RuntimeTests` project loads the same MuPDF installation as
 the application. It checks shared resources and locks, runtime lifetime, and
 concurrent context cloning, transferring prepared contexts to workers, and
@@ -67,6 +71,8 @@ restore the user settings they change and print a PASS/FAIL table.
   without opening a window.
   Tab widths are checked for short and long filenames, empty and selected tabs,
   and tabs moved to a new window, accounting for Windows DPI scaling.
+  Tear-out checks also cover normal and maximized source windows dropped near a
+  screen edge, preserving the restore size and fitting the drop monitor's work area.
   With `-CheckPresentation`, it also samples the desktop output when torn-out
   windows first appear, checking for black startup frames and verifying that
   tearing out the last tab replaces and closes its source window.

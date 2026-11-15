@@ -1513,8 +1513,28 @@ namespace winrt::urPDF::implementation
             POINT cursor{};
             if (GetCursorPos(&cursor))
             {
-                window.AppWindow().MoveAndResize({ cursor.x - m_tabDragOffset.X, cursor.y - m_tabDragOffset.Y,
-                    AppWindow().Size().Width, AppWindow().Size().Height });
+                auto nativeWindow = try_as<::IWindowNative>();
+                HWND hwnd{};
+                WINDOWPLACEMENT placement{};
+                placement.length = sizeof(placement);
+                RECT normalBounds{};
+                if (nativeWindow && SUCCEEDED(nativeWindow->get_WindowHandle(&hwnd))
+                    && GetWindowPlacement(hwnd, &placement))
+                {
+                    normalBounds = placement.rcNormalPosition;
+                }
+
+                MONITORINFO monitorInfo{};
+                monitorInfo.cbSize = sizeof(monitorInfo);
+                if (GetMonitorInfoW(MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST), &monitorInfo))
+                {
+                    if (const auto bounds = urpdf::ResolveTabTearOutPlacement(normalBounds, monitorInfo.rcWork,
+                        cursor, { m_tabDragOffset.X, m_tabDragOffset.Y }))
+                    {
+                        window.AppWindow().MoveAndResize({ static_cast<int32_t>(bounds->left), static_cast<int32_t>(bounds->top),
+                            static_cast<int32_t>(bounds->right - bounds->left), static_cast<int32_t>(bounds->bottom - bounds->top) });
+                    }
+                }
             }
             auto destination = get_self<MainWindow>(window);
             if (!destination->TransferTabFrom(*this, tab, 0)) { window.Close(); }

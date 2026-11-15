@@ -55,6 +55,7 @@
     <ClCompile Include="PdfRenderScaleTests.cpp" />
     <ClCompile Include="PdfBitmapLimitsTests.cpp" />
     <ClCompile Include="AppSettingsTests.cpp" />
+    <ClCompile Include="WindowPlacementTests.cpp" />
     <ClCompile Include="DocumentViewStateTests.cpp" />
     <ClCompile Include="PageLayoutGeometryTests.cpp" />
     <ClCompile Include="DocumentOperationTests.cpp" />
