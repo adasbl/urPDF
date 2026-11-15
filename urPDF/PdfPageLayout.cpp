@@ -2,13 +2,13 @@
 
 // Corresponding
 #include "PdfPageLayout.h"
+#include "PageLayoutGeometry.h"
 
 // Generated
 #include "PdfPageLayout.g.cpp"
 
 // Standard C++
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -75,92 +75,25 @@ namespace winrt::urPDF::implementation
 
     std::vector<foundation::Rect> PdfPageLayout::CalculatePageRects(foundation::Size const& availableSize)
     {
+        std::vector<urpdf::PageSize> pageSizes;
+        if (m_pageSizes)
+        {
+            pageSizes.reserve(m_pageSizes.Size());
+            for (auto const& size : m_pageSizes)
+            {
+                pageSizes.push_back({ size.Width, size.Height });
+            }
+        }
+
+        const auto geometry = urpdf::CalculatePageLayoutGeometry(pageSizes, m_columnCount, m_spacing, availableSize.Width);
+        m_contentWidth = geometry.contentWidth;
         std::vector<foundation::Rect> pageRects;
-        if (!m_pageSizes)
+        pageRects.reserve(geometry.pageRects.size());
+        for (auto const& rect : geometry.pageRects)
         {
-            m_contentWidth = 0.0;
-            return pageRects;
+            pageRects.push_back({ static_cast<float>(rect.x), static_cast<float>(rect.y),
+                static_cast<float>(rect.width), static_cast<float>(rect.height) });
         }
-
-        const uint32_t pageCount = m_pageSizes.Size();
-        pageRects.resize(pageCount);
-
-        if (pageCount == 0)
-        {
-            m_contentWidth = 0.0;
-            return pageRects;
-        }
-
-        double contentWidth = availableSize.Width;
-        if (!std::isfinite(contentWidth) || contentWidth <= 0.0)
-        {
-            contentWidth = 0.0;
-            for (uint32_t i = 0; i < pageCount; ++i)
-            {
-                auto const size = m_pageSizes.GetAt(i);
-                contentWidth = (std::max)(contentWidth, static_cast<double>(size.Width));
-            }
-
-            if (m_columnCount == 2)
-            {
-                for (uint32_t i = 0; i < pageCount; i += 2)
-                {
-                    const double firstWidth = m_pageSizes.GetAt(i).Width;
-                    const double secondWidth = i + 1 < pageCount ? m_pageSizes.GetAt(i + 1).Width : 0.0;
-                    contentWidth = (std::max)(contentWidth, firstWidth + secondWidth + m_spacing);
-                }
-            }
-        }
-
-        m_contentWidth = contentWidth;
-
-        const double safeSpacing = (std::max)(0.0, m_spacing);
-
-        double y = 0.0;
-        for (uint32_t rowStart = 0; rowStart < pageCount; rowStart += m_columnCount)
-        {
-            const uint32_t rowEnd = (std::min)(pageCount, rowStart + static_cast<uint32_t>(m_columnCount));
-            double rowHeight = 0.0; 
-            std::array<double, 2> widths{};
-            std::array<double, 2> heights{};
-
-            for (uint32_t column = 0; rowStart + column < rowEnd; ++column)
-            {
-                auto const size = m_pageSizes.GetAt(rowStart + column);
-                const double rawWidth = (std::max)(1.0, static_cast<double>(size.Width));
-                const double rawHeight = (std::max)(1.0, static_cast<double>(size.Height));
-                widths[column] = rawWidth;
-                heights[column] = rawHeight;
-            }
-
-            const bool isPagePair = rowEnd - rowStart == 2;
-            const double rawPagesWidth = widths[0] + (isPagePair ? widths[1] : 0.0);
-            const double availablePageWidth = isPagePair ? (std::max)(0.0, contentWidth - safeSpacing) : contentWidth;
-            const double rowScale = rawPagesWidth > availablePageWidth && availablePageWidth > 0.0 ? availablePageWidth / rawPagesWidth : 1.0;
-
-            for (uint32_t column = 0; rowStart + column < rowEnd; ++column)
-            {
-                widths[column] *= rowScale;
-                heights[column] *= rowScale;
-                rowHeight = (std::max)(rowHeight, heights[column]);
-            }
-
-            double x = isPagePair ? (contentWidth / 2.0) - (safeSpacing / 2.0) - widths[0] : (contentWidth - widths[0]) / 2.0;
-            for (uint32_t column = 0; rowStart + column < rowEnd; ++column)
-            {
-                pageRects[rowStart + column] = foundation::Rect{
-                    static_cast<float>(x),
-                    static_cast<float>(y),
-                    static_cast<float>(widths[column]),
-                    static_cast<float>(heights[column])
-                };
-
-                x += widths[column] + safeSpacing;
-            }
-
-            y += rowHeight + safeSpacing;
-        }
-
         return pageRects;
     }
 
