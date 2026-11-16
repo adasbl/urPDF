@@ -4,6 +4,8 @@
 #include "MainWindow.xaml.h"
 #include "DocumentOperation.h"
 #include "MuPdfDocument.h"
+#include "ExternalUriPolicy.h"
+#include "LinkHitArea.h"
 #if __has_include("MainWindow.g.cpp")
 #include "MainWindow.g.cpp"
 #endif
@@ -48,6 +50,9 @@ extern "C" {
 #include <winrt/Windows.Graphics.Imaging.h>
 #include <winrt/Windows.Graphics.Printing.h>
 #include <winrt/Windows.System.Threading.h>
+#include <winrt/Windows.System.h>
+#include <winrt/Microsoft.UI.Xaml.Automation.h>
+#include <winrt/Microsoft.UI.Xaml.Input.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <winrt/Microsoft.UI.Dispatching.h>
 #include <winrt/Microsoft.UI.Xaml.Printing.h>
@@ -215,6 +220,30 @@ namespace
         bool rendered{ false };
     };
 
+    struct PageLinksResult
+    {
+        std::vector<urpdf::PageLink> links;
+        bool loaded{ false };
+    };
+
+    winrt::fire_and_forget LaunchExternalUriAsync(std::string utf8Uri)
+    {
+        try
+        {
+            const auto checked = urpdf::TryGetLaunchableExternalUri(utf8Uri);
+            if (!checked) { co_return; }
+            foundation::Uri uri{ winrt::to_hstring(*checked) };
+            if (!urpdf::IsAllowedExternalScheme(winrt::to_string(uri.SchemeName()))) { co_return; }
+            co_await winrt::Windows::System::Launcher::LaunchUriAsync(uri);
+        }
+        catch (...)
+        {
+#ifdef _DEBUG
+            OutputDebugStringW(L"urPDF: external link could not be opened.\n");
+#endif
+        }
+    }
+
     struct PageElementParts
     {
         controls::Border border{ nullptr };
@@ -255,10 +284,16 @@ namespace
         clip.Rect(bounds);
     }
 
-    void ClearPageElement(PageElementParts const& parts)
+    void ClearPageOverlay(PageElementParts const& parts, winrt::urPDF::implementation::PageOverlayElement* entry)
+    {
+        parts.overlay.Children().Clear();
+        if (entry) { entry->linkAreasBuilt = false; }
+    }
+
+    void ClearPageElement(PageElementParts const& parts, winrt::urPDF::implementation::PageOverlayElement* entry = nullptr)
     {
         parts.image.Source(nullptr);
-        parts.overlay.Children().Clear();
+        ClearPageOverlay(parts, entry);
         UpdatePageOverlayClip(parts);
         parts.border.Opacity(0.65);
     }
@@ -1257,6 +1292,7 @@ namespace winrt::urPDF::implementation
         if (tabView.SelectedItem() == tab) { SaveViewState(pdfTab); }
 
         const auto generation = pdfTab->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+        for (auto& links : pdfTab->m_pageLinks) { links.ResetPending(); }
         if (m_pendingZoomTab.lock() == pdfTab) { CancelPendingZoomRender(); }
         if (m_presentedTab.lock() == pdfTab || m_pendingLayoutViewSaveTab.lock() == pdfTab)
         {
@@ -2021,6 +2057,7 @@ namespace winrt::urPDF::implementation
             pdfTab->m_pagecount = pagecount;
             pdfTab->m_pageBounds = std::move(pageBounds);
             pdfTab->m_renderedPages = std::move(slots);
+            pdfTab->m_pageLinks.resize(pagecount);
             pdfTab->m_layoutLoaded = true;
 
             auto targetTab = requestedTarget
@@ -2675,7 +2712,7 @@ namespace winrt::urPDF::implementation
         {
             entry.bitmap.reset();
             entry.state.ClearRaster(binding);
-            parts->overlay.Children().Clear();
+            ClearPageOverlay(*parts, &entry);
             UpdatePageOverlayClip(*parts);
             return;
         }
@@ -2685,10 +2722,16 @@ namespace winrt::urPDF::implementation
         if (size.width != previousSize.width || size.height != previousSize.height)
         {
             // Page-specific features rebuild their drawings for the new mapping.
-            parts->overlay.Children().Clear();
+            ClearPageOverlay(*parts, &entry);
         }
         entry.state.Resize(binding, size);
         UpdatePageOverlayClip(*parts, entry.state.Mapping());
+        if (entry.state.Mapping() && !entry.linkAreasBuilt
+            && binding.pageIndex >= 0 && static_cast<std::size_t>(binding.pageIndex) < document->m_pageLinks.size()
+            && document->m_pageLinks[binding.pageIndex].State() == urpdf::PageLinksState::ready)
+        {
+            BuildPageLinkAreas(element, entry, document, binding);
+        }
     }
 
     void MainWindow::RefreshRealizedPageOverlays()
@@ -2747,7 +2790,7 @@ namespace winrt::urPDF::implementation
         if (previousBinding != binding)
         {
             entry->sizeChangedRevoker.revoke();
-            ClearPageElement(*parts);
+            ClearPageElement(*parts, entry.get());
             entry->bitmap.reset();
             entry->document = document;
             entry->sizeChangedRevoker = parts->content.SizeChanged(winrt::auto_revoke,
@@ -2770,11 +2813,11 @@ namespace winrt::urPDF::implementation
         {
             entry->bitmap.reset();
             entry->state.ClearRaster(*binding);
-            ClearPageElement(*parts);
+            ClearPageElement(*parts, entry.get());
             return;
         }
         const bool bitmapChanged = !entry->bitmap || entry->bitmap->source != page.bitmap->source;
-        if (bitmapChanged) { parts->overlay.Children().Clear(); }
+        if (bitmapChanged) { ClearPageOverlay(*parts, entry.get()); }
         if (parts->image.Source() != page.bitmap->source)
         {
             controls::Image freshImage;
@@ -2793,8 +2836,127 @@ namespace winrt::urPDF::implementation
                 { parts->content.ActualWidth(), parts->content.ActualHeight() });
         }
         RefreshPageOverlay(element, *binding);
+        EnsurePageLinks(document, static_cast<int32_t>(pageIndex));
         parts->border.Opacity(1.0);
         TryRecordFirstVisiblePage(document);
+    }
+
+    void MainWindow::EnsurePageLinks(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex)
+    {
+        if (m_isClosed || m_isPageLinksLoadRunning || m_workCancelled->load(std::memory_order_acquire)
+            || pageIndex < 0 || static_cast<std::size_t>(pageIndex) >= document->m_pageLinks.size()) { return; }
+        auto& slot = document->m_pageLinks[pageIndex];
+        if (slot.State() != urpdf::PageLinksState::notLoaded) { return; }
+        auto registration = m_runtime->Work().TryRegister();
+        if (!registration) { return; }
+        const auto requestId = *slot.BeginLoad();
+        m_isPageLinksLoadRunning = true;
+        const auto generation = document->m_renderGeneration.load(std::memory_order_acquire);
+        const auto documentId = document->m_documentId;
+        const auto weakTab = std::weak_ptr<PdfTabInfo>(document);
+        try
+        {
+            auto context = m_runtime->CloneContext();
+            auto cancelled = m_workCancelled;
+            auto dispatcher = DispatcherQueue();
+            QueueMuPdfWork(std::move(registration),
+                [document, context = std::move(context), cancelled, generation, pageIndex]() mutable
+                {
+                    PageLinksResult result;
+                    if (cancelled->load(std::memory_order_acquire)) { return result; }
+                    urpdf::RunDocumentOperation(document->m_documentMutex, document->m_renderGeneration, generation, [&]
+                        {
+                            if (cancelled->load(std::memory_order_acquire)) { return; }
+                            result.links = urpdf::CollectPageLinks(context.get(), document->m_doc, pageIndex);
+                            result.loaded = true;
+                        });
+                    return result;
+                },
+                [weakThis = get_weak(), weakTab, cancelled, dispatcher, documentId, pageIndex, requestId]
+                (std::optional<PageLinksResult> result, std::exception_ptr error)
+                {
+                    PageLinksResult completed;
+                    if (result) { completed = std::move(*result); }
+                    TryPublishResult(dispatcher, cancelled,
+                        [weakThis, weakTab, cancelled, documentId, pageIndex, requestId, completed = std::move(completed), error]() mutable
+                        {
+                            auto self = weakThis.get();
+                            if (!self || cancelled->load(std::memory_order_acquire)) { return; }
+                            self->CompletePageLinksLoad(weakTab, documentId, pageIndex, requestId,
+                                std::move(completed.links), completed.loaded, error);
+                        });
+                });
+        }
+        catch (...)
+        {
+            CompletePageLinksLoad(weakTab, documentId, pageIndex, requestId, {}, false, std::current_exception());
+        }
+    }
+
+    void MainWindow::CompletePageLinksLoad(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
+        int32_t pageIndex, std::uint64_t requestId, std::vector<urpdf::PageLink> links, bool loaded, std::exception_ptr error)
+    {
+        m_isPageLinksLoadRunning = false;
+        if (m_isClosed) { return; }
+        try
+        {
+            auto document = weakTab.lock();
+            const bool belongsToWindow = document && document->m_documentId == documentId
+                && std::any_of(m_openedTabs.begin(), m_openedTabs.end(), [&](auto const& tab) { return tab.second == document; });
+            if (belongsToWindow && pageIndex >= 0 && static_cast<std::size_t>(pageIndex) < document->m_pageLinks.size())
+            {
+                document->m_pageLinks[pageIndex].Complete(requestId, std::move(links), loaded, error != nullptr);
+            }
+            // Also schedules pending pages after this job, including an explicit
+            // retry if a generation change discarded it AFTER the last configure.
+            // A transferred tab resets its pending slots before the new owner
+            // configures them; request IDs reject any old owner's completion.
+            RefreshRealizedPageOverlays();
+        }
+        catch (...)
+        {
+#ifdef _DEBUG
+            OutputDebugStringW(L"urPDF: page link completion could not be applied.\n");
+#endif
+        }
+    }
+
+    void MainWindow::BuildPageLinkAreas(xaml::UIElement const& element, PageOverlayElement& entry,
+        std::shared_ptr<PdfTabInfo> const& document, urpdf::PageOverlayState::Binding binding)
+    {
+        const auto parts = TryGetPageElementParts(element);
+        const auto& mapping = entry.state.Mapping();
+        if (!parts || !mapping) { return; }
+        for (auto const& link : document->m_pageLinks[binding.pageIndex].Links())
+        {
+            const auto rect = mapping->PdfToElementRect(link.rect);
+            if (!rect) { continue; }
+            auto area = winrt::make<LinkHitArea>();
+            area.Width(rect->width);
+            area.Height(rect->height);
+            controls::Canvas::SetLeft(area, rect->x);
+            controls::Canvas::SetTop(area, rect->y);
+            xaml::Automation::AutomationProperties::SetName(area, link.kind == urpdf::PageLinkKind::external
+                ? winrt::to_hstring(link.uri) : L"Page " + winrt::to_hstring(link.targetPageIndex + 1));
+            area.Tapped([weakThis = get_weak(), weakElement = winrt::make_weak(element), binding, link]
+                (foundation::IInspectable const&, xaml::Input::TappedRoutedEventArgs const& args)
+                {
+                    auto self = weakThis.get();
+                    auto element = weakElement.get();
+                    if (!self || self->m_isClosed || !element) { return; }
+                    auto overlay = self->m_pageOverlays.find(element);
+                    if (overlay == self->m_pageOverlays.end() || !overlay->second->state.IsCurrent(binding)) { return; }
+                    auto tab = self->MainTabView().SelectedItem().try_as<controls::TabViewItem>();
+                    auto opened = self->m_openedTabs.find(tab);
+                    if (opened == self->m_openedTabs.end() || opened->second->m_documentId != binding.documentId
+                        || opened->second->m_renderGeneration.load(std::memory_order_acquire) != binding.generation) { return; }
+                    args.Handled(true);
+                    if (link.kind == urpdf::PageLinkKind::external) { LaunchExternalUriAsync(link.uri); }
+                    else { self->ScrollToPage(link.targetPageIndex + 1); }
+                });
+            parts->overlay.Children().Append(area);
+        }
+        entry.linkAreasBuilt = true;
     }
 
     void MainWindow::TryRecordFirstVisiblePage(std::shared_ptr<PdfTabInfo> const& PdfTab)

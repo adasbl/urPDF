@@ -1,0 +1,8 @@
+namespace urPDF
+{
+    [default_interface]
+    runtimeclass LinkHitArea : Microsoft.UI.Xaml.Controls.Grid
+    {
+        LinkHitArea();
+    }
+}

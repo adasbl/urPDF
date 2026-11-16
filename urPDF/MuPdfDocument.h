@@ -1,5 +1,7 @@
 #pragma once
 
+#include "PageLinks.h"
+
 extern "C" {
 #include <mupdf/fitz.h>
 }
@@ -14,4 +16,5 @@ namespace urpdf
     fz_document* OpenPdfDocument(fz_context* ctx, char const* utf8Path);
     int CountDocumentPages(fz_context* ctx, fz_document* document);
     std::vector<fz_rect> CollectPageBounds(fz_context* ctx, fz_document* document, int pageCount);
+    std::vector<PageLink> CollectPageLinks(fz_context* ctx, fz_document* document, int pageIndex);
 }
