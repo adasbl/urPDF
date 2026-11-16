@@ -8,6 +8,7 @@
 #include "DocumentViewState.h"
 #include "MuPdfRuntime.h"
 #include "PageCoordinateMapping.h"
+#include "PageOverlayState.h"
 #include "PdfPageLayout.h"
 #include "PdfRenderScale.h"
 #include "WindowCreationOptions.h"
@@ -270,6 +271,14 @@ namespace winrt::urPDF::implementation
     };
 
 
+    struct PageOverlayElement
+    {
+        urpdf::PageOverlayState state;
+        std::weak_ptr<PdfTabInfo> document;
+        std::optional<PageBitmap> bitmap;
+        xaml::FrameworkElement::SizeChanged_revoker sizeChangedRevoker;
+    };
+
     struct PendingDocumentOpen
     {
         urpdf::WindowCreationOptions document;
@@ -321,7 +330,6 @@ namespace winrt::urPDF::implementation
         winrt::fire_and_forget PdfScrollViewer_ViewChanged(foundation::IInspectable const& sender, controls::ScrollViewerViewChangedEventArgs const& args);
         void PagesRepeater_ElementPrepared(foundation::IInspectable const& sender, controls::ItemsRepeaterElementPreparedEventArgs const& args);
         void PagesRepeater_ElementClearing(foundation::IInspectable const& sender, controls::ItemsRepeaterElementClearingEventArgs const& args);
-        void PageContent_SizeChanged(foundation::IInspectable const& sender, xaml::SizeChangedEventArgs const& args);
         void SettingsButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
         winrt::fire_and_forget RotateButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
         void PageNumberBox_ValueChanged(controls::NumberBox const& sender, controls::NumberBoxValueChangedEventArgs const& args);
@@ -406,6 +414,7 @@ namespace winrt::urPDF::implementation
         int m_layoutRotation{ 0 };
         PageBitmapCache m_pageBitmapCache{ 256ull * 1024ull * 1024ull };
         foundation::Collections::IObservableVector<foundation::IInspectable> m_pageRepeaterItems{ nullptr };
+        std::map<xaml::UIElement, std::shared_ptr<PageOverlayElement>> m_pageOverlays;
 
         void CloseTab(controls::TabViewItem const& tab);
         winrt::fire_and_forget CompleteDeferredPresentation();
@@ -449,6 +458,10 @@ namespace winrt::urPDF::implementation
         void ApplyPendingDpiRefresh();
         void RebuildPagesContainer(std::shared_ptr<PdfTabInfo> const& pdfTab, std::vector<PageSlot> const& pages, urpdf::ViewStateGuard::Operation operation);
         void ConfigurePageElement(xaml::UIElement const& element, std::size_t pageIndex);
+        void RefreshPageOverlay(xaml::UIElement const& element, urpdf::PageOverlayState::Binding binding);
+        void RefreshRealizedPageOverlays();
+        void ReleasePageOverlay(xaml::UIElement const& element);
+        void ClearPageOverlays(std::uint64_t documentId = 0);
         std::optional<urpdf::PageCoordinateMapping> TryGetPageCoordinateMapping(int32_t pageIndex);
         void TryRecordFirstVisiblePage(std::shared_ptr<PdfTabInfo> const& PdfTab);
         std::vector<PageRenderRequest> BuildRenderQueue(int32_t pageCount, PageViewRange& viewRange);

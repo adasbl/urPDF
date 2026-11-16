@@ -237,19 +237,14 @@ namespace
         return PageElementParts{ border, content, image, overlay };
     }
 
-    void UpdatePageOverlayClip(PageElementParts const& parts)
+    void UpdatePageOverlayClip(PageElementParts const& parts, std::optional<urpdf::PageCoordinateMapping> const& mapping = std::nullopt)
     {
         foundation::Rect bounds{};
-        auto bitmap = parts.image.Source().try_as<imaging::BitmapSource>();
-        if (bitmap)
+        if (mapping)
         {
-            const auto rect = urpdf::TryUniformBitmapRect({ bitmap.PixelWidth(), bitmap.PixelHeight() },
-                { parts.content.ActualWidth(), parts.content.ActualHeight() });
-            if (rect)
-            {
-                bounds = { static_cast<float>(rect->x), static_cast<float>(rect->y),
-                    static_cast<float>(rect->width), static_cast<float>(rect->height) };
-            }
+            const auto rect = mapping->BitmapRect();
+            bounds = { static_cast<float>(rect.x), static_cast<float>(rect.y),
+                static_cast<float>(rect.width), static_cast<float>(rect.height) };
         }
         auto clip = parts.overlay.Clip().try_as<media::RectangleGeometry>();
         if (!clip)
@@ -445,6 +440,7 @@ namespace winrt::urPDF::implementation
     {
         if (m_isClosed) { return; }
         m_isClosed = true;
+        try { ClearPageOverlays(); } catch (...) { m_pageOverlays.clear(); }
         try { StopTrackingWindowState(); } catch (...) {}
         m_firstFrameRenderedRevoker.revoke();
         CloseTransferredSourceWindow();
@@ -573,7 +569,6 @@ namespace winrt::urPDF::implementation
 
         LoadSettings();
 
-        // Torn-out tabs receive their placement from the drag operation.
         if (!options.deferPresentation) { RestoreWindowState(); }
         TrackWindowState();
     }
@@ -623,8 +618,6 @@ namespace winrt::urPDF::implementation
         StopTrackingWindowState();
         CaptureWindowState();
 
-        // AppWindow does not support the weak references required by auto_revoke.
-        // Keep the event source alive and remove the handlers explicitly.
         m_observedAppWindow = AppWindow();
         m_windowChangedToken = m_observedAppWindow.Changed(
             [weakThis = get_weak()](auto const&, auto const&)
@@ -1166,6 +1159,7 @@ namespace winrt::urPDF::implementation
                 SaveViewState(removedEntry->second);
             }
         }
+        ClearPageOverlays();
         CancelPendingZoomRender();
         auto tabView = sender.as<controls::TabView>();
         auto currentTab = tabView.SelectedItem().try_as<controls::TabViewItem>();
@@ -1271,6 +1265,7 @@ namespace winrt::urPDF::implementation
         }
 
         m_pageBitmapCache.ClearDocumentEntries(pdfTab->m_documentId);
+        ClearPageOverlays(pdfTab->m_documentId);
         ReleaseSlotsOutsideRange(pdfTab, 0, -1);
         for (auto& slot : pdfTab->m_renderedPages)
         {
@@ -1633,6 +1628,7 @@ namespace winrt::urPDF::implementation
                 CancelPendingZoomRender();
             }
             ++openedTab->second->m_renderGeneration;
+            ClearPageOverlays(openedTab->second->m_documentId);
             for (auto& slot : openedTab->second->m_renderedPages) { slot.bitmap.reset(); }
             m_pageBitmapCache.ClearDocumentEntries(openedTab->second->m_documentId);
             m_openedTabs.erase(openedTab);
@@ -2272,6 +2268,7 @@ namespace winrt::urPDF::implementation
 
         m_dpiRefreshPending = false;
         PdfScrollViewer().UpdateLayout();
+        RefreshRealizedPageOverlays();
         RenderVisiblePagesAsync();
     }
 
@@ -2585,6 +2582,7 @@ namespace winrt::urPDF::implementation
     void MainWindow::RebuildPagesContainer(std::shared_ptr<PdfTabInfo> const& pdfTab, std::vector<PageSlot> const& pages, urpdf::ViewStateGuard::Operation operation)
     {
         if (!IsCurrentViewOperation(pdfTab, operation)) { return; }
+        ClearPageOverlays();
         m_presentedTab.reset();
         const int currentRotation = pdfTab->m_viewState.rotation;
         const bool bookView = pdfTab->m_viewState.bookView;
@@ -2627,52 +2625,156 @@ namespace winrt::urPDF::implementation
         }
     }
 
+    void MainWindow::ReleasePageOverlay(xaml::UIElement const& element)
+    {
+        auto found = m_pageOverlays.find(element);
+        if (found != m_pageOverlays.end())
+        {
+            auto& entry = *found->second;
+            entry.sizeChangedRevoker.revoke();
+            entry.state.Clear();
+            entry.bitmap.reset();
+            entry.document.reset();
+            m_pageOverlays.erase(found);
+        }
+        if (auto parts = TryGetPageElementParts(element)) { ClearPageElement(*parts); }
+    }
+
+    void MainWindow::ClearPageOverlays(std::uint64_t documentId)
+    {
+        std::vector<xaml::UIElement> elements;
+        elements.reserve(m_pageOverlays.size());
+        for (auto const& [element, entry] : m_pageOverlays)
+        {
+            const auto binding = entry->state.CurrentBinding();
+            if (documentId == 0 || (binding && binding->documentId == documentId)) { elements.push_back(element); }
+        }
+        for (auto const& element : elements) { ReleasePageOverlay(element); }
+    }
+
+    void MainWindow::RefreshPageOverlay(xaml::UIElement const& element, urpdf::PageOverlayState::Binding binding)
+    {
+        auto found = m_pageOverlays.find(element);
+        if (found == m_pageOverlays.end() || !found->second->state.IsCurrent(binding)) { return; }
+        auto& entry = *found->second;
+        auto document = entry.document.lock();
+        auto tab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
+        auto opened = m_openedTabs.find(tab);
+        if (m_isClosed || !document || document->m_documentId != binding.documentId
+            || document->m_renderGeneration.load(std::memory_order_acquire) != binding.generation
+            || opened == m_openedTabs.end() || opened->second != document
+            || m_layoutRotation != NormalizeRotation(document->m_viewState.rotation)
+            || PagesRepeater().GetElementIndex(element) != binding.pageIndex)
+        {
+            ReleasePageOverlay(element);
+            return;
+        }
+        const auto parts = TryGetPageElementParts(element);
+        if (!parts) { ReleasePageOverlay(element); return; }
+        if (!entry.bitmap || parts->image.Source() != entry.bitmap->source)
+        {
+            entry.bitmap.reset();
+            entry.state.ClearRaster(binding);
+            parts->overlay.Children().Clear();
+            UpdatePageOverlayClip(*parts);
+            return;
+        }
+
+        const urpdf::ElementSize size{ parts->content.ActualWidth(), parts->content.ActualHeight() };
+        const auto previousSize = entry.state.DisplaySize();
+        if (size.width != previousSize.width || size.height != previousSize.height)
+        {
+            // Page-specific features rebuild their drawings for the new mapping.
+            parts->overlay.Children().Clear();
+        }
+        entry.state.Resize(binding, size);
+        UpdatePageOverlayClip(*parts, entry.state.Mapping());
+    }
+
+    void MainWindow::RefreshRealizedPageOverlays()
+    {
+        // Snapshot only realized elements; configuration may release entries.
+        std::vector<xaml::UIElement> elements;
+        elements.reserve(m_pageOverlays.size());
+        for (auto const& [element, entry] : m_pageOverlays) { elements.push_back(element); }
+        for (auto const& element : elements)
+        {
+            const auto index = PagesRepeater().GetElementIndex(element);
+            if (index < 0) { ReleasePageOverlay(element); }
+            else { ConfigurePageElement(element, static_cast<std::size_t>(index)); }
+        }
+    }
+
     std::optional<urpdf::PageCoordinateMapping> MainWindow::TryGetPageCoordinateMapping(int32_t pageIndex)
     {
         if (m_isClosed || pageIndex < 0) { return std::nullopt; }
-        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
-        auto openedTab = m_openedTabs.find(currentTab);
-        if (openedTab == m_openedTabs.end()
-            || static_cast<std::size_t>(pageIndex) >= openedTab->second->m_renderedPages.size()) { return std::nullopt; }
-
-        auto const& page = openedTab->second->m_renderedPages[pageIndex];
-        if (!page.bitmap) { return std::nullopt; }
-        const auto parts = TryGetPageElementParts(PagesRepeater().TryGetElement(pageIndex));
-        if (!parts || parts->image.Source() != page.bitmap->source) { return std::nullopt; }
-
-        // Read current arranged DIPs, even while a new zoom/DPI render is pending.
-        // Geometry comes from the displayed source, never the requested bucket.
-        // Grid is already inside BorderThickness/Padding; do not subtract again.
-        return urpdf::PageCoordinateMapping::TryCreate(page.bitmap->geometry,
-            { parts->content.ActualWidth(), parts->content.ActualHeight() });
+        auto element = PagesRepeater().TryGetElement(pageIndex);
+        auto found = m_pageOverlays.find(element);
+        if (found == m_pageOverlays.end()) { return std::nullopt; }
+        const auto binding = found->second->state.CurrentBinding();
+        if (!binding) { return std::nullopt; }
+        RefreshPageOverlay(element, *binding);
+        found = m_pageOverlays.find(element);
+        if (found == m_pageOverlays.end() || !found->second->state.IsCurrent(*binding)) { return std::nullopt; }
+        return found->second->state.Mapping();
     }
 
     void MainWindow::ConfigurePageElement(xaml::UIElement const& element, std::size_t pageIndex)
     {
         auto parts = TryGetPageElementParts(element);
-        if (!parts) { return; }
-
+        if (!parts) { ReleasePageOverlay(element); return; }
         auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
-        if (!currentTab)
-        {
-            ClearPageElement(*parts);
-            return;
-        }
-
         auto openedTab = m_openedTabs.find(currentTab);
-        if (openedTab == m_openedTabs.end() || pageIndex >= openedTab->second->m_renderedPages.size())
+        if (m_isClosed || openedTab == m_openedTabs.end()
+            || pageIndex >= openedTab->second->m_renderedPages.size()
+            || PagesRepeater().GetElementIndex(element) != static_cast<int32_t>(pageIndex))
         {
-            ClearPageElement(*parts);
+            ReleasePageOverlay(element);
             return;
         }
 
-        auto const& page = openedTab->second->m_renderedPages[pageIndex];
-        if (!page.bitmap || page.state != PageRenderState::ready)
+        auto document = openedTab->second;
+        auto found = m_pageOverlays.find(element);
+        if (found == m_pageOverlays.end())
         {
+            found = m_pageOverlays.emplace(element, std::make_shared<PageOverlayElement>()).first;
+        }
+        auto entry = found->second;
+        const auto previousBinding = entry->state.CurrentBinding();
+        const auto binding = entry->state.Bind(document->m_documentId, static_cast<int>(pageIndex),
+            document->m_renderGeneration.load(std::memory_order_acquire));
+        if (!binding) { ReleasePageOverlay(element); return; }
+        if (previousBinding != binding)
+        {
+            entry->sizeChangedRevoker.revoke();
+            ClearPageElement(*parts);
+            entry->bitmap.reset();
+            entry->document = document;
+            entry->sizeChangedRevoker = parts->content.SizeChanged(winrt::auto_revoke,
+                [weakThis = get_weak(), weakElement = winrt::make_weak(element),
+                    weakEntry = std::weak_ptr<PageOverlayElement>(entry), binding = *binding](auto const&, auto const&)
+                {
+                    auto self = weakThis.get();
+                    auto element = weakElement.get();
+                    auto entry = weakEntry.lock();
+                    if (!self || !element || !entry) { return; }
+                    const auto found = self->m_pageOverlays.find(element);
+                    if (found == self->m_pageOverlays.end() || found->second != entry) { return; }
+                    self->RefreshPageOverlay(element, binding);
+                });
+        }
+
+        auto const& page = document->m_renderedPages[pageIndex];
+        // A failed/pending replacement may leave a valid older bitmap visible.
+        if (!page.bitmap || !page.bitmap->source)
+        {
+            entry->bitmap.reset();
+            entry->state.ClearRaster(*binding);
             ClearPageElement(*parts);
             return;
         }
-
+        const bool bitmapChanged = !entry->bitmap || entry->bitmap->source != page.bitmap->source;
+        if (bitmapChanged) { parts->overlay.Children().Clear(); }
         if (parts->image.Source() != page.bitmap->source)
         {
             controls::Image freshImage;
@@ -2684,10 +2786,15 @@ namespace winrt::urPDF::implementation
             parts->content.Children().SetAt(0, freshImage);
             parts->image = freshImage;
         }
-
-        UpdatePageOverlayClip(*parts);
+        if (bitmapChanged || !entry->bitmap)
+        {
+            entry->bitmap = page.bitmap;
+            entry->state.SetRaster(*binding, entry->bitmap->geometry,
+                { parts->content.ActualWidth(), parts->content.ActualHeight() });
+        }
+        RefreshPageOverlay(element, *binding);
         parts->border.Opacity(1.0);
-        TryRecordFirstVisiblePage(openedTab->second);
+        TryRecordFirstVisiblePage(document);
     }
 
     void MainWindow::TryRecordFirstVisiblePage(std::shared_ptr<PdfTabInfo> const& PdfTab)
@@ -2738,17 +2845,7 @@ namespace winrt::urPDF::implementation
 
     void MainWindow::PagesRepeater_ElementClearing(foundation::IInspectable const&, controls::ItemsRepeaterElementClearingEventArgs const& args)
     {
-        if (auto parts = TryGetPageElementParts(args.Element())) { ClearPageElement(*parts); }
-    }
-
-    void MainWindow::PageContent_SizeChanged(foundation::IInspectable const& sender, xaml::SizeChangedEventArgs const&)
-    {
-        auto content = sender.try_as<controls::Grid>();
-        if (!content) { return; }
-        if (auto parts = TryGetPageElementParts(content.Parent().try_as<xaml::UIElement>()))
-        {
-            UpdatePageOverlayClip(*parts);
-        }
+        ReleasePageOverlay(args.Element());
     }
 
 
@@ -2864,6 +2961,7 @@ namespace winrt::urPDF::implementation
         m_pendingRestoreHasAnchor = pdfTab->m_hasViewAnchor;
         m_viewRestorePhase = ViewRestorePhase::Layout;
 
+        ClearPageOverlays();
         m_presentedTab.reset();
         PagesRepeater().ItemsSource(nullptr);
         m_pageRepeaterItems = nullptr;
@@ -3154,6 +3252,7 @@ namespace winrt::urPDF::implementation
     {
         const bool zoomChanged = pdfTab->m_viewState.zoom != zoom;
         pdfTab->m_viewState.zoom = zoom;
+        RefreshRealizedPageOverlays();
         auto pendingTab = m_pendingZoomTab.lock();
         if (zoom == pdfTab->m_renderZoom)
         {
