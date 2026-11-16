@@ -210,7 +210,7 @@ namespace
 
     struct PageRenderResult
     {
-        graphics::SoftwareBitmap bitmap{ nullptr };
+        std::optional<winrt::urPDF::implementation::SoftwarePageBitmap> bitmap;
         winrt::urPDF::implementation::PageRenderMetrics metrics;
         bool rendered{ false };
     };
@@ -291,7 +291,8 @@ namespace
         return TryPageRasterBounds(pageBounds, rotation, bucket, transform, bbox) ? bucket : 0;
     }
 
-    fz_pixmap* RenderPagePixmap(fz_context* ctx, fz_document* doc, int pageIndex, fz_rect pageBounds, int bucket, int rotation)
+    fz_pixmap* RenderPagePixmap(fz_context* ctx, fz_document* doc, int pageIndex, fz_rect pageBounds, int bucket, int rotation,
+        urpdf::PageRasterGeometry& geometry)
     {
         fz_matrix transform;
         fz_irect bbox;
@@ -325,16 +326,25 @@ namespace
             pix = nullptr;
         }
 
+        if (pix)
+        {
+            geometry = { { pageBounds.x0, pageBounds.y0, pageBounds.x1, pageBounds.y1 },
+                { transform.a, transform.b, transform.c, transform.d, transform.e, transform.f },
+                { bbox.x0, bbox.y0, bbox.x1, bbox.y1 },
+                { fz_pixmap_width(ctx, pix), fz_pixmap_height(ctx, pix) } };
+        }
         return pix;
     }
 
-    graphics::SoftwareBitmap RenderPageToSoftwareBitmap(fz_context* ctx, fz_document* doc, int pageIndex, fz_rect pageBounds, int renderScaleBucket, int rotation)
+    std::optional<winrt::urPDF::implementation::SoftwarePageBitmap> RenderPageToSoftwareBitmap(
+        fz_context* ctx, fz_document* doc, int pageIndex, fz_rect pageBounds, int renderScaleBucket, int rotation)
     {
         const double renderScale = urpdf::RenderScaleForBucket(renderScaleBucket);
-        if (renderScale <= 0.0) { return nullptr; }
+        if (renderScale <= 0.0) { return std::nullopt; }
 
         graphics::SoftwareBitmap bitmap{ nullptr };
-        fz_pixmap* pix = RenderPagePixmap(ctx, doc, pageIndex, pageBounds, renderScaleBucket, rotation);
+        urpdf::PageRasterGeometry geometry;
+        fz_pixmap* pix = RenderPagePixmap(ctx, doc, pageIndex, pageBounds, renderScaleBucket, rotation, geometry);
         if (pix)
         {
             const int width = fz_pixmap_width(ctx, pix);
@@ -364,7 +374,8 @@ namespace
             fz_drop_pixmap(ctx, pix);
         }
 
-        return bitmap;
+        if (!bitmap) { return std::nullopt; }
+        return winrt::urPDF::implementation::SoftwarePageBitmap{ bitmap, geometry };
     }
 }
 
@@ -635,7 +646,7 @@ namespace winrt::urPDF::implementation
     {
     }
 
-    std::optional<imaging::WriteableBitmap>PageBitmapCache::TryGetBitmap(PageBitmapCacheKey const& key)
+    std::optional<PageBitmap> PageBitmapCache::TryGetBitmap(PageBitmapCacheKey const& key)
     {
         auto cacheEntry = m_entries.find(key);
         if (cacheEntry == m_entries.end())
@@ -649,9 +660,9 @@ namespace winrt::urPDF::implementation
         return cacheEntry->second.bitmap;
     }
 
-    void PageBitmapCache::StoreBitmap(PageBitmapCacheKey const& key, imaging::WriteableBitmap const& bitmap)
+    void PageBitmapCache::StoreBitmap(PageBitmapCacheKey const& key, PageBitmap const& bitmap)
     {
-        const std::size_t memoryBytes = BitmapMemoryBytes(bitmap);
+        const std::size_t memoryBytes = BitmapMemoryBytes(bitmap.source);
         if (memoryBytes > m_budgetBytes)
         {
             return;
@@ -2234,7 +2245,7 @@ namespace winrt::urPDF::implementation
         return LimitedPageRenderScaleBucket(bounds, pdfTab->m_viewState.rotation, urpdf::PageRenderScale(std::abs(static_cast<double>(bounds.x1) - bounds.x0), std::abs(static_cast<double>(bounds.y1) - bounds.y0), pdfTab->m_viewState.rotation, rect.Width, rect.Height, pdfTab->m_renderZoom, GetRasterizationScale()));
     }
 
-    bool MainWindow::ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, imaging::WriteableBitmap const& bitmap, int renderScaleBucket)
+    bool MainWindow::ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, PageBitmap const& bitmap, int renderScaleBucket)
     {
         if (m_isClosed || renderScaleBucket <= 0 || GetPageRenderScaleBucket(PdfTab, pageIndex) != renderScaleBucket)
         {
@@ -2383,8 +2394,8 @@ namespace winrt::urPDF::implementation
                             result.metrics.bitmapCreated = static_cast<bool>(result.bitmap);
                             if (result.bitmap)
                             {
-                                result.metrics.pixelWidth = result.bitmap.PixelWidth();
-                                result.metrics.pixelHeight = result.bitmap.PixelHeight();
+                                result.metrics.pixelWidth = result.bitmap->source.PixelWidth();
+                                result.metrics.pixelHeight = result.bitmap->source.PixelHeight();
                                 result.metrics.pixelCount = static_cast<std::uint64_t>(result.metrics.pixelWidth) * result.metrics.pixelHeight;
                                 result.metrics.estimatedBufferBytes = result.metrics.pixelCount * 4ull;
                             }
@@ -2407,7 +2418,7 @@ namespace winrt::urPDF::implementation
                 }
                 catch (...)
                 {
-                    CompletePageRender(weakTab, metrics, nullptr, false, std::current_exception(), false);
+                    CompletePageRender(weakTab, metrics, std::nullopt, false, std::current_exception(), false);
                 }
                 return;
             }
@@ -2419,7 +2430,7 @@ namespace winrt::urPDF::implementation
     }
 
     void MainWindow::CompletePageRender(std::weak_ptr<PdfTabInfo> const& weakTab, PageRenderMetrics metrics,
-        graphics::SoftwareBitmap const& bitmap, bool rendered, std::exception_ptr error, bool scheduleNext)
+        std::optional<SoftwarePageBitmap> const& bitmap, bool rendered, std::exception_ptr error, bool scheduleNext)
     {
         try
         {
@@ -2448,12 +2459,13 @@ namespace winrt::urPDF::implementation
                         if (error) { std::rethrow_exception(error); }
                         if (rendered && bitmap)
                         {
-                            imaging::WriteableBitmap writeable(bitmap.PixelWidth(), bitmap.PixelHeight());
-                            bitmap.CopyToBuffer(writeable.PixelBuffer());
+                            imaging::WriteableBitmap writeable(bitmap->source.PixelWidth(), bitmap->source.PixelHeight());
+                            bitmap->source.CopyToBuffer(writeable.PixelBuffer());
                             writeable.Invalidate();
+                            const PageBitmap pageBitmap{ writeable, bitmap->geometry };
                             m_pageBitmapCache.StoreBitmap(PageBitmapCacheKey{ pdfTab->m_documentId, pageIndex,
-                                metrics.rotation, metrics.renderScaleBucket }, writeable);
-                            metrics.status = ApplyPageBitmap(pdfTab, pageIndex, writeable, metrics.renderScaleBucket)
+                                metrics.rotation, metrics.renderScaleBucket }, pageBitmap);
+                            metrics.status = ApplyPageBitmap(pdfTab, pageIndex, pageBitmap, metrics.renderScaleBucket)
                                 ? PageRenderOutcome::applied : PageRenderOutcome::discarded;
                         }
                         else if (rendered)
@@ -2562,6 +2574,32 @@ namespace winrt::urPDF::implementation
         }
     }
 
+    std::optional<urpdf::PageCoordinateMapping> MainWindow::TryGetPageCoordinateMapping(int32_t pageIndex)
+    {
+        if (m_isClosed || pageIndex < 0) { return std::nullopt; }
+        auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
+        auto openedTab = m_openedTabs.find(currentTab);
+        if (openedTab == m_openedTabs.end()
+            || static_cast<std::size_t>(pageIndex) >= openedTab->second->m_renderedPages.size()) { return std::nullopt; }
+
+        auto const& page = openedTab->second->m_renderedPages[pageIndex];
+        if (!page.bitmap) { return std::nullopt; }
+        auto element = PagesRepeater().TryGetElement(pageIndex);
+        auto border = element ? element.try_as<controls::Border>() : nullptr;
+        auto image = border ? border.Child().try_as<controls::Image>() : nullptr;
+        if (!image || image.Source() != page.bitmap->source) { return std::nullopt; }
+
+        // Read current arranged DIPs, even while a new zoom/DPI render is pending.
+        // Geometry comes from the displayed source, never the requested bucket.
+        auto thickness = border.BorderThickness();
+        auto padding = border.Padding();
+        const auto size = urpdf::TryPageContentSize({ border.ActualWidth(), border.ActualHeight() },
+            { thickness.Left, thickness.Top, thickness.Right, thickness.Bottom },
+            { padding.Left, padding.Top, padding.Right, padding.Bottom });
+        if (!size) { return std::nullopt; }
+        return urpdf::PageCoordinateMapping::TryCreate(page.bitmap->geometry, *size);
+    }
+
     void MainWindow::ConfigurePageElement(xaml::UIElement const& element, std::size_t pageIndex)
     {
         auto border = element.try_as<controls::Border>();
@@ -2603,13 +2641,13 @@ namespace winrt::urPDF::implementation
             return;
         }
 
-        if (image.Source() != *page.bitmap)
+        if (image.Source() != page.bitmap->source)
         {
             controls::Image freshImage;
             freshImage.Stretch(media::Stretch::Uniform);
             freshImage.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
             freshImage.VerticalAlignment(xaml::VerticalAlignment::Stretch);
-            freshImage.Source(*page.bitmap);
+            freshImage.Source(page.bitmap->source);
             image.Source(nullptr);
             border.Child(freshImage);
         }
@@ -2648,13 +2686,13 @@ namespace winrt::urPDF::implementation
             if (rect.Y + rect.Height <= viewportTop || rect.X + rect.Width <= viewportLeft || rect.X >= viewportRight) { continue; }
 
             auto const& slot = PdfTab->m_renderedPages[i];
-            if (slot.state != PageRenderState::ready || !slot.bitmap || !*slot.bitmap || slot.generation != PdfTab->m_renderGeneration.load(std::memory_order_acquire)) { continue; }
+            if (slot.state != PageRenderState::ready || !slot.bitmap || !slot.bitmap->source || slot.generation != PdfTab->m_renderGeneration.load(std::memory_order_acquire)) { continue; }
 
             auto element = PagesRepeater().TryGetElement(static_cast<int32_t>(i));
             auto border = element ? element.try_as<controls::Border>() : nullptr;
             auto image = border ? border.Child().try_as<controls::Image>() : nullptr;
 
-            if (!image || image.Source() != *slot.bitmap) { continue; }
+            if (!image || image.Source() != slot.bitmap->source) { continue; }
 
             metrics.firstPageAttachedMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - *metrics.openStartedAt).count();
             metrics.firstVisiblePageIndex = static_cast<int32_t>(i);
@@ -3296,7 +3334,7 @@ namespace winrt::urPDF::implementation
         printPages->reserve(pdfInfo->m_renderedPages.size());
         for (auto const& slot : pdfInfo->m_renderedPages)
         {
-            printPages->push_back(slot.bitmap && slot.state == PageRenderState::ready ? *slot.bitmap : nullptr);
+            printPages->push_back(slot.bitmap && slot.state == PageRenderState::ready ? slot.bitmap->source : nullptr);
         }
         auto cancelled = m_workCancelled;
         HWND hwnd;
