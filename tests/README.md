@@ -4,6 +4,12 @@ The `urPDF.UnitTests` project contains unit tests for urPDF. It uses the Microso
 Native Unit Test Framework included with Visual Studio's Desktop development
 with C++ workload.
 
+`PageCoordinateGeometryTests.cpp` verifies the coordinate input contract:
+separate coordinate spaces, offset page/pixmap bounds, bitmap-size consistency,
+measured inner DIPs, border/padding insets, Uniform margins and edges, and
+controlled rejection of invalid geometry and noninvertible transforms. It does
+not yet test PDF/element point or rectangle conversions.
+
 The unit tests run without starting the WinUI application or loading MuPDF.
 They require Visual Studio 2026's C++ toolset `v145` and Windows SDK
 `10.0.26100.0`, and use C++20, matching the application project. vcpkg integration
