@@ -9,6 +9,7 @@
 #include "MuPdfRuntime.h"
 #include "PageCoordinateMapping.h"
 #include "PageOverlayState.h"
+#include "PageLinks.h"
 #include "PdfPageLayout.h"
 #include "PdfRenderScale.h"
 #include "WindowCreationOptions.h"
@@ -248,6 +249,7 @@ namespace winrt::urPDF::implementation
         winrt::hstring m_openedFilePath;
         winrt::hstring m_fileName = L"unknown";
         std::vector<PageSlot> m_renderedPages;
+        std::vector<urpdf::PageLinksSlot> m_pageLinks;
         int32_t m_currentPageIndex = { 1 };
         urpdf::DocumentViewState m_viewState{};
         bool m_hasViewAnchor{ false };
@@ -277,6 +279,7 @@ namespace winrt::urPDF::implementation
         std::weak_ptr<PdfTabInfo> document;
         std::optional<PageBitmap> bitmap;
         xaml::FrameworkElement::SizeChanged_revoker sizeChangedRevoker;
+        bool linkAreasBuilt{ false };
     };
 
     struct PendingDocumentOpen
@@ -389,6 +392,7 @@ namespace winrt::urPDF::implementation
         xaml::Media::CompositionTarget::Rendering_revoker m_viewStateRenderingRevoker;
         bool m_zoomWasEnabled{ false };
         bool m_isVisibleRenderRunning{ false };
+        bool m_isPageLinksLoadRunning{ false };
         bool m_isClosed{ false };
         urpdf::WindowState m_windowState;
         winrt::Microsoft::UI::Windowing::AppWindow m_observedAppWindow{ nullptr };
@@ -458,6 +462,11 @@ namespace winrt::urPDF::implementation
         void ApplyPendingDpiRefresh();
         void RebuildPagesContainer(std::shared_ptr<PdfTabInfo> const& pdfTab, std::vector<PageSlot> const& pages, urpdf::ViewStateGuard::Operation operation);
         void ConfigurePageElement(xaml::UIElement const& element, std::size_t pageIndex);
+        void EnsurePageLinks(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
+        void CompletePageLinksLoad(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
+            int32_t pageIndex, std::uint64_t requestId, std::vector<urpdf::PageLink> links, bool loaded, std::exception_ptr error);
+        void BuildPageLinkAreas(xaml::UIElement const& element, PageOverlayElement& entry,
+            std::shared_ptr<PdfTabInfo> const& document, urpdf::PageOverlayState::Binding binding);
         void RefreshPageOverlay(xaml::UIElement const& element, urpdf::PageOverlayState::Binding binding);
         void RefreshRealizedPageOverlays();
         void ReleasePageOverlay(xaml::UIElement const& element);
