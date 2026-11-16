@@ -61,6 +61,9 @@
     <ClCompile Include="PageCoordinateGeometryTests.cpp" />
     <ClCompile Include="PageCoordinateMappingTests.cpp" />
     <ClCompile Include="PageOverlayStateTests.cpp" />
+    <ClCompile Include="ExternalUriPolicyTests.cpp" />
+    <ClCompile Include="..\urPDF\ExternalUriPolicy.cpp" />
+    <ClInclude Include="..\urPDF\ExternalUriPolicy.h" />
     <ClCompile Include="DocumentOperationTests.cpp" />
     <ClCompile Include="BackgroundWorkTests.cpp" />
     <ClCompile Include="..\urPDF\AppSettings.cpp" />
