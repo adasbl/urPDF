@@ -40,23 +40,30 @@ namespace
         if (raster.bitmapSize.width <= 0 || raster.bitmapSize.height <= 0
             || width != raster.bitmapSize.width || height != raster.bitmapSize.height) { return false; }
 
-        auto const& m = raster.transform;
+        return urpdf::TryInvertPageRasterTransform(raster.transform).has_value();
+    }
+}
+
+namespace urpdf
+{
+    std::optional<PageRasterTransform> TryInvertPageRasterTransform(PageRasterTransform m) noexcept
+    {
         for (double coefficient : { m.a, m.b, m.c, m.d, m.e, m.f })
         {
-            if (!std::isfinite(coefficient)) { return false; }
+            if (!std::isfinite(coefficient)) { return std::nullopt; }
         }
 
         // Normalize before taking the determinant to avoid overflow/underflow
         // for otherwise usable uniform scales. Do not use an absolute epsilon:
         // small rasterization scales can have perfectly valid inverses.
         const double scale = (std::max)({ std::abs(m.a), std::abs(m.b), std::abs(m.c), std::abs(m.d) });
-        if (scale == 0.0) { return false; }
+        if (scale == 0.0) { return std::nullopt; }
         const double a = m.a / scale;
         const double b = m.b / scale;
         const double c = m.c / scale;
         const double d = m.d / scale;
         const double determinant = a * d - b * c;
-        if (!std::isfinite(determinant) || determinant == 0.0) { return false; }
+        if (!std::isfinite(determinant) || determinant == 0.0) { return std::nullopt; }
         const double ia = (d / determinant) / scale;
         const double ib = (-b / determinant) / scale;
         const double ic = (-c / determinant) / scale;
@@ -65,14 +72,11 @@ namespace
         const double iff = -(ib * m.e + id * m.f);
         for (double coefficient : { ia, ib, ic, id, ie, iff })
         {
-            if (!std::isfinite(coefficient)) { return false; }
+            if (!std::isfinite(coefficient)) { return std::nullopt; }
         }
-        return true;
+        return PageRasterTransform{ ia, ib, ic, id, ie, iff };
     }
-}
 
-namespace urpdf
-{
     std::optional<ElementSize> TryPageContentSize(ElementSize borderSize,
         ElementInsets borderThickness, ElementInsets padding) noexcept
     {

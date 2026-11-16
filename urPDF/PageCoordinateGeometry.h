@@ -117,6 +117,9 @@ namespace urpdf
     std::optional<ElementRect> TryUniformBitmapRect(BitmapSize bitmapSize,
         ElementSize displaySize) noexcept;
 
+    // Also used to invert the composed page-to-element affine transform.
+    std::optional<PageRasterTransform> TryInvertPageRasterTransform(PageRasterTransform transform) noexcept;
+
     // Includes validation of a finite, representable inverse raster transform.
     std::optional<PageCoordinateInputs> TryCreatePageCoordinateInputs(
         PageRasterGeometry const& raster, ElementSize displaySize) noexcept;
