@@ -22,6 +22,8 @@
     <ClCompile Include="MuPdfRuntime.cpp" />
     <ClCompile Include="DocumentViewState.cpp" />
     <ClCompile Include="PageLayoutGeometry.cpp" />
+    <ClCompile Include="PageCoordinateGeometry.cpp" />
+    <ClCompile Include="PageCoordinateMapping.cpp" />
     <ClCompile Include="SettingsStore.cpp" />
     <ClCompile Include="CommandLine.cpp" />
   </ItemGroup>
@@ -30,6 +32,9 @@
     <ClInclude Include="PdfRenderScale.h" />
     <ClInclude Include="DocumentViewState.h" />
     <ClInclude Include="PageLayoutGeometry.h" />
+    <ClInclude Include="PageCoordinateGeometry.h" />
+    <ClInclude Include="PageCoordinateMapping.h" />
+    <ClInclude Include="PageOverlayState.h" />
     <ClInclude Include="DocumentOperation.h" />
     <ClInclude Include="BackgroundWork.h" />
     <ClInclude Include="resource.h" />

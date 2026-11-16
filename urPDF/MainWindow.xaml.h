@@ -7,6 +7,8 @@
 #include "AppSettings.h"
 #include "DocumentViewState.h"
 #include "MuPdfRuntime.h"
+#include "PageCoordinateMapping.h"
+#include "PageOverlayState.h"
 #include "PdfPageLayout.h"
 #include "PdfRenderScale.h"
 #include "WindowCreationOptions.h"
@@ -97,11 +99,24 @@ namespace winrt::urPDF::implementation
     };
 
 
+    // A bitmap and the exact raster geometry that produced it travel together.
+    struct PageBitmap
+    {
+        imaging::WriteableBitmap source{ nullptr };
+        urpdf::PageRasterGeometry geometry;
+    };
+
+    struct SoftwarePageBitmap
+    {
+        winrt::Windows::Graphics::Imaging::SoftwareBitmap source{ nullptr };
+        urpdf::PageRasterGeometry geometry;
+    };
+
     struct PageSlot
     {
         fz_rect pdfBounds{};
         PageRenderState state{ PageRenderState::unloaded };
-        std::optional<imaging::WriteableBitmap> bitmap;
+        std::optional<PageBitmap> bitmap;
         std::uint64_t generation{ 0 };
         int renderScaleBucket{ 0 };
 
@@ -178,7 +193,7 @@ namespace winrt::urPDF::implementation
     {
         struct CacheEntry
         {
-            imaging::WriteableBitmap bitmap{ nullptr };
+            PageBitmap bitmap;
             std::size_t memoryBytes{ 0 };
             std::list<PageBitmapCacheKey>::iterator lruPosition;
         };
@@ -198,8 +213,8 @@ namespace winrt::urPDF::implementation
     public:
         explicit PageBitmapCache(std::size_t budgetBytes);
 
-        std::optional<imaging::WriteableBitmap> TryGetBitmap(PageBitmapCacheKey const& key);
-        void StoreBitmap(PageBitmapCacheKey const& key, imaging::WriteableBitmap const& bitmap);
+        std::optional<PageBitmap> TryGetBitmap(PageBitmapCacheKey const& key);
+        void StoreBitmap(PageBitmapCacheKey const& key, PageBitmap const& bitmap);
         void ClearDocumentEntries(std::uint64_t documentId);
 
         PageBitmapCacheMetrics GetMetrics() const noexcept { return m_metrics; }
@@ -255,6 +270,14 @@ namespace winrt::urPDF::implementation
         int32_t m_retainedPageLast{ -1 };
     };
 
+
+    struct PageOverlayElement
+    {
+        urpdf::PageOverlayState state;
+        std::weak_ptr<PdfTabInfo> document;
+        std::optional<PageBitmap> bitmap;
+        xaml::FrameworkElement::SizeChanged_revoker sizeChangedRevoker;
+    };
 
     struct PendingDocumentOpen
     {
@@ -391,6 +414,7 @@ namespace winrt::urPDF::implementation
         int m_layoutRotation{ 0 };
         PageBitmapCache m_pageBitmapCache{ 256ull * 1024ull * 1024ull };
         foundation::Collections::IObservableVector<foundation::IInspectable> m_pageRepeaterItems{ nullptr };
+        std::map<xaml::UIElement, std::shared_ptr<PageOverlayElement>> m_pageOverlays;
 
         void CloseTab(controls::TabViewItem const& tab);
         winrt::fire_and_forget CompleteDeferredPresentation();
@@ -401,7 +425,7 @@ namespace winrt::urPDF::implementation
         std::shared_ptr<PdfTabInfo> DetachTabForTransfer(controls::TabViewItem const& tab, bool allowViewRestore);
         void ShutdownMuPdfWork() noexcept;
         void CompleteDocumentOpen(std::shared_ptr<PdfTabInfo> const& pdfTab, std::uint64_t generation, int pagecount, std::vector<fz_rect> pageBounds, std::exception_ptr error);
-        void CompletePageRender(std::weak_ptr<PdfTabInfo> const& weakTab, PageRenderMetrics metrics, winrt::Windows::Graphics::Imaging::SoftwareBitmap const& bitmap, bool rendered, std::exception_ptr error, bool scheduleNext = true);
+        void CompletePageRender(std::weak_ptr<PdfTabInfo> const& weakTab, PageRenderMetrics metrics, std::optional<SoftwarePageBitmap> const& bitmap, bool rendered, std::exception_ptr error, bool scheduleNext = true);
         void ReadViewGeometry(std::shared_ptr<PdfTabInfo> const& pdfTab, std::vector<urpdf::PageRect>& pages, urpdf::ViewportGeometry& viewport);
         std::optional<int32_t> VisiblePageNumber(std::shared_ptr<PdfTabInfo> const& pdfTab);
         std::optional<urpdf::DocumentViewState> CaptureViewState(std::shared_ptr<PdfTabInfo> const& pdfTab);
@@ -434,13 +458,18 @@ namespace winrt::urPDF::implementation
         void ApplyPendingDpiRefresh();
         void RebuildPagesContainer(std::shared_ptr<PdfTabInfo> const& pdfTab, std::vector<PageSlot> const& pages, urpdf::ViewStateGuard::Operation operation);
         void ConfigurePageElement(xaml::UIElement const& element, std::size_t pageIndex);
+        void RefreshPageOverlay(xaml::UIElement const& element, urpdf::PageOverlayState::Binding binding);
+        void RefreshRealizedPageOverlays();
+        void ReleasePageOverlay(xaml::UIElement const& element);
+        void ClearPageOverlays(std::uint64_t documentId = 0);
+        std::optional<urpdf::PageCoordinateMapping> TryGetPageCoordinateMapping(int32_t pageIndex);
         void TryRecordFirstVisiblePage(std::shared_ptr<PdfTabInfo> const& PdfTab);
         std::vector<PageRenderRequest> BuildRenderQueue(int32_t pageCount, PageViewRange& viewRange);
         void ReleaseSlotsOutsideRange(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t keepFirst, int32_t keepLast);
         void RestoreSlotsFromCache(std::shared_ptr<PdfTabInfo> const& PdfTab);
         double GetRasterizationScale();
         int GetPageRenderScaleBucket(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t pageIndex);
-        bool ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, imaging::WriteableBitmap const& bitmap, int renderScaleBucket);
+        bool ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, PageBitmap const& bitmap, int renderScaleBucket);
         void RecordPageRenderMetrics(std::shared_ptr<PdfTabInfo> const& PdfTab, PageRenderMetrics const& metrics) noexcept;
     };
 }

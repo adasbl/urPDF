@@ -172,6 +172,9 @@
     <ClInclude Include="PdfRenderScale.h" />
     <ClInclude Include="DocumentViewState.h" />
     <ClInclude Include="PageLayoutGeometry.h" />
+    <ClInclude Include="PageCoordinateGeometry.h" />
+    <ClInclude Include="PageCoordinateMapping.h" />
+    <ClInclude Include="PageOverlayState.h" />
     <ClInclude Include="DocumentOperation.h" />
     <ClInclude Include="BackgroundWork.h" />
     <ClInclude Include="App.xaml.h">
@@ -222,6 +225,12 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="PageLayoutGeometry.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="PageCoordinateGeometry.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="PageCoordinateMapping.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="pch.cpp">
