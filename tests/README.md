@@ -10,6 +10,13 @@ measured inner DIPs, border/padding insets, Uniform margins and edges, and
 controlled rejection of invalid geometry and noninvertible transforms. It does
 not yet test PDF/element point or rectangle conversions.
 
+`PageCoordinateMappingTests.cpp` checks the point and rectangle conversions in
+both directions: expected corners, centers and rectangles at all quarter turns,
+negative and rounded pixmap origins, raster translations, four-corner bounds
+under shear, Uniform margins, DPI/zoom resolution independence in local DIPs,
+resizing, outside points, fractional edge roundoff and invalid inputs. Point and
+quarter-turn rectangle comparisons use a tolerance of `1e-9`.
+
 The unit tests run without starting the WinUI application or loading MuPDF.
 They require Visual Studio 2026's C++ toolset `v145` and Windows SDK
 `10.0.26100.0`, and use C++20, matching the application project. vcpkg integration
