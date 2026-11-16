@@ -19,6 +19,7 @@
     <ClCompile Include="ActivationArguments.cpp" />
     <ClCompile Include="AppSettings.cpp" />
     <ClCompile Include="MuPdfDocument.cpp" />
+    <ClCompile Include="ExternalUriPolicy.cpp" />
     <ClCompile Include="MuPdfRuntime.cpp" />
     <ClCompile Include="DocumentViewState.cpp" />
     <ClCompile Include="PageLayoutGeometry.cpp" />
@@ -43,6 +44,7 @@
     <ClInclude Include="AppSettings.h" />
     <ClInclude Include="WindowPlacement.h" />
     <ClInclude Include="MuPdfDocument.h" />
+    <ClInclude Include="ExternalUriPolicy.h" />
     <ClInclude Include="MuPdfRuntime.h" />
     <ClInclude Include="WindowCreationOptions.h" />
     <ClInclude Include="SettingsStore.h" />
