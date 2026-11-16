@@ -321,6 +321,7 @@ namespace winrt::urPDF::implementation
         winrt::fire_and_forget PdfScrollViewer_ViewChanged(foundation::IInspectable const& sender, controls::ScrollViewerViewChangedEventArgs const& args);
         void PagesRepeater_ElementPrepared(foundation::IInspectable const& sender, controls::ItemsRepeaterElementPreparedEventArgs const& args);
         void PagesRepeater_ElementClearing(foundation::IInspectable const& sender, controls::ItemsRepeaterElementClearingEventArgs const& args);
+        void PageContent_SizeChanged(foundation::IInspectable const& sender, xaml::SizeChangedEventArgs const& args);
         void SettingsButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
         winrt::fire_and_forget RotateButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
         void PageNumberBox_ValueChanged(controls::NumberBox const& sender, controls::NumberBoxValueChangedEventArgs const& args);

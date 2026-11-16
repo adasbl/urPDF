@@ -215,6 +215,59 @@ namespace
         bool rendered{ false };
     };
 
+    struct PageElementParts
+    {
+        controls::Border border{ nullptr };
+        controls::Grid content{ nullptr };
+        controls::Image image{ nullptr };
+        controls::Canvas overlay{ nullptr };
+    };
+
+    std::optional<PageElementParts> TryGetPageElementParts(xaml::UIElement const& element)
+    {
+        auto border = element ? element.try_as<controls::Border>() : nullptr;
+        auto content = border ? border.Child().try_as<controls::Grid>() : nullptr;
+        if (!content || content.Children().Size() != 2) { return std::nullopt; }
+
+        // Keep the template's child order in one place; Image is replaced in
+        // this slot without replacing the Grid or the overlay above it.
+        auto image = content.Children().GetAt(0).try_as<controls::Image>();
+        auto overlay = content.Children().GetAt(1).try_as<controls::Canvas>();
+        if (!image || !overlay) { return std::nullopt; }
+        return PageElementParts{ border, content, image, overlay };
+    }
+
+    void UpdatePageOverlayClip(PageElementParts const& parts)
+    {
+        foundation::Rect bounds{};
+        auto bitmap = parts.image.Source().try_as<imaging::BitmapSource>();
+        if (bitmap)
+        {
+            const auto rect = urpdf::TryUniformBitmapRect({ bitmap.PixelWidth(), bitmap.PixelHeight() },
+                { parts.content.ActualWidth(), parts.content.ActualHeight() });
+            if (rect)
+            {
+                bounds = { static_cast<float>(rect->x), static_cast<float>(rect->y),
+                    static_cast<float>(rect->width), static_cast<float>(rect->height) };
+            }
+        }
+        auto clip = parts.overlay.Clip().try_as<media::RectangleGeometry>();
+        if (!clip)
+        {
+            clip = media::RectangleGeometry();
+            parts.overlay.Clip(clip);
+        }
+        clip.Rect(bounds);
+    }
+
+    void ClearPageElement(PageElementParts const& parts)
+    {
+        parts.image.Source(nullptr);
+        parts.overlay.Children().Clear();
+        UpdatePageOverlayClip(parts);
+        parts.border.Opacity(0.65);
+    }
+
     constexpr double PdfRenderScale(double zoom, double dpiScale) noexcept
     {
         return urpdf::DipPerPdfPoint * zoom * dpiScale * urpdf::RenderSupersampling;
@@ -2584,75 +2637,56 @@ namespace winrt::urPDF::implementation
 
         auto const& page = openedTab->second->m_renderedPages[pageIndex];
         if (!page.bitmap) { return std::nullopt; }
-        auto element = PagesRepeater().TryGetElement(pageIndex);
-        auto border = element ? element.try_as<controls::Border>() : nullptr;
-        auto image = border ? border.Child().try_as<controls::Image>() : nullptr;
-        if (!image || image.Source() != page.bitmap->source) { return std::nullopt; }
+        const auto parts = TryGetPageElementParts(PagesRepeater().TryGetElement(pageIndex));
+        if (!parts || parts->image.Source() != page.bitmap->source) { return std::nullopt; }
 
         // Read current arranged DIPs, even while a new zoom/DPI render is pending.
         // Geometry comes from the displayed source, never the requested bucket.
-        auto thickness = border.BorderThickness();
-        auto padding = border.Padding();
-        const auto size = urpdf::TryPageContentSize({ border.ActualWidth(), border.ActualHeight() },
-            { thickness.Left, thickness.Top, thickness.Right, thickness.Bottom },
-            { padding.Left, padding.Top, padding.Right, padding.Bottom });
-        if (!size) { return std::nullopt; }
-        return urpdf::PageCoordinateMapping::TryCreate(page.bitmap->geometry, *size);
+        // Grid is already inside BorderThickness/Padding; do not subtract again.
+        return urpdf::PageCoordinateMapping::TryCreate(page.bitmap->geometry,
+            { parts->content.ActualWidth(), parts->content.ActualHeight() });
     }
 
     void MainWindow::ConfigurePageElement(xaml::UIElement const& element, std::size_t pageIndex)
     {
-        auto border = element.try_as<controls::Border>();
-        if (!border)
-        {
-            return;
-        }
-
-        auto image = border.Child().try_as<controls::Image>();
-        if (!image)
-        {
-            return;
-        }
-
-        auto clearImage = [&]()
-        {
-            image.Source(nullptr);
-            border.Opacity(0.65);
-        };
+        auto parts = TryGetPageElementParts(element);
+        if (!parts) { return; }
 
         auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
         if (!currentTab)
         {
-            clearImage();
+            ClearPageElement(*parts);
             return;
         }
 
         auto openedTab = m_openedTabs.find(currentTab);
         if (openedTab == m_openedTabs.end() || pageIndex >= openedTab->second->m_renderedPages.size())
         {
-            clearImage();
+            ClearPageElement(*parts);
             return;
         }
 
         auto const& page = openedTab->second->m_renderedPages[pageIndex];
         if (!page.bitmap || page.state != PageRenderState::ready)
         {
-            clearImage();
+            ClearPageElement(*parts);
             return;
         }
 
-        if (image.Source() != page.bitmap->source)
+        if (parts->image.Source() != page.bitmap->source)
         {
             controls::Image freshImage;
             freshImage.Stretch(media::Stretch::Uniform);
             freshImage.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
             freshImage.VerticalAlignment(xaml::VerticalAlignment::Stretch);
             freshImage.Source(page.bitmap->source);
-            image.Source(nullptr);
-            border.Child(freshImage);
+            parts->image.Source(nullptr);
+            parts->content.Children().SetAt(0, freshImage);
+            parts->image = freshImage;
         }
 
-        border.Opacity(1.0);
+        UpdatePageOverlayClip(*parts);
+        parts->border.Opacity(1.0);
         TryRecordFirstVisiblePage(openedTab->second);
     }
 
@@ -2688,11 +2722,8 @@ namespace winrt::urPDF::implementation
             auto const& slot = PdfTab->m_renderedPages[i];
             if (slot.state != PageRenderState::ready || !slot.bitmap || !slot.bitmap->source || slot.generation != PdfTab->m_renderGeneration.load(std::memory_order_acquire)) { continue; }
 
-            auto element = PagesRepeater().TryGetElement(static_cast<int32_t>(i));
-            auto border = element ? element.try_as<controls::Border>() : nullptr;
-            auto image = border ? border.Child().try_as<controls::Image>() : nullptr;
-
-            if (!image || image.Source() != slot.bitmap->source) { continue; }
+            const auto parts = TryGetPageElementParts(PagesRepeater().TryGetElement(static_cast<int32_t>(i)));
+            if (!parts || parts->image.Source() != slot.bitmap->source) { continue; }
 
             metrics.firstPageAttachedMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - *metrics.openStartedAt).count();
             metrics.firstVisiblePageIndex = static_cast<int32_t>(i);
@@ -2707,19 +2738,17 @@ namespace winrt::urPDF::implementation
 
     void MainWindow::PagesRepeater_ElementClearing(foundation::IInspectable const&, controls::ItemsRepeaterElementClearingEventArgs const& args)
     {
-        auto border = args.Element().try_as<controls::Border>();
-        if (!border)
-        {
-            return;
-        }
+        if (auto parts = TryGetPageElementParts(args.Element())) { ClearPageElement(*parts); }
+    }
 
-        auto image = border.Child().try_as<controls::Image>();
-        if (image)
+    void MainWindow::PageContent_SizeChanged(foundation::IInspectable const& sender, xaml::SizeChangedEventArgs const&)
+    {
+        auto content = sender.try_as<controls::Grid>();
+        if (!content) { return; }
+        if (auto parts = TryGetPageElementParts(content.Parent().try_as<xaml::UIElement>()))
         {
-            image.Source(nullptr);
+            UpdatePageOverlayClip(*parts);
         }
-
-        border.Opacity(0.65);
     }
 
 
