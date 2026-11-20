@@ -13,6 +13,16 @@ namespace urpdf
         {
             return value < low ? low - value : value > high ? value - high : 0.0;
         }
+
+        bool HasCharacters(TextLine const& line, PageText const& text) noexcept
+        {
+            return line.firstChar < line.endChar && line.endChar <= text.chars.size();
+        }
+
+        PdfPagePoint DistanceFromLine(PdfPagePoint point, PdfPageBounds bounds) noexcept
+        {
+            return { DistanceOutside(point.x, bounds.x0, bounds.x1), DistanceOutside(point.y, bounds.y0, bounds.y1) };
+        }
     }
 
     std::uint32_t HitTest(PageText const& text, PdfPagePoint point) noexcept
@@ -22,9 +32,8 @@ namespace urpdf
         double nearestVertical = 0.0;
         for (auto const& line : text.lines)
         {
-            if (line.firstChar >= line.endChar || line.endChar > text.chars.size()) { continue; }
-            const double dx = DistanceOutside(point.x, line.bounds.x0, line.bounds.x1);
-            const double dy = DistanceOutside(point.y, line.bounds.y0, line.bounds.y1);
+            if (!HasCharacters(line, text)) { continue; }
+            const auto [dx, dy] = DistanceFromLine(point, line.bounds);
             double distance = std::hypot(dx, dy);
             if (distance <= LineHitTolerance) { distance = 0.0; }
             if (!nearest || distance < nearestDistance || (distance == nearestDistance && dy < nearestVertical))
@@ -42,5 +51,37 @@ namespace urpdf
             if (point.x < (bounds.x0 + bounds.x1) / 2.0) { return i; }
         }
         return nearest->endChar;
+    }
+
+    bool IsOverText(PageText const& text, PdfPagePoint point) noexcept
+    {
+        if (!std::isfinite(point.x) || !std::isfinite(point.y)) { return false; }
+        return std::any_of(text.lines.begin(), text.lines.end(), [&](TextLine const& line)
+            {
+                if (!HasCharacters(line, text)) { return false; }
+                const auto [dx, dy] = DistanceFromLine(point, line.bounds);
+                return std::hypot(dx, dy) <= LineHitTolerance;
+            });
+    }
+
+    std::vector<PdfPageBounds> SelectionRects(PageText const& text, std::uint32_t firstCaret, std::uint32_t lastCaret)
+    {
+        std::vector<PdfPageBounds> rectangles;
+        if (firstCaret == lastCaret) { return rectangles; }
+
+        const auto [begin, end] = std::minmax(firstCaret, lastCaret);
+        for (auto const& line : text.lines)
+        {
+            if (!HasCharacters(line, text)) { continue; }
+            const auto first = (std::max)(begin, line.firstChar);
+            const auto last = (std::min)(end, line.endChar);
+            if (first >= last) { continue; }
+
+            const PdfPageBounds bounds{
+                text.chars[first].bounds.x0, line.bounds.y0,
+                text.chars[last - 1].bounds.x1, line.bounds.y1 };
+            if (bounds.x0 < bounds.x1 && bounds.y0 < bounds.y1) { rectangles.push_back(bounds); }
+        }
+        return rectangles;
     }
 }

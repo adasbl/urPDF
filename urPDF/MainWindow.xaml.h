@@ -285,6 +285,7 @@ namespace winrt::urPDF::implementation
         std::optional<PageBitmap> bitmap;
         xaml::FrameworkElement::SizeChanged_revoker sizeChangedRevoker;
         bool linkAreasBuilt{ false };
+        bool selectionBuilt{ false };
     };
 
     struct PageTextDrag
@@ -492,6 +493,7 @@ namespace winrt::urPDF::implementation
         void CompletePageTextLoad(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
             int32_t pageIndex, std::uint64_t requestId, urpdf::PageText text, bool loaded, std::exception_ptr error);
         void ResolvePendingTextPress(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
+        void SetPageTextSelection(std::shared_ptr<PdfTabInfo> const& document, std::optional<urpdf::TextSelection> selection);
         bool OwnsPageTextPointer(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) const;
         void UpdatePageTextDrag(xaml::Input::PointerRoutedEventArgs const& args);
         void EndPageTextDrag(bool canceled);

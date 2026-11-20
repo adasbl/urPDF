@@ -37,12 +37,14 @@ namespace urpdf
     {
         int page{ 0 };
         std::uint32_t caret{ 0 };
+        bool operator==(TextPosition const&) const = default;
     };
 
     struct TextSelection
     {
         TextPosition anchor;
         TextPosition focus;
+        bool operator==(TextSelection const&) const = default;
     };
 
     // A press can arrive before the page's text is loaded. Keep the PDF points
@@ -57,6 +59,10 @@ namespace urpdf
     // Picks the line under (or nearest to) the point first, so points between lines or
     // columns do not jump to an unrelated character elsewhere on the page.
     std::uint32_t HitTest(PageText const& text, PdfPagePoint point) noexcept;
+    bool IsOverText(PageText const& text, PdfPagePoint point) noexcept;
+
+    // One rectangle per line intersecting the half-open range between the carets.
+    std::vector<PdfPageBounds> SelectionRects(PageText const& text, std::uint32_t firstCaret, std::uint32_t lastCaret);
 
     enum class PageTextState { notLoaded, loading, ready, failed };
 

@@ -257,6 +257,7 @@ namespace
         controls::Grid content{ nullptr };
         controls::Image image{ nullptr };
         winrt::urPDF::TextSelectionLayer selection{ nullptr };
+        controls::Canvas highlights{ nullptr };
         controls::Canvas overlay{ nullptr };
     };
 
@@ -271,8 +272,10 @@ namespace
         auto image = content.Children().GetAt(0).try_as<controls::Image>();
         auto selection = content.Children().GetAt(1).try_as<winrt::urPDF::TextSelectionLayer>();
         auto overlay = content.Children().GetAt(2).try_as<controls::Canvas>();
-        if (!image || !selection || !overlay) { return std::nullopt; }
-        return PageElementParts{ border, content, image, selection, overlay };
+        auto highlights = selection && selection.Children().Size() == 1
+            ? selection.Children().GetAt(0).try_as<controls::Canvas>() : nullptr;
+        if (!image || !highlights || !overlay) { return std::nullopt; }
+        return PageElementParts{ border, content, image, selection, highlights, overlay };
     }
 
     xaml::UIElement GetPageElementForTextSelectionLayer(winrt::urPDF::TextSelectionLayer const& layer)
@@ -296,8 +299,13 @@ namespace
 
     void ClearPageOverlay(PageElementParts const& parts, winrt::urPDF::implementation::PageOverlayElement* entry)
     {
+        parts.highlights.Children().Clear();
         parts.overlay.Children().Clear();
-        if (entry) { entry->linkAreasBuilt = false; }
+        if (entry)
+        {
+            entry->linkAreasBuilt = false;
+            entry->selectionBuilt = false;
+        }
     }
 
     void ClearPageElement(PageElementParts const& parts, winrt::urPDF::implementation::PageOverlayElement* entry = nullptr)
@@ -306,6 +314,45 @@ namespace
         ClearPageOverlay(parts, entry);
         UpdatePageOverlayClip(parts);
         parts.border.Opacity(0.65);
+    }
+
+    void DrawPageSelection(controls::Canvas const& canvas, urpdf::PageCoordinateMapping const& mapping,
+        winrt::urPDF::implementation::PdfTabInfo const& document, int32_t pageIndex)
+    {
+        auto children = canvas.Children();
+        auto const& selection = document.m_textSelection;
+        if (!selection || selection->anchor.page != pageIndex || selection->focus.page != pageIndex
+            || selection->anchor.caret == selection->focus.caret || pageIndex < 0
+            || static_cast<std::size_t>(pageIndex) >= document.m_pageText.size()
+            || document.m_pageText[pageIndex].State() != urpdf::PageTextState::ready)
+        {
+            children.Clear();
+            return;
+        }
+
+        const auto style = canvas.Resources().Lookup(winrt::box_value(L"PageSelectionRectangleStyle")).as<xaml::Style>();
+        auto const& text = document.m_pageText[pageIndex].Text();
+        std::uint32_t count = 0;
+        for (auto const& bounds : urpdf::SelectionRects(text, selection->anchor.caret, selection->focus.caret))
+        {
+            const auto rect = mapping.PdfToElementRect(bounds);
+            if (!rect) { continue; }
+
+            auto highlight = count < children.Size()
+                ? children.GetAt(count).as<xaml::Shapes::Rectangle>() : nullptr;
+            if (!highlight)
+            {
+                highlight = xaml::Shapes::Rectangle();
+                highlight.Style(style);
+                children.Append(highlight);
+            }
+            highlight.Width(rect->width);
+            highlight.Height(rect->height);
+            controls::Canvas::SetLeft(highlight, rect->x);
+            controls::Canvas::SetTop(highlight, rect->y);
+            ++count;
+        }
+        while (children.Size() > count) { children.RemoveAtEnd(); }
     }
 
     constexpr double PdfRenderScale(double zoom, double dpiScale) noexcept
@@ -2741,8 +2788,15 @@ namespace winrt::urPDF::implementation
             ClearPageOverlay(*parts, &entry);
         }
         entry.state.Resize(binding, size);
-        UpdatePageOverlayClip(*parts, entry.state.Mapping());
-        if (entry.state.Mapping() && !entry.linkAreasBuilt
+        auto const& mapping = entry.state.Mapping();
+        UpdatePageOverlayClip(*parts, mapping);
+        if (!mapping) { return; }
+        if (!entry.selectionBuilt)
+        {
+            DrawPageSelection(parts->highlights, *mapping, *document, binding.pageIndex);
+            entry.selectionBuilt = true;
+        }
+        if (!entry.linkAreasBuilt
             && binding.pageIndex >= 0 && static_cast<std::size_t>(binding.pageIndex) < document->m_pageLinks.size()
             && document->m_pageLinks[binding.pageIndex].State() == urpdf::PageLinksState::ready)
         {
@@ -3091,10 +3145,33 @@ namespace winrt::urPDF::implementation
         auto& pending = document->m_pendingTextPress;
         if (!pending || pending->page != pageIndex) { return; }
         auto const& text = document->m_pageText[pageIndex].Text();
-        document->m_textSelection = urpdf::TextSelection{
+        const urpdf::TextSelection selection{
             { pageIndex, urpdf::HitTest(text, pending->pressed) },
             { pageIndex, urpdf::HitTest(text, pending->moved) } };
         pending.reset();
+        SetPageTextSelection(document, selection);
+    }
+
+    void MainWindow::SetPageTextSelection(std::shared_ptr<PdfTabInfo> const& document, std::optional<urpdf::TextSelection> selection)
+    {
+        if (document->m_textSelection == selection) { return; }
+        const int previousPage = document->m_textSelection ? document->m_textSelection->anchor.page : -1;
+        const int currentPage = selection ? selection->anchor.page : -1;
+        document->m_textSelection = std::move(selection);
+
+        const auto refreshSelection = [&](int pageIndex)
+            {
+                auto element = PagesRepeater().TryGetElement(pageIndex);
+                auto found = m_pageOverlays.find(element);
+                if (found == m_pageOverlays.end() || found->second->document.lock() != document) { return; }
+                if (const auto binding = found->second->state.CurrentBinding())
+                {
+                    found->second->selectionBuilt = false;
+                    RefreshPageOverlay(element, *binding);
+                }
+            };
+        if (previousPage >= 0 && previousPage != currentPage) { refreshSelection(previousPage); }
+        if (currentPage >= 0) { refreshSelection(currentPage); }
     }
 
     void MainWindow::TextSelectionLayer_PointerEntered(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const&)
@@ -3137,7 +3214,11 @@ namespace winrt::urPDF::implementation
         args.Handled(true);
         document->m_pendingTextPress = urpdf::PendingTextPress{ pageIndex, *pdfPoint, *pdfPoint };
         if (slot.State() == urpdf::PageTextState::ready) { ResolvePendingTextPress(document, pageIndex); }
-        else { EnsurePageText(document, pageIndex, true); }
+        else
+        {
+            SetPageTextSelection(document, std::nullopt);
+            EnsurePageText(document, pageIndex, true);
+        }
     }
 
     bool MainWindow::OwnsPageTextPointer(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) const
@@ -3157,7 +3238,7 @@ namespace winrt::urPDF::implementation
     {
         if (!OwnsPageTextPointer(sender, args)) { return; }
         UpdatePageTextDrag(args);
-        EndPageTextDrag(false);
+        if (m_pageTextDrag) { EndPageTextDrag(false); }
         args.Handled(true);
     }
 
@@ -3185,7 +3266,9 @@ namespace winrt::urPDF::implementation
         else if (auto const& slot = document->m_pageText[binding->pageIndex];
             slot.State() == urpdf::PageTextState::ready && document->m_textSelection)
         {
-            document->m_textSelection->focus = { binding->pageIndex, urpdf::HitTest(slot.Text(), *pdfPoint) };
+            auto selection = *document->m_textSelection;
+            selection.focus = { binding->pageIndex, urpdf::HitTest(slot.Text(), *pdfPoint) };
+            SetPageTextSelection(document, selection);
         }
     }
 

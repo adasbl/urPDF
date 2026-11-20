@@ -349,6 +349,14 @@
                                                     <local:TextSelectionLayer.Clip>
                                                         <RectangleGeometry Rect="0,0,0,0"/>
                                                     </local:TextSelectionLayer.Clip>
+                                                    <Canvas IsHitTestVisible="False">
+                                                        <Canvas.Resources>
+                                                            <Style x:Key="PageSelectionRectangleStyle" TargetType="Rectangle">
+                                                                <Setter Property="Fill" Value="{ThemeResource AccentFillColorDefaultBrush}"/>
+                                                                <Setter Property="Opacity" Value="0.35"/>
+                                                            </Style>
+                                                        </Canvas.Resources>
+                                                    </Canvas>
                                                 </local:TextSelectionLayer>
                                                 <Canvas HorizontalAlignment="Stretch"
                                                         VerticalAlignment="Stretch"

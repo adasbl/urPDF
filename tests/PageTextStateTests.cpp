@@ -21,6 +21,14 @@ namespace urPDFTests
             line.endChar = static_cast<std::uint32_t>(text.chars.size());
             text.lines.push_back(line);
         }
+
+        void AssertBounds(urpdf::PdfPageBounds const& expected, urpdf::PdfPageBounds const& actual)
+        {
+            Assert::AreEqual(expected.x0, actual.x0);
+            Assert::AreEqual(expected.y0, actual.y0);
+            Assert::AreEqual(expected.x1, actual.x1);
+            Assert::AreEqual(expected.y1, actual.y1);
+        }
     }
 
     TEST_CLASS(PageTextStateTests)
@@ -75,6 +83,65 @@ namespace urPDFTests
             urpdf::PageText malformed;
             malformed.lines.push_back({ 0, 3, 0, { 0, 0, 10, 10 } });
             Assert::AreEqual(0u, urpdf::HitTest(malformed, { 5, 5 }));
+        }
+
+        TEST_METHOD(SelectionRectsJoinsCharactersAtLineHeight)
+        {
+            urpdf::PageText text;
+            AppendLine(text, U"abcd", 100, 50);
+            text.chars[1].bounds.y0 = 53;
+            text.chars[2].bounds.y1 = 60;
+
+            const auto rectangles = urpdf::SelectionRects(text, 1, 3);
+            Assert::AreEqual(std::size_t(1), rectangles.size());
+            AssertBounds({ 110, 50, 130, 62 }, rectangles[0]);
+        }
+
+        TEST_METHOD(SelectionRectsClipsEachLineForEitherDragDirection)
+        {
+            urpdf::PageText text;
+            AppendLine(text, U"abc", 100, 50);
+            AppendLine(text, U"defg", 120, 70);
+            AppendLine(text, U"hi", 200, 90);
+            const auto forward = urpdf::SelectionRects(text, 2, 8);
+            const auto backward = urpdf::SelectionRects(text, 8, 2);
+
+            for (auto const* rectangles : { &forward, &backward })
+            {
+                Assert::AreEqual(std::size_t(3), rectangles->size());
+                AssertBounds({ 120, 50, 130, 62 }, (*rectangles)[0]);
+                AssertBounds({ 120, 70, 160, 82 }, (*rectangles)[1]);
+                AssertBounds({ 200, 90, 210, 102 }, (*rectangles)[2]);
+            }
+        }
+
+        TEST_METHOD(SelectionRectsExcludesTheEndCaretAndEmptyRanges)
+        {
+            urpdf::PageText text;
+            AppendLine(text, U"abc", 100, 50);
+            AppendLine(text, U"de", 100, 70);
+
+            const auto rectangles = urpdf::SelectionRects(text, 0, 3);
+            Assert::AreEqual(std::size_t(1), rectangles.size());
+            AssertBounds({ 100, 50, 130, 62 }, rectangles[0]);
+            Assert::IsTrue(urpdf::SelectionRects(text, 2, 2).empty());
+            Assert::IsTrue(urpdf::SelectionRects(text, 5, 9).empty());
+            Assert::IsTrue(urpdf::SelectionRects({}, 0, 1).empty());
+        }
+
+        TEST_METHOD(IsOverTextUsesLineBoundsAndTolerance)
+        {
+            urpdf::PageText text;
+            AppendLine(text, U"abc", 100, 50);
+            AppendLine(text, U"def", 200, 50);
+
+            Assert::IsTrue(urpdf::IsOverText(text, { 115, 56 }));
+            Assert::IsTrue(urpdf::IsOverText(text, { 99, 56 }));
+            Assert::IsTrue(urpdf::IsOverText(text, { 99.4, 49.4 }));
+            Assert::IsFalse(urpdf::IsOverText(text, { 99.2, 49.2 }));
+            Assert::IsFalse(urpdf::IsOverText(text, { 160, 56 }));
+            Assert::IsFalse(urpdf::IsOverText(text, { 115, 66 }));
+            Assert::IsFalse(urpdf::IsOverText({}, { 115, 56 }));
         }
 
         TEST_METHOD(EmptyAndPopulatedReadyCachesAreNotLoadedAgain)
