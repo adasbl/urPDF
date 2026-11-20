@@ -63,10 +63,13 @@
     <ClCompile Include="PageOverlayStateTests.cpp" />
     <ClCompile Include="ExternalUriPolicyTests.cpp" />
     <ClCompile Include="PageLinksStateTests.cpp" />
+    <ClCompile Include="PageTextStateTests.cpp" />
     <ClCompile Include="..\urPDF\ExternalUriPolicy.cpp" />
     <ClCompile Include="..\urPDF\PageLinks.cpp" />
+    <ClCompile Include="..\urPDF\PageText.cpp" />
     <ClInclude Include="..\urPDF\ExternalUriPolicy.h" />
     <ClInclude Include="..\urPDF\PageLinks.h" />
+    <ClInclude Include="..\urPDF\PageText.h" />
     <ClCompile Include="DocumentOperationTests.cpp" />
     <ClCompile Include="BackgroundWorkTests.cpp" />
     <ClCompile Include="..\urPDF\AppSettings.cpp" />
