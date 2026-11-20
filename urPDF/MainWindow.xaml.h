@@ -10,6 +10,7 @@
 #include "PageCoordinateMapping.h"
 #include "PageOverlayState.h"
 #include "PageLinks.h"
+#include "PageText.h"
 #include "PdfPageLayout.h"
 #include "PdfRenderScale.h"
 #include "WindowCreationOptions.h"
@@ -51,6 +52,7 @@ extern "C" {
 #include <winrt/Microsoft.UI.Xaml.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 #include <winrt/Microsoft.UI.Xaml.Data.h>
+#include <winrt/Microsoft.UI.Xaml.Input.h>
 #include <winrt/Microsoft.UI.Xaml.Media.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <winrt/Microsoft.UI.Xaml.Printing.h>
@@ -250,6 +252,9 @@ namespace winrt::urPDF::implementation
         winrt::hstring m_fileName = L"unknown";
         std::vector<PageSlot> m_renderedPages;
         std::vector<urpdf::PageLinksSlot> m_pageLinks;
+        std::vector<urpdf::PageTextSlot> m_pageText;
+        std::optional<urpdf::TextSelection> m_textSelection;
+        std::optional<urpdf::PendingTextPress> m_pendingTextPress;
         int32_t m_currentPageIndex = { 1 };
         urpdf::DocumentViewState m_viewState{};
         bool m_hasViewAnchor{ false };
@@ -279,8 +284,13 @@ namespace winrt::urPDF::implementation
         std::weak_ptr<PdfTabInfo> document;
         std::optional<PageBitmap> bitmap;
         xaml::FrameworkElement::SizeChanged_revoker sizeChangedRevoker;
+        xaml::UIElement::PointerEntered_revoker pointerEnteredRevoker;
+        xaml::UIElement::PointerPressed_revoker pointerPressedRevoker;
+        xaml::UIElement::PointerMoved_revoker pointerMovedRevoker;
         bool linkAreasBuilt{ false };
     };
+
+    enum class PageTextPointerEvent { entered, pressed, moved };
 
     struct PendingDocumentOpen
     {
@@ -393,6 +403,8 @@ namespace winrt::urPDF::implementation
         bool m_zoomWasEnabled{ false };
         bool m_isVisibleRenderRunning{ false };
         bool m_isPageLinksLoadRunning{ false };
+        bool m_isPageTextLoadRunning{ false };
+        std::deque<std::pair<std::weak_ptr<PdfTabInfo>, int32_t>> m_pageTextLoadQueue;
         bool m_isClosed{ false };
         urpdf::WindowState m_windowState;
         winrt::Microsoft::UI::Windowing::AppWindow m_observedAppWindow{ nullptr };
@@ -467,6 +479,13 @@ namespace winrt::urPDF::implementation
             int32_t pageIndex, std::uint64_t requestId, std::vector<urpdf::PageLink> links, bool loaded, std::exception_ptr error);
         void BuildPageLinkAreas(xaml::UIElement const& element, PageOverlayElement& entry,
             std::shared_ptr<PdfTabInfo> const& document, urpdf::PageOverlayState::Binding binding);
+        void EnsurePageText(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex, bool prioritize = false);
+        void StartNextPageTextLoad();
+        void CompletePageTextLoad(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
+            int32_t pageIndex, std::uint64_t requestId, urpdf::PageText text, bool loaded, std::exception_ptr error);
+        void ResolvePendingTextPress(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
+        void HandlePageTextPointer(xaml::UIElement const& element, urpdf::PageOverlayState::Binding binding,
+            xaml::Input::PointerRoutedEventArgs const& args, PageTextPointerEvent kind);
         void RefreshPageOverlay(xaml::UIElement const& element, urpdf::PageOverlayState::Binding binding);
         void RefreshRealizedPageOverlays();
         void ReleasePageOverlay(xaml::UIElement const& element);

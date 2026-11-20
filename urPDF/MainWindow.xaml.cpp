@@ -226,6 +226,12 @@ namespace
         bool loaded{ false };
     };
 
+    struct PageTextResult
+    {
+        urpdf::PageText text;
+        bool loaded{ false };
+    };
+
     winrt::fire_and_forget LaunchExternalUriAsync(std::string utf8Uri)
     {
         try
@@ -496,6 +502,7 @@ namespace winrt::urPDF::implementation
         m_loadingTargetTab.reset();
         m_openedTabs.clear();
         m_pendingOpens.clear();
+        m_pageTextLoadQueue.clear();
         m_ctx.reset();
         m_runtime.reset();
         try { if (m_openErrorDialog) { m_openErrorDialog.Hide(); } } catch (...) {}
@@ -1293,6 +1300,8 @@ namespace winrt::urPDF::implementation
 
         const auto generation = pdfTab->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
         for (auto& links : pdfTab->m_pageLinks) { links.ResetPending(); }
+        for (auto& text : pdfTab->m_pageText) { text.ResetPending(); }
+        pdfTab->m_pendingTextPress.reset();
         if (m_pendingZoomTab.lock() == pdfTab) { CancelPendingZoomRender(); }
         if (m_presentedTab.lock() == pdfTab || m_pendingLayoutViewSaveTab.lock() == pdfTab)
         {
@@ -2058,6 +2067,7 @@ namespace winrt::urPDF::implementation
             pdfTab->m_pageBounds = std::move(pageBounds);
             pdfTab->m_renderedPages = std::move(slots);
             pdfTab->m_pageLinks.resize(pagecount);
+            pdfTab->m_pageText.resize(pagecount);
             pdfTab->m_layoutLoaded = true;
 
             auto targetTab = requestedTarget
@@ -2669,6 +2679,9 @@ namespace winrt::urPDF::implementation
         {
             auto& entry = *found->second;
             entry.sizeChangedRevoker.revoke();
+            entry.pointerEnteredRevoker.revoke();
+            entry.pointerPressedRevoker.revoke();
+            entry.pointerMovedRevoker.revoke();
             entry.state.Clear();
             entry.bitmap.reset();
             entry.document.reset();
@@ -2805,6 +2818,20 @@ namespace winrt::urPDF::implementation
                     if (found == self->m_pageOverlays.end() || found->second != entry) { return; }
                     self->RefreshPageOverlay(element, binding);
                 });
+            const auto pointerHandler = [weakThis = get_weak(), weakElement = winrt::make_weak(element), binding = *binding]
+                (PageTextPointerEvent kind)
+                {
+                    return [weakThis, weakElement, binding, kind]
+                        (foundation::IInspectable const&, xaml::Input::PointerRoutedEventArgs const& args)
+                        {
+                            auto self = weakThis.get();
+                            auto element = weakElement.get();
+                            if (self && element) { self->HandlePageTextPointer(element, binding, args, kind); }
+                        };
+                };
+            entry->pointerEnteredRevoker = parts->content.PointerEntered(winrt::auto_revoke, pointerHandler(PageTextPointerEvent::entered));
+            entry->pointerPressedRevoker = parts->content.PointerPressed(winrt::auto_revoke, pointerHandler(PageTextPointerEvent::pressed));
+            entry->pointerMovedRevoker = parts->content.PointerMoved(winrt::auto_revoke, pointerHandler(PageTextPointerEvent::moved));
         }
 
         auto const& page = document->m_renderedPages[pageIndex];
@@ -2957,6 +2984,172 @@ namespace winrt::urPDF::implementation
             parts->overlay.Children().Append(area);
         }
         entry.linkAreasBuilt = true;
+    }
+
+    void MainWindow::EnsurePageText(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex, bool prioritize)
+    {
+        if (m_isClosed || m_workCancelled->load(std::memory_order_acquire)
+            || pageIndex < 0 || static_cast<std::size_t>(pageIndex) >= document->m_pageText.size()) { return; }
+        auto& slot = document->m_pageText[pageIndex];
+        if (slot.State() != urpdf::PageTextState::notLoaded) { return; }
+        if (m_isPageTextLoadRunning)
+        {
+            auto queued = std::find_if(m_pageTextLoadQueue.begin(), m_pageTextLoadQueue.end(),
+                [&](auto const& item) { return item.second == pageIndex && item.first.lock() == document; });
+            if (queued != m_pageTextLoadQueue.end())
+            {
+                if (!prioritize) { return; }
+                m_pageTextLoadQueue.erase(queued);
+            }
+            if (prioritize) { m_pageTextLoadQueue.emplace_front(document, pageIndex); }
+            else { m_pageTextLoadQueue.emplace_back(document, pageIndex); }
+            return;
+        }
+        auto registration = m_runtime->Work().TryRegister();
+        if (!registration) { return; }
+        const auto requestId = *slot.BeginLoad();
+        m_isPageTextLoadRunning = true;
+        const auto generation = document->m_renderGeneration.load(std::memory_order_acquire);
+        const auto documentId = document->m_documentId;
+        const auto weakTab = std::weak_ptr<PdfTabInfo>(document);
+        try
+        {
+            auto context = m_runtime->CloneContext();
+            auto cancelled = m_workCancelled;
+            auto dispatcher = DispatcherQueue();
+            QueueMuPdfWork(std::move(registration),
+                [document, context = std::move(context), cancelled, generation, pageIndex]() mutable
+                {
+                    PageTextResult result;
+                    if (cancelled->load(std::memory_order_acquire)) { return result; }
+                    urpdf::RunDocumentOperation(document->m_documentMutex, document->m_renderGeneration, generation, [&]
+                        {
+                            if (cancelled->load(std::memory_order_acquire)) { return; }
+                            result.text = urpdf::LoadPageText(context.get(), document->m_doc, pageIndex);
+                            result.loaded = true;
+                        });
+                    return result;
+                },
+                [weakThis = get_weak(), weakTab, cancelled, dispatcher, documentId, pageIndex, requestId]
+                (std::optional<PageTextResult> result, std::exception_ptr error)
+                {
+                    PageTextResult completed;
+                    if (result) { completed = std::move(*result); }
+                    TryPublishResult(dispatcher, cancelled,
+                        [weakThis, weakTab, cancelled, documentId, pageIndex, requestId, completed = std::move(completed), error]() mutable
+                        {
+                            auto self = weakThis.get();
+                            if (!self || cancelled->load(std::memory_order_acquire)) { return; }
+                            self->CompletePageTextLoad(weakTab, documentId, pageIndex, requestId,
+                                std::move(completed.text), completed.loaded, error);
+                        });
+                });
+        }
+        catch (...)
+        {
+            CompletePageTextLoad(weakTab, documentId, pageIndex, requestId, {}, false, std::current_exception());
+        }
+    }
+
+    void MainWindow::StartNextPageTextLoad()
+    {
+        while (!m_isClosed && !m_isPageTextLoadRunning && !m_pageTextLoadQueue.empty())
+        {
+            auto [weakTab, pageIndex] = m_pageTextLoadQueue.front();
+            m_pageTextLoadQueue.pop_front();
+            auto document = weakTab.lock();
+            if (document && std::any_of(m_openedTabs.begin(), m_openedTabs.end(), [&](auto const& tab) { return tab.second == document; }))
+            {
+                EnsurePageText(document, pageIndex);
+            }
+        }
+    }
+
+    void MainWindow::CompletePageTextLoad(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
+        int32_t pageIndex, std::uint64_t requestId, urpdf::PageText text, bool loaded, std::exception_ptr error)
+    {
+        m_isPageTextLoadRunning = false;
+        if (m_isClosed) { return; }
+        try
+        {
+            auto document = weakTab.lock();
+            const bool belongsToWindow = document && document->m_documentId == documentId
+                && std::any_of(m_openedTabs.begin(), m_openedTabs.end(), [&](auto const& tab) { return tab.second == document; });
+            if (belongsToWindow && pageIndex >= 0 && static_cast<std::size_t>(pageIndex) < document->m_pageText.size()
+                && document->m_pageText[pageIndex].Complete(requestId, std::move(text), loaded, error != nullptr))
+            {
+                const auto state = document->m_pageText[pageIndex].State();
+                const bool pressPending = document->m_pendingTextPress && document->m_pendingTextPress->page == pageIndex;
+                if (state == urpdf::PageTextState::ready) { ResolvePendingTextPress(document, pageIndex); }
+                else if (state == urpdf::PageTextState::failed && pressPending) { document->m_pendingTextPress.reset(); }
+                // A generation change discarded the load; the press still needs this page.
+                else if (state == urpdf::PageTextState::notLoaded && pressPending) { EnsurePageText(document, pageIndex, true); }
+            }
+        }
+        catch (...)
+        {
+#ifdef _DEBUG
+            OutputDebugStringW(L"urPDF: page text completion could not be applied.\n");
+#endif
+        }
+        try { StartNextPageTextLoad(); } catch (...) {}
+    }
+
+    void MainWindow::ResolvePendingTextPress(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex)
+    {
+        auto& pending = document->m_pendingTextPress;
+        if (!pending || pending->page != pageIndex) { return; }
+        auto const& text = document->m_pageText[pageIndex].Text();
+        document->m_textSelection = urpdf::TextSelection{
+            { pageIndex, urpdf::HitTest(text, pending->pressed) },
+            { pageIndex, urpdf::HitTest(text, pending->moved) } };
+        pending.reset();
+    }
+
+    void MainWindow::HandlePageTextPointer(xaml::UIElement const& element, urpdf::PageOverlayState::Binding binding,
+        xaml::Input::PointerRoutedEventArgs const& args, PageTextPointerEvent kind)
+    {
+        auto found = m_pageOverlays.find(element);
+        if (m_isClosed || found == m_pageOverlays.end() || !found->second->state.IsCurrent(binding)) { return; }
+        auto document = found->second->document.lock();
+        if (!document || document->m_documentId != binding.documentId
+            || binding.pageIndex < 0 || static_cast<std::size_t>(binding.pageIndex) >= document->m_pageText.size()) { return; }
+        if (kind == PageTextPointerEvent::pressed && args.OriginalSource().try_as<winrt::urPDF::LinkHitArea>()) { return; }
+        // Extraction holds the document mutex, so text is loaded only for pages the
+        // pointer reaches instead of for every realized page.
+        if (kind != PageTextPointerEvent::moved) { EnsurePageText(document, binding.pageIndex, kind == PageTextPointerEvent::pressed); }
+        if (kind == PageTextPointerEvent::entered) { return; }
+
+        const auto parts = TryGetPageElementParts(element);
+        const auto& mapping = found->second->state.Mapping();
+        if (!parts || !mapping) { return; }
+        const auto point = args.GetCurrentPoint(parts->content);
+        const urpdf::ElementPoint elementPoint{ point.Position().X, point.Position().Y };
+        const auto pdfPoint = mapping->ElementToPdfPoint(elementPoint);
+        if (!pdfPoint) { return; }
+        const auto pointerId = args.Pointer().PointerId();
+        auto& pending = document->m_pendingTextPress;
+        if (kind == PageTextPointerEvent::moved)
+        {
+            if (pending && pending->page == binding.pageIndex && pending->pointerId == pointerId && point.IsInContact())
+            {
+                pending->moved = *pdfPoint;
+            }
+            return;
+        }
+
+        if (!point.Properties().IsLeftButtonPressed() || mapping->IsElementPointInsidePage(elementPoint) != true) { return; }
+        pending.reset();
+        auto const& slot = document->m_pageText[binding.pageIndex];
+        if (slot.State() == urpdf::PageTextState::ready)
+        {
+            const urpdf::TextPosition position{ binding.pageIndex, urpdf::HitTest(slot.Text(), *pdfPoint) };
+            document->m_textSelection = urpdf::TextSelection{ position, position };
+        }
+        else if (slot.State() == urpdf::PageTextState::loading || slot.State() == urpdf::PageTextState::notLoaded)
+        {
+            pending = urpdf::PendingTextPress{ binding.pageIndex, pointerId, *pdfPoint, *pdfPoint };
+        }
     }
 
     void MainWindow::TryRecordFirstVisiblePage(std::shared_ptr<PdfTabInfo> const& PdfTab)
