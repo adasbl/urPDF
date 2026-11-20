@@ -6,6 +6,11 @@ namespace winrt::urPDF::implementation
 {
     struct TextSelectionLayer : TextSelectionLayerT<TextSelectionLayer>
     {
+        TextSelectionLayer();
+        void SetTextCursor(bool overText);
+
+    private:
+        bool m_overText{ false };
     };
 }
 

@@ -284,6 +284,32 @@ namespace
         return content ? content.Parent().try_as<controls::Border>() : nullptr;
     }
 
+    bool IsPointerOverPageText(winrt::urPDF::implementation::PageOverlayElement const& entry,
+        winrt::urPDF::TextSelectionLayer const& layer, xaml::Input::PointerRoutedEventArgs const& args)
+    {
+        const auto binding = entry.state.CurrentBinding();
+        auto const& mapping = entry.state.Mapping();
+        auto document = entry.document.lock();
+        if (!binding || !mapping || !document || binding->pageIndex < 0
+            || static_cast<std::size_t>(binding->pageIndex) >= document->m_pageText.size()) { return false; }
+        auto const& slot = document->m_pageText[binding->pageIndex];
+        if (slot.State() != urpdf::PageTextState::ready) { return false; }
+
+        const auto position = args.GetCurrentPoint(layer).Position();
+        const urpdf::ElementPoint point{ position.X, position.Y };
+        if (mapping->IsElementPointInsidePage(point) != true) { return false; }
+        const auto pdfPoint = mapping->ElementToPdfPoint(point);
+        return pdfPoint && urpdf::IsOverText(slot.Text(), *pdfPoint);
+    }
+
+    void UpdatePageTextCursor(winrt::urPDF::TextSelectionLayer const& layer,
+        winrt::urPDF::implementation::PageOverlayElement const* entry, xaml::Input::PointerRoutedEventArgs const& args)
+    {
+        if (args.Pointer().PointerDeviceType() == winrt::Microsoft::UI::Input::PointerDeviceType::Touch) { return; }
+        winrt::get_self<winrt::urPDF::implementation::TextSelectionLayer>(layer)->SetTextCursor(
+            entry && IsPointerOverPageText(*entry, layer, args));
+    }
+
     void UpdatePageOverlayClip(PageElementParts const& parts, std::optional<urpdf::PageCoordinateMapping> const& mapping = std::nullopt)
     {
         foundation::Rect bounds{};
@@ -292,6 +318,10 @@ namespace
             const auto rect = mapping->BitmapRect();
             bounds = { static_cast<float>(rect.x), static_cast<float>(rect.y),
                 static_cast<float>(rect.width), static_cast<float>(rect.height) };
+        }
+        else
+        {
+            winrt::get_self<winrt::urPDF::implementation::TextSelectionLayer>(parts.selection)->SetTextCursor(false);
         }
         parts.selection.Clip().as<media::RectangleGeometry>().Rect(bounds);
         parts.overlay.Clip().as<media::RectangleGeometry>().Rect(bounds);
@@ -3174,13 +3204,15 @@ namespace winrt::urPDF::implementation
         if (currentPage >= 0) { refreshSelection(currentPage); }
     }
 
-    void MainWindow::TextSelectionLayer_PointerEntered(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const&)
+    void MainWindow::TextSelectionLayer_PointerEntered(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args)
     {
+        if (m_isClosed) { return; }
         auto layer = sender.as<winrt::urPDF::TextSelectionLayer>();
         auto found = m_pageOverlays.find(GetPageElementForTextSelectionLayer(layer));
-        if (m_isClosed || found == m_pageOverlays.end()) { return; }
+        if (found == m_pageOverlays.end()) { return; }
         const auto binding = found->second->state.CurrentBinding();
         auto document = found->second->document.lock();
+        UpdatePageTextCursor(layer, found->second.get(), args);
         if (document && binding) { EnsurePageText(document, binding->pageIndex); }
     }
 
@@ -3229,6 +3261,10 @@ namespace winrt::urPDF::implementation
 
     void MainWindow::TextSelectionLayer_PointerMoved(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args)
     {
+        if (m_isClosed) { return; }
+        auto layer = sender.as<winrt::urPDF::TextSelectionLayer>();
+        auto found = m_pageOverlays.find(GetPageElementForTextSelectionLayer(layer));
+        UpdatePageTextCursor(layer, found != m_pageOverlays.end() ? found->second.get() : nullptr, args);
         if (!OwnsPageTextPointer(sender, args)) { return; }
         UpdatePageTextDrag(args);
         args.Handled(true);
