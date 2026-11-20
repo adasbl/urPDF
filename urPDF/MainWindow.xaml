@@ -339,7 +339,7 @@
                                                        HorizontalAlignment="Stretch"
                                                        VerticalAlignment="Stretch"/>
                                                 <local:TextSelectionLayer Background="Transparent"
-                                                                          ManipulationMode="None"
+                                                                          ManipulationMode="System"
                                                                           PointerEntered="TextSelectionLayer_PointerEntered"
                                                                           PointerPressed="TextSelectionLayer_PointerPressed"
                                                                           PointerMoved="TextSelectionLayer_PointerMoved"

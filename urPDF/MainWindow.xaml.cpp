@@ -3242,9 +3242,22 @@ namespace winrt::urPDF::implementation
         auto const& slot = document->m_pageText[pageIndex];
         auto pointer = args.Pointer();
         if (slot.State() == urpdf::PageTextState::failed || !layer.CapturePointer(pointer)) { return; }
-        m_pageTextDrag = PageTextDrag{ element, layer, pointer };
+        using winrt::Microsoft::UI::Input::PointerDeviceType;
+        const auto device = pointer.PointerDeviceType();
+        const bool directContact = device == PointerDeviceType::Touch || device == PointerDeviceType::Pen;
+        m_pageTextDrag = PageTextDrag{ element, layer, pointer, directContact };
         args.Handled(true);
         document->m_pendingTextPress = urpdf::PendingTextPress{ pageIndex, *pdfPoint, *pdfPoint };
+
+        if (directContact)
+        {
+            // WinUI can register the contact after PointerPressed returns.
+            // Restore system gestures when this selection ends.
+            layer.ManipulationMode(xaml::Input::ManipulationModes::None);
+            layer.CancelDirectManipulations();
+            if (!OwnsPageTextPointer(sender, args)) { return; }
+        }
+
         if (slot.State() == urpdf::PageTextState::ready) { ResolvePendingTextPress(document, pageIndex); }
         else
         {
@@ -3319,6 +3332,10 @@ namespace winrt::urPDF::implementation
             {
                 if (auto document = found->second->document.lock()) { document->m_pendingTextPress.reset(); }
             }
+        }
+        if (drag.restoreSystemManipulation)
+        {
+            drag.layer.ManipulationMode(xaml::Input::ManipulationModes::System);
         }
         drag.layer.ReleasePointerCapture(drag.pointer);
     }

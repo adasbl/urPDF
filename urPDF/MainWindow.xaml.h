@@ -293,6 +293,7 @@ namespace winrt::urPDF::implementation
         xaml::UIElement element;
         xaml::UIElement layer;
         xaml::Input::Pointer pointer;
+        bool restoreSystemManipulation{ false };
     };
 
     struct PendingDocumentOpen
