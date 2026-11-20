@@ -338,6 +338,18 @@
                                                 <Image Stretch="Uniform"
                                                        HorizontalAlignment="Stretch"
                                                        VerticalAlignment="Stretch"/>
+                                                <local:TextSelectionLayer Background="Transparent"
+                                                                          ManipulationMode="None"
+                                                                          PointerEntered="TextSelectionLayer_PointerEntered"
+                                                                          PointerPressed="TextSelectionLayer_PointerPressed"
+                                                                          PointerMoved="TextSelectionLayer_PointerMoved"
+                                                                          PointerReleased="TextSelectionLayer_PointerReleased"
+                                                                          PointerCanceled="TextSelectionLayer_PointerCanceled"
+                                                                          PointerCaptureLost="TextSelectionLayer_PointerCanceled">
+                                                    <local:TextSelectionLayer.Clip>
+                                                        <RectangleGeometry Rect="0,0,0,0"/>
+                                                    </local:TextSelectionLayer.Clip>
+                                                </local:TextSelectionLayer>
                                                 <Canvas HorizontalAlignment="Stretch"
                                                         VerticalAlignment="Stretch"
                                                         IsHitTestVisible="True">

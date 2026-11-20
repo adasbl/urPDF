@@ -45,12 +45,11 @@ namespace urpdf
         TextPosition focus;
     };
 
-    // A press (touch and pen give no PointerEntered) can arrive before the page's
-    // text is loaded; it becomes a TextSelection once the text is ready.
+    // A press can arrive before the page's text is loaded. Keep the PDF points
+    // until the text is ready, even if the pointer has already been released.
     struct PendingTextPress
     {
         int page{ 0 };
-        std::uint32_t pointerId{ 0 };
         PdfPagePoint pressed;
         PdfPagePoint moved;
     };

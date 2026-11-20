@@ -181,6 +181,9 @@
     <ClInclude Include="LinkHitArea.h">
       <DependentUpon>LinkHitArea.idl</DependentUpon>
     </ClInclude>
+    <ClInclude Include="TextSelectionLayer.h">
+      <DependentUpon>TextSelectionLayer.idl</DependentUpon>
+    </ClInclude>
     <ClInclude Include="DocumentOperation.h" />
     <ClInclude Include="BackgroundWork.h" />
     <ClInclude Include="App.xaml.h">
@@ -236,6 +239,9 @@
     <ClCompile Include="LinkHitArea.cpp">
       <DependentUpon>LinkHitArea.idl</DependentUpon>
     </ClCompile>
+    <ClCompile Include="TextSelectionLayer.cpp">
+      <DependentUpon>TextSelectionLayer.idl</DependentUpon>
+    </ClCompile>
     <ClCompile Include="MuPdfRuntime.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -284,6 +290,9 @@
       <SubType>Code</SubType>
     </Midl>
     <Midl Include="LinkHitArea.idl">
+      <SubType>Code</SubType>
+    </Midl>
+    <Midl Include="TextSelectionLayer.idl">
       <SubType>Code</SubType>
     </Midl>
     <Midl Include="SettingsPage.idl">

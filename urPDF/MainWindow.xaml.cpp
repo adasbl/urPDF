@@ -6,6 +6,7 @@
 #include "MuPdfDocument.h"
 #include "ExternalUriPolicy.h"
 #include "LinkHitArea.h"
+#include "TextSelectionLayer.h"
 #if __has_include("MainWindow.g.cpp")
 #include "MainWindow.g.cpp"
 #endif
@@ -255,6 +256,7 @@ namespace
         controls::Border border{ nullptr };
         controls::Grid content{ nullptr };
         controls::Image image{ nullptr };
+        winrt::urPDF::TextSelectionLayer selection{ nullptr };
         controls::Canvas overlay{ nullptr };
     };
 
@@ -262,14 +264,21 @@ namespace
     {
         auto border = element ? element.try_as<controls::Border>() : nullptr;
         auto content = border ? border.Child().try_as<controls::Grid>() : nullptr;
-        if (!content || content.Children().Size() != 2) { return std::nullopt; }
+        if (!content || content.Children().Size() != 3) { return std::nullopt; }
 
         // Keep the template's child order in one place; Image is replaced in
         // this slot without replacing the Grid or the overlay above it.
         auto image = content.Children().GetAt(0).try_as<controls::Image>();
-        auto overlay = content.Children().GetAt(1).try_as<controls::Canvas>();
-        if (!image || !overlay) { return std::nullopt; }
-        return PageElementParts{ border, content, image, overlay };
+        auto selection = content.Children().GetAt(1).try_as<winrt::urPDF::TextSelectionLayer>();
+        auto overlay = content.Children().GetAt(2).try_as<controls::Canvas>();
+        if (!image || !selection || !overlay) { return std::nullopt; }
+        return PageElementParts{ border, content, image, selection, overlay };
+    }
+
+    xaml::UIElement GetPageElementForTextSelectionLayer(winrt::urPDF::TextSelectionLayer const& layer)
+    {
+        auto content = layer.Parent().try_as<controls::Grid>();
+        return content ? content.Parent().try_as<controls::Border>() : nullptr;
     }
 
     void UpdatePageOverlayClip(PageElementParts const& parts, std::optional<urpdf::PageCoordinateMapping> const& mapping = std::nullopt)
@@ -281,13 +290,8 @@ namespace
             bounds = { static_cast<float>(rect.x), static_cast<float>(rect.y),
                 static_cast<float>(rect.width), static_cast<float>(rect.height) };
         }
-        auto clip = parts.overlay.Clip().try_as<media::RectangleGeometry>();
-        if (!clip)
-        {
-            clip = media::RectangleGeometry();
-            parts.overlay.Clip(clip);
-        }
-        clip.Rect(bounds);
+        parts.selection.Clip().as<media::RectangleGeometry>().Rect(bounds);
+        parts.overlay.Clip().as<media::RectangleGeometry>().Rect(bounds);
     }
 
     void ClearPageOverlay(PageElementParts const& parts, winrt::urPDF::implementation::PageOverlayElement* entry)
@@ -2674,14 +2678,12 @@ namespace winrt::urPDF::implementation
 
     void MainWindow::ReleasePageOverlay(xaml::UIElement const& element)
     {
+        if (m_pageTextDrag && m_pageTextDrag->element == element) { EndPageTextDrag(true); }
         auto found = m_pageOverlays.find(element);
         if (found != m_pageOverlays.end())
         {
             auto& entry = *found->second;
             entry.sizeChangedRevoker.revoke();
-            entry.pointerEnteredRevoker.revoke();
-            entry.pointerPressedRevoker.revoke();
-            entry.pointerMovedRevoker.revoke();
             entry.state.Clear();
             entry.bitmap.reset();
             entry.document.reset();
@@ -2723,6 +2725,7 @@ namespace winrt::urPDF::implementation
         if (!parts) { ReleasePageOverlay(element); return; }
         if (!entry.bitmap || parts->image.Source() != entry.bitmap->source)
         {
+            if (m_pageTextDrag && m_pageTextDrag->element == element) { EndPageTextDrag(true); }
             entry.bitmap.reset();
             entry.state.ClearRaster(binding);
             ClearPageOverlay(*parts, &entry);
@@ -2802,6 +2805,7 @@ namespace winrt::urPDF::implementation
         if (!binding) { ReleasePageOverlay(element); return; }
         if (previousBinding != binding)
         {
+            if (m_pageTextDrag && m_pageTextDrag->element == element) { EndPageTextDrag(true); }
             entry->sizeChangedRevoker.revoke();
             ClearPageElement(*parts, entry.get());
             entry->bitmap.reset();
@@ -2818,26 +2822,13 @@ namespace winrt::urPDF::implementation
                     if (found == self->m_pageOverlays.end() || found->second != entry) { return; }
                     self->RefreshPageOverlay(element, binding);
                 });
-            const auto pointerHandler = [weakThis = get_weak(), weakElement = winrt::make_weak(element), binding = *binding]
-                (PageTextPointerEvent kind)
-                {
-                    return [weakThis, weakElement, binding, kind]
-                        (foundation::IInspectable const&, xaml::Input::PointerRoutedEventArgs const& args)
-                        {
-                            auto self = weakThis.get();
-                            auto element = weakElement.get();
-                            if (self && element) { self->HandlePageTextPointer(element, binding, args, kind); }
-                        };
-                };
-            entry->pointerEnteredRevoker = parts->content.PointerEntered(winrt::auto_revoke, pointerHandler(PageTextPointerEvent::entered));
-            entry->pointerPressedRevoker = parts->content.PointerPressed(winrt::auto_revoke, pointerHandler(PageTextPointerEvent::pressed));
-            entry->pointerMovedRevoker = parts->content.PointerMoved(winrt::auto_revoke, pointerHandler(PageTextPointerEvent::moved));
         }
 
         auto const& page = document->m_renderedPages[pageIndex];
         // A failed/pending replacement may leave a valid older bitmap visible.
         if (!page.bitmap || !page.bitmap->source)
         {
+            if (m_pageTextDrag && m_pageTextDrag->element == element) { EndPageTextDrag(true); }
             entry->bitmap.reset();
             entry->state.ClearRaster(*binding);
             ClearPageElement(*parts, entry.get());
@@ -3106,50 +3097,111 @@ namespace winrt::urPDF::implementation
         pending.reset();
     }
 
-    void MainWindow::HandlePageTextPointer(xaml::UIElement const& element, urpdf::PageOverlayState::Binding binding,
-        xaml::Input::PointerRoutedEventArgs const& args, PageTextPointerEvent kind)
+    void MainWindow::TextSelectionLayer_PointerEntered(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const&)
     {
-        auto found = m_pageOverlays.find(element);
-        if (m_isClosed || found == m_pageOverlays.end() || !found->second->state.IsCurrent(binding)) { return; }
+        auto layer = sender.as<winrt::urPDF::TextSelectionLayer>();
+        auto found = m_pageOverlays.find(GetPageElementForTextSelectionLayer(layer));
+        if (m_isClosed || found == m_pageOverlays.end()) { return; }
+        const auto binding = found->second->state.CurrentBinding();
         auto document = found->second->document.lock();
-        if (!document || document->m_documentId != binding.documentId
-            || binding.pageIndex < 0 || static_cast<std::size_t>(binding.pageIndex) >= document->m_pageText.size()) { return; }
-        if (kind == PageTextPointerEvent::pressed && args.OriginalSource().try_as<winrt::urPDF::LinkHitArea>()) { return; }
-        // Extraction holds the document mutex, so text is loaded only for pages the
-        // pointer reaches instead of for every realized page.
-        if (kind != PageTextPointerEvent::moved) { EnsurePageText(document, binding.pageIndex, kind == PageTextPointerEvent::pressed); }
-        if (kind == PageTextPointerEvent::entered) { return; }
+        if (document && binding) { EnsurePageText(document, binding->pageIndex); }
+    }
 
-        const auto parts = TryGetPageElementParts(element);
+    void MainWindow::TextSelectionLayer_PointerPressed(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args)
+    {
+        if (m_isClosed || m_pageTextDrag) { return; }
+        // LinkHitArea is in the Canvas above this layer, so its presses never
+        // route through the selection layer.
+        auto layer = sender.as<winrt::urPDF::TextSelectionLayer>();
+        auto element = GetPageElementForTextSelectionLayer(layer);
+        auto found = m_pageOverlays.find(element);
+        if (found == m_pageOverlays.end()) { return; }
+        const auto binding = found->second->state.CurrentBinding();
         const auto& mapping = found->second->state.Mapping();
-        if (!parts || !mapping) { return; }
-        const auto point = args.GetCurrentPoint(parts->content);
-        const urpdf::ElementPoint elementPoint{ point.Position().X, point.Position().Y };
+        auto document = found->second->document.lock();
+        if (!mapping || !binding || !document || binding->pageIndex < 0
+            || static_cast<std::size_t>(binding->pageIndex) >= document->m_pageText.size()) { return; }
+
+        const auto point = args.GetCurrentPoint(layer);
+        const auto position = point.Position();
+        const urpdf::ElementPoint elementPoint{ position.X, position.Y };
+        if (!point.Properties().IsLeftButtonPressed() || mapping->IsElementPointInsidePage(elementPoint) != true) { return; }
         const auto pdfPoint = mapping->ElementToPdfPoint(elementPoint);
         if (!pdfPoint) { return; }
-        const auto pointerId = args.Pointer().PointerId();
-        auto& pending = document->m_pendingTextPress;
-        if (kind == PageTextPointerEvent::moved)
-        {
-            if (pending && pending->page == binding.pageIndex && pending->pointerId == pointerId && point.IsInContact())
-            {
-                pending->moved = *pdfPoint;
-            }
-            return;
-        }
 
-        if (!point.Properties().IsLeftButtonPressed() || mapping->IsElementPointInsidePage(elementPoint) != true) { return; }
-        pending.reset();
-        auto const& slot = document->m_pageText[binding.pageIndex];
-        if (slot.State() == urpdf::PageTextState::ready)
+        const auto pageIndex = binding->pageIndex;
+        auto const& slot = document->m_pageText[pageIndex];
+        auto pointer = args.Pointer();
+        if (slot.State() == urpdf::PageTextState::failed || !layer.CapturePointer(pointer)) { return; }
+        m_pageTextDrag = PageTextDrag{ element, layer, pointer };
+        args.Handled(true);
+        document->m_pendingTextPress = urpdf::PendingTextPress{ pageIndex, *pdfPoint, *pdfPoint };
+        if (slot.State() == urpdf::PageTextState::ready) { ResolvePendingTextPress(document, pageIndex); }
+        else { EnsurePageText(document, pageIndex, true); }
+    }
+
+    bool MainWindow::OwnsPageTextPointer(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) const
+    {
+        return m_pageTextDrag && m_pageTextDrag->layer == sender
+            && m_pageTextDrag->pointer.PointerId() == args.Pointer().PointerId();
+    }
+
+    void MainWindow::TextSelectionLayer_PointerMoved(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args)
+    {
+        if (!OwnsPageTextPointer(sender, args)) { return; }
+        UpdatePageTextDrag(args);
+        args.Handled(true);
+    }
+
+    void MainWindow::TextSelectionLayer_PointerReleased(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args)
+    {
+        if (!OwnsPageTextPointer(sender, args)) { return; }
+        UpdatePageTextDrag(args);
+        EndPageTextDrag(false);
+        args.Handled(true);
+    }
+
+    void MainWindow::TextSelectionLayer_PointerCanceled(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args)
+    {
+        if (OwnsPageTextPointer(sender, args)) { EndPageTextDrag(true); }
+    }
+
+    void MainWindow::UpdatePageTextDrag(xaml::Input::PointerRoutedEventArgs const& args)
+    {
+        auto found = m_pageOverlays.find(m_pageTextDrag->element);
+        if (found == m_pageOverlays.end()) { return; }
+        const auto binding = found->second->state.CurrentBinding();
+        const auto& mapping = found->second->state.Mapping();
+        auto document = found->second->document.lock();
+        if (!mapping || !binding || !document) { return; }
+
+        const auto position = args.GetCurrentPoint(m_pageTextDrag->layer).Position();
+        const auto pdfPoint = mapping->ElementToPdfPoint({ position.X, position.Y });
+        if (!pdfPoint) { return; }
+        if (auto& pending = document->m_pendingTextPress)
         {
-            const urpdf::TextPosition position{ binding.pageIndex, urpdf::HitTest(slot.Text(), *pdfPoint) };
-            document->m_textSelection = urpdf::TextSelection{ position, position };
+            pending->moved = *pdfPoint;
         }
-        else if (slot.State() == urpdf::PageTextState::loading || slot.State() == urpdf::PageTextState::notLoaded)
+        else if (auto const& slot = document->m_pageText[binding->pageIndex];
+            slot.State() == urpdf::PageTextState::ready && document->m_textSelection)
         {
-            pending = urpdf::PendingTextPress{ binding.pageIndex, pointerId, *pdfPoint, *pdfPoint };
+            document->m_textSelection->focus = { binding->pageIndex, urpdf::HitTest(slot.Text(), *pdfPoint) };
         }
+    }
+
+    void MainWindow::EndPageTextDrag(bool canceled)
+    {
+        auto drag = std::move(*m_pageTextDrag);
+        m_pageTextDrag.reset();
+        if (canceled)
+        {
+            auto found = m_pageOverlays.find(drag.element);
+            if (found != m_pageOverlays.end())
+            {
+                if (auto document = found->second->document.lock()) { document->m_pendingTextPress.reset(); }
+            }
+        }
+        drag.layer.ReleasePointerCapture(drag.pointer);
     }
 
     void MainWindow::TryRecordFirstVisiblePage(std::shared_ptr<PdfTabInfo> const& PdfTab)
