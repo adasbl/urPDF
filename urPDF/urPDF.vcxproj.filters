@@ -22,6 +22,7 @@
     <ClCompile Include="MuPdfDocument.cpp" />
     <ClCompile Include="ExternalUriPolicy.cpp" />
     <ClCompile Include="PageLinks.cpp" />
+    <ClCompile Include="PageText.cpp" />
     <ClCompile Include="LinkHitArea.cpp" />
     <ClCompile Include="MuPdfRuntime.cpp" />
     <ClCompile Include="DocumentViewState.cpp" />
@@ -49,6 +50,7 @@
     <ClInclude Include="MuPdfDocument.h" />
     <ClInclude Include="ExternalUriPolicy.h" />
     <ClInclude Include="PageLinks.h" />
+    <ClInclude Include="PageText.h" />
     <ClInclude Include="LinkHitArea.h" />
     <ClInclude Include="MuPdfRuntime.h" />
     <ClInclude Include="WindowCreationOptions.h" />

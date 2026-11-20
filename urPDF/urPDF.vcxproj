@@ -177,6 +177,7 @@
     <ClInclude Include="PageOverlayState.h" />
     <ClInclude Include="ExternalUriPolicy.h" />
     <ClInclude Include="PageLinks.h" />
+    <ClInclude Include="PageText.h" />
     <ClInclude Include="LinkHitArea.h">
       <DependentUpon>LinkHitArea.idl</DependentUpon>
     </ClInclude>
@@ -227,6 +228,9 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="PageLinks.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="PageText.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="LinkHitArea.cpp">
