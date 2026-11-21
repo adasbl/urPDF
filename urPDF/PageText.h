@@ -65,6 +65,12 @@ namespace urpdf
         }
     };
 
+    struct WordSelectionPoints
+    {
+        PendingTextPosition anchor;
+        PendingTextPosition focus;
+    };
+
     using TextCaretRange = std::pair<std::uint32_t, std::uint32_t>;
     std::optional<TextCaretRange> PageSelectionCarets(TextSelection const& selection, int page) noexcept;
 
@@ -78,6 +84,9 @@ namespace urpdf
     bool IsOverText(PageText const& text, PdfPagePoint point) noexcept;
     // Select the word under a glyph, bounded by the line and Unicode separators.
     std::optional<TextCaretRange> WordAt(PageText const& text, PdfPagePoint point) noexcept;
+    // Snap a drag endpoint within a word to that word, even in a gap between glyphs.
+    TextCaretRange WordDragCarets(PageText const& text, PdfPagePoint point) noexcept;
+    TextSelection ExtendWordSelection(TextSelection const& anchorWord, int page, TextCaretRange focus) noexcept;
 
     // One rectangle per line intersecting the half-open range between the carets.
     std::vector<PdfPageBounds> SelectionRects(PageText const& text, std::uint32_t firstCaret, std::uint32_t lastCaret);

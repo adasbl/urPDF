@@ -32,6 +32,15 @@ namespace urpdf
                 || u_ispunct(static_cast<UChar32>(codepoint)));
         }
 
+        TextCaretRange ExpandWord(PageText const& text, TextLine const& line, std::uint32_t character) noexcept
+        {
+            auto first = character;
+            auto last = character + 1;
+            while (first > line.firstChar && !IsWordSeparator(text.chars[first - 1].codepoint)) { --first; }
+            while (last < line.endChar && !IsWordSeparator(text.chars[last].codepoint)) { ++last; }
+            return { first, last };
+        }
+
         void AppendUtf16(std::wstring& text, char32_t codepoint)
         {
             if (codepoint > 0x10FFFF || (codepoint >= 0xD800 && codepoint <= 0xDFFF))
@@ -143,14 +152,35 @@ namespace urpdf
                 if (!ContainsPoint(hit.bounds, point)) { continue; }
                 if (IsWordSeparator(hit.codepoint)) { return std::nullopt; }
 
-                auto first = i;
-                auto last = i + 1;
-                while (first > line.firstChar && !IsWordSeparator(text.chars[first - 1].codepoint)) { --first; }
-                while (last < line.endChar && !IsWordSeparator(text.chars[last].codepoint)) { ++last; }
-                return TextCaretRange{ first, last };
+                return ExpandWord(text, line, i);
             }
         }
         return std::nullopt;
+    }
+
+    TextCaretRange WordDragCarets(PageText const& text, PdfPagePoint point) noexcept
+    {
+        if (const auto word = WordAt(text, point)) { return *word; }
+        const auto caret = HitTest(text, point);
+        for (auto const& line : text.lines)
+        {
+            if (caret <= line.firstChar || caret >= line.endChar || !HasCharacters(line, text)) { continue; }
+            if (!IsWordSeparator(text.chars[caret - 1].codepoint) && !IsWordSeparator(text.chars[caret].codepoint))
+            {
+                return ExpandWord(text, line, caret);
+            }
+            break;
+        }
+        return { caret, caret };
+    }
+
+    TextSelection ExtendWordSelection(TextSelection const& anchorWord, int page, TextCaretRange focus) noexcept
+    {
+        const TextPosition first{ page, focus.first };
+        const TextPosition last{ page, focus.second };
+        if (first < anchorWord.anchor) { return { anchorWord.focus, first }; }
+        if (last > anchorWord.focus) { return { anchorWord.anchor, last }; }
+        return anchorWord;
     }
 
     std::vector<PdfPageBounds> SelectionRects(PageText const& text, std::uint32_t firstCaret, std::uint32_t lastCaret)

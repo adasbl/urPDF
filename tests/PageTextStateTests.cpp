@@ -126,6 +126,31 @@ namespace urPDFTests
             Assert::IsFalse(urpdf::WordAt({}, { 10, 5 }).has_value());
         }
 
+        TEST_METHOD(WordDragSnapsBetweenGlyphsAndStopsAtLineBoundaries)
+        {
+            urpdf::PageText text;
+            AppendLine(text, U"first,", 0, 0);
+            AppendLine(text, U"second", 0, 20);
+            text.chars[2].bounds.x1 = 24;
+
+            Assert::IsFalse(urpdf::WordAt(text, { 27, 5 }).has_value());
+            Assert::IsTrue(urpdf::WordDragCarets(text, { 27, 5 }) == urpdf::TextCaretRange{ 0, 5 });
+            Assert::IsTrue(urpdf::WordDragCarets(text, { 51, 5 }) == urpdf::TextCaretRange{ 5, 5 });
+            Assert::IsTrue(urpdf::WordDragCarets(text, { 60, 13 }) == urpdf::TextCaretRange{ 6, 6 });
+            Assert::IsTrue(urpdf::WordDragCarets(text, { 55, 25 }) == urpdf::TextCaretRange{ 6, 12 });
+        }
+
+        TEST_METHOD(ExtendingAWordKeepsTheEntireAnchorWhenReversingDirection)
+        {
+            const urpdf::TextSelection anchor{ { 1, 10 }, { 1, 14 } };
+            Assert::IsTrue(urpdf::ExtendWordSelection(anchor, 1, { 16, 20 }) == urpdf::TextSelection{ { 1, 10 }, { 1, 20 } });
+            Assert::IsTrue(urpdf::ExtendWordSelection(anchor, 1, { 12, 12 }) == anchor);
+            Assert::IsTrue(urpdf::ExtendWordSelection(anchor, 1, { 2, 5 }) == urpdf::TextSelection{ { 1, 14 }, { 1, 2 } });
+            Assert::IsTrue(urpdf::ExtendWordSelection(anchor, 0, { 0, 0 }) == urpdf::TextSelection{ { 1, 14 }, { 0, 0 } });
+            Assert::IsTrue(urpdf::ExtendWordSelection(anchor, 2, { urpdf::kPageEnd, urpdf::kPageEnd })
+                == urpdf::TextSelection{ { 1, 10 }, { 2, urpdf::kPageEnd } });
+        }
+
         TEST_METHOD(SelectionRectsJoinsCharactersAtLineHeight)
         {
             urpdf::PageText text;

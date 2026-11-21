@@ -256,7 +256,7 @@ namespace winrt::urPDF::implementation
         std::optional<urpdf::TextSelection> m_textSelection;
         std::optional<urpdf::PendingTextPosition> m_pendingTextAnchor;
         std::optional<urpdf::PendingTextPosition> m_pendingTextFocus;
-        std::optional<urpdf::PendingTextPosition> m_pendingTextWord;
+        std::optional<urpdf::WordSelectionPoints> m_wordSelectionPoints;
         int32_t m_currentPageIndex = { 1 };
         urpdf::DocumentViewState m_viewState{};
         bool m_hasViewAnchor{ false };
@@ -290,14 +290,22 @@ namespace winrt::urPDF::implementation
         bool selectionBuilt{ false };
     };
 
+    struct PageTextClick
+    {
+        std::weak_ptr<PdfTabInfo> document;
+        foundation::Point position;
+        std::uint64_t timestamp;
+        int32_t page;
+    };
+
     struct PageTextDrag
     {
         xaml::UIElement capture;
         xaml::UIElement manipulationLayer;
         xaml::Input::Pointer pointer;
-        std::weak_ptr<PdfTabInfo> document;
-        foundation::Point pressed;
+        PageTextClick press;
         foundation::Point position;
+        bool byWord{ false };
         bool moved{ false };
     };
 
@@ -458,6 +466,7 @@ namespace winrt::urPDF::implementation
         foundation::Collections::IObservableVector<foundation::IInspectable> m_pageRepeaterItems{ nullptr };
         std::map<xaml::UIElement, std::shared_ptr<PageOverlayElement>> m_pageOverlays;
         std::optional<PageTextDrag> m_pageTextDrag;
+        std::optional<PageTextClick> m_lastPageTextClick;
         dispatching::DispatcherQueueTimer m_pageTextScrollTimer{ nullptr };
         std::optional<PendingSelectionCopy> m_pendingSelectionCopy;
 
@@ -513,7 +522,7 @@ namespace winrt::urPDF::implementation
         void CompletePageTextLoad(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
             int32_t pageIndex, std::uint64_t requestId, urpdf::PageText text, bool loaded, std::exception_ptr error);
         void ResolvePendingTextPositions(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
-        void SelectPageWord(std::shared_ptr<PdfTabInfo> const& document, urpdf::PendingTextPosition const& position);
+        void UpdateWordTextSelection(std::shared_ptr<PdfTabInfo> const& document);
         void SetPageTextSelection(std::shared_ptr<PdfTabInfo> const& document, std::optional<urpdf::TextSelection> selection);
         void RefreshPageTextSelection(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
         void ClearPageTextSelection(std::shared_ptr<PdfTabInfo> const& document);
@@ -524,7 +533,7 @@ namespace winrt::urPDF::implementation
             foundation::Point position, bool requireInsidePage = false);
         void UpdatePageTextDrag(foundation::Point position);
         void ScrollPageTextDragAtEdge();
-        void EndPageTextDrag();
+        void EndPageTextDrag(bool released = false);
         void RefreshPageOverlay(xaml::UIElement const& element, urpdf::PageOverlayState::Binding binding);
         void RefreshRealizedPageOverlays();
         void ReleasePageOverlay(xaml::UIElement const& element);
