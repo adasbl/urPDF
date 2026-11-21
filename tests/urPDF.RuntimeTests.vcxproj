@@ -57,6 +57,7 @@
   <ItemGroup>
     <ClCompile Include="MuPdfDocumentTests.cpp" />
     <ClCompile Include="PageLinksTests.cpp" />
+    <ClCompile Include="PageImagesTests.cpp" />
     <ClCompile Include="PageTextTests.cpp" />
     <ClCompile Include="..\urPDF\ExternalUriPolicy.cpp" />
     <ClCompile Include="..\urPDF\PageLinks.cpp" />
