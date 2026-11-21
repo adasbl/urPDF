@@ -130,6 +130,10 @@
       <PreprocessorDefinitions>DISABLE_XAML_GENERATED_MAIN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
     </ClCompile>
+    <Link>
+      <!-- The legacy ICU import supports Windows 10 version 1809. -->
+      <AdditionalDependencies>icuuc.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
     <ResourceCompile>
       <!-- Consumed by urPDF.version.rc (VERSIONINFO of urPDF.exe). -->
       <PreprocessorDefinitions>URPDF_VERSION_MAJOR=$(UrPDFVersion.Split('.')[0]);URPDF_VERSION_MINOR=$(UrPDFVersion.Split('.')[1]);URPDF_VERSION_PATCH=$(UrPDFVersion.Split('.')[2]);%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -177,8 +181,12 @@
     <ClInclude Include="PageOverlayState.h" />
     <ClInclude Include="ExternalUriPolicy.h" />
     <ClInclude Include="PageLinks.h" />
+    <ClInclude Include="PageText.h" />
     <ClInclude Include="LinkHitArea.h">
       <DependentUpon>LinkHitArea.idl</DependentUpon>
+    </ClInclude>
+    <ClInclude Include="TextSelectionLayer.h">
+      <DependentUpon>TextSelectionLayer.idl</DependentUpon>
     </ClInclude>
     <ClInclude Include="DocumentOperation.h" />
     <ClInclude Include="BackgroundWork.h" />
@@ -229,8 +237,14 @@
     <ClCompile Include="PageLinks.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="PageText.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="LinkHitArea.cpp">
       <DependentUpon>LinkHitArea.idl</DependentUpon>
+    </ClCompile>
+    <ClCompile Include="TextSelectionLayer.cpp">
+      <DependentUpon>TextSelectionLayer.idl</DependentUpon>
     </ClCompile>
     <ClCompile Include="MuPdfRuntime.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
@@ -280,6 +294,9 @@
       <SubType>Code</SubType>
     </Midl>
     <Midl Include="LinkHitArea.idl">
+      <SubType>Code</SubType>
+    </Midl>
+    <Midl Include="TextSelectionLayer.idl">
       <SubType>Code</SubType>
     </Midl>
     <Midl Include="SettingsPage.idl">

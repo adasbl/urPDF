@@ -12,6 +12,7 @@
     <Midl Include="MainWindow.idl" />
     <Midl Include="PdfPageLayout.idl" />
     <Midl Include="LinkHitArea.idl" />
+    <Midl Include="TextSelectionLayer.idl" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp" />
@@ -22,7 +23,9 @@
     <ClCompile Include="MuPdfDocument.cpp" />
     <ClCompile Include="ExternalUriPolicy.cpp" />
     <ClCompile Include="PageLinks.cpp" />
+    <ClCompile Include="PageText.cpp" />
     <ClCompile Include="LinkHitArea.cpp" />
+    <ClCompile Include="TextSelectionLayer.cpp" />
     <ClCompile Include="MuPdfRuntime.cpp" />
     <ClCompile Include="DocumentViewState.cpp" />
     <ClCompile Include="PageLayoutGeometry.cpp" />
@@ -49,7 +52,9 @@
     <ClInclude Include="MuPdfDocument.h" />
     <ClInclude Include="ExternalUriPolicy.h" />
     <ClInclude Include="PageLinks.h" />
+    <ClInclude Include="PageText.h" />
     <ClInclude Include="LinkHitArea.h" />
+    <ClInclude Include="TextSelectionLayer.h" />
     <ClInclude Include="MuPdfRuntime.h" />
     <ClInclude Include="WindowCreationOptions.h" />
     <ClInclude Include="SettingsStore.h" />

@@ -312,18 +312,30 @@
                     <Grid Grid.Row="1">
                         <ScrollViewer
                             x:Name="PdfScrollViewer"
+                            KeyboardAcceleratorPlacementMode="Hidden"
                             ZoomMode="Enabled"
                             MinZoomFactor="0.5"
                             MaxZoomFactor="3.0"
                             HorizontalScrollBarVisibility="Auto"
                             VerticalScrollBarVisibility="Auto"
+                            Tapped="PdfScrollViewer_Tapped"
                             ViewChanged="PdfScrollViewer_ViewChanged">
+
+                            <ScrollViewer.KeyboardAccelerators>
+                                <KeyboardAccelerator Key="C" Modifiers="Control" Invoked="CopyPdfText_Invoked"/>
+                                <KeyboardAccelerator Key="Escape" Invoked="ClearPdfSelection_Invoked"/>
+                            </ScrollViewer.KeyboardAccelerators>
 
                             <ItemsRepeater x:Name="PagesRepeater"
                                            HorizontalAlignment="Center"
                                            Margin="0,20"
                                            ElementPrepared="PagesRepeater_ElementPrepared"
-                                           ElementClearing="PagesRepeater_ElementClearing">
+                                           ElementClearing="PagesRepeater_ElementClearing"
+                                           DoubleTapped="PageText_DoubleTapped"
+                                           PointerMoved="PageText_PointerMoved"
+                                           PointerReleased="PageText_PointerReleased"
+                                           PointerCanceled="PageText_PointerCanceled"
+                                           PointerCaptureLost="PageText_PointerCanceled">
 
                                 <ItemsRepeater.Layout>
                                     <local:PdfPageLayout x:Name="PagesLayout" Spacing="10"/>
@@ -338,6 +350,23 @@
                                                 <Image Stretch="Uniform"
                                                        HorizontalAlignment="Stretch"
                                                        VerticalAlignment="Stretch"/>
+                                                <local:TextSelectionLayer Background="Transparent"
+                                                                          ManipulationMode="System"
+                                                                          PointerEntered="TextSelectionLayer_PointerEntered"
+                                                                          PointerPressed="TextSelectionLayer_PointerPressed"
+                                                                          PointerMoved="TextSelectionLayer_PointerMoved">
+                                                    <local:TextSelectionLayer.Clip>
+                                                        <RectangleGeometry Rect="0,0,0,0"/>
+                                                    </local:TextSelectionLayer.Clip>
+                                                    <Canvas IsHitTestVisible="False">
+                                                        <Canvas.Resources>
+                                                            <Style x:Key="PageSelectionRectangleStyle" TargetType="Rectangle">
+                                                                <Setter Property="Fill" Value="{ThemeResource AccentFillColorDefaultBrush}"/>
+                                                                <Setter Property="Opacity" Value="0.35"/>
+                                                            </Style>
+                                                        </Canvas.Resources>
+                                                    </Canvas>
+                                                </local:TextSelectionLayer>
                                                 <Canvas HorizontalAlignment="Stretch"
                                                         VerticalAlignment="Stretch"
                                                         IsHitTestVisible="True">

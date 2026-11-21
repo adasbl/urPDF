@@ -1,0 +1,244 @@
+#include "PageText.h"
+
+#include <icucommon.h>
+
+#include <algorithm>
+#include <cmath>
+
+namespace urpdf
+{
+    namespace
+    {
+        constexpr double LineHitTolerance = 1.0;
+
+        double DistanceOutside(double value, double low, double high) noexcept
+        {
+            return value < low ? low - value : value > high ? value - high : 0.0;
+        }
+
+        bool HasCharacters(TextLine const& line, PageText const& text) noexcept
+        {
+            return line.firstChar < line.endChar && line.endChar <= text.chars.size();
+        }
+
+        bool ContainsPoint(PdfPageBounds bounds, PdfPagePoint point) noexcept
+        {
+            return bounds.x0 <= point.x && point.x < bounds.x1 && bounds.y0 <= point.y && point.y < bounds.y1;
+        }
+
+        bool IsWordSeparator(char32_t codepoint) noexcept
+        {
+            return codepoint <= 0x10FFFF && (u_isUWhiteSpace(static_cast<UChar32>(codepoint))
+                || u_ispunct(static_cast<UChar32>(codepoint)));
+        }
+
+        TextCaretRange ExpandWord(PageText const& text, TextLine const& line, std::uint32_t character) noexcept
+        {
+            auto first = character;
+            auto last = character + 1;
+            while (first > line.firstChar && !IsWordSeparator(text.chars[first - 1].codepoint)) { --first; }
+            while (last < line.endChar && !IsWordSeparator(text.chars[last].codepoint)) { ++last; }
+            return { first, last };
+        }
+
+        void AppendUtf16(std::wstring& text, char32_t codepoint)
+        {
+            if (codepoint > 0x10FFFF || (codepoint >= 0xD800 && codepoint <= 0xDFFF))
+            {
+                codepoint = 0xFFFD;
+            }
+            if (codepoint <= 0xFFFF)
+            {
+                text.push_back(static_cast<wchar_t>(codepoint));
+                return;
+            }
+            codepoint -= 0x10000;
+            text.push_back(static_cast<wchar_t>(0xD800 + (codepoint >> 10)));
+            text.push_back(static_cast<wchar_t>(0xDC00 + (codepoint & 0x3FF)));
+        }
+
+        void AppendLineBreak(std::wstring& text)
+        {
+            while (!text.empty() && text.back() == L' ') { text.pop_back(); }
+            text.append(L"\r\n");
+        }
+
+        PdfPagePoint DistanceFromLine(PdfPagePoint point, PdfPageBounds bounds) noexcept
+        {
+            return { DistanceOutside(point.x, bounds.x0, bounds.x1), DistanceOutside(point.y, bounds.y0, bounds.y1) };
+        }
+    }
+
+    std::pair<TextPosition, TextPosition> TextSelection::InDocumentOrder() const noexcept
+    {
+        return std::minmax(anchor, focus);
+    }
+
+    std::optional<TextCaretRange> PageSelectionCarets(TextSelection const& selection, int page) noexcept
+    {
+        const auto [begin, end] = selection.InDocumentOrder();
+        if (page < begin.page || page > end.page) { return std::nullopt; }
+        const auto first = page == begin.page ? begin.caret : 0;
+        const auto last = page == end.page ? end.caret : kPageEnd;
+        if (first == last) { return std::nullopt; }
+        return TextCaretRange{ first, last };
+    }
+
+    std::optional<double> SelectionEdgeScrollOffset(double pointer, double viewport, double offset, double scrollable) noexcept
+    {
+        if (!std::isfinite(pointer) || !std::isfinite(viewport) || viewport <= 0.0
+            || !std::isfinite(offset) || !std::isfinite(scrollable) || scrollable <= 0.0) { return std::nullopt; }
+
+        constexpr double edgeWidth = 32.0;
+        constexpr double minStep = 2.0;
+        constexpr double maxStep = 20.0;
+        const double zone = (std::min)(edgeWidth, viewport / 2.0);
+        const bool nearStart = pointer < zone;
+        const double distanceInside = nearStart ? pointer : viewport - pointer;
+        if (distanceInside >= zone) { return std::nullopt; }
+
+        const double proximity = 1.0 - std::clamp(distanceInside / zone, 0.0, 1.0);
+        const double step = minStep + proximity * (maxStep - minStep);
+        return std::clamp(offset + (nearStart ? -step : step), 0.0, scrollable);
+    }
+
+    std::uint32_t HitTest(PageText const& text, PdfPagePoint point) noexcept
+    {
+        TextLine const* nearest = nullptr;
+        double nearestDistance = 0.0;
+        double nearestVertical = 0.0;
+        for (auto const& line : text.lines)
+        {
+            if (!HasCharacters(line, text)) { continue; }
+            const auto [dx, dy] = DistanceFromLine(point, line.bounds);
+            double distance = std::hypot(dx, dy);
+            if (distance <= LineHitTolerance) { distance = 0.0; }
+            if (!nearest || distance < nearestDistance || (distance == nearestDistance && dy < nearestVertical))
+            {
+                nearest = &line;
+                nearestDistance = distance;
+                nearestVertical = dy;
+            }
+        }
+        if (!nearest) { return 0; }
+
+        for (auto i = nearest->firstChar; i < nearest->endChar; ++i)
+        {
+            auto const& bounds = text.chars[i].bounds;
+            if (point.x < (bounds.x0 + bounds.x1) / 2.0) { return i; }
+        }
+        return nearest->endChar;
+    }
+
+    bool IsOverText(PageText const& text, PdfPagePoint point) noexcept
+    {
+        if (!std::isfinite(point.x) || !std::isfinite(point.y)) { return false; }
+        return std::any_of(text.lines.begin(), text.lines.end(), [&](TextLine const& line)
+            {
+                if (!HasCharacters(line, text)) { return false; }
+                const auto [dx, dy] = DistanceFromLine(point, line.bounds);
+                return std::hypot(dx, dy) <= LineHitTolerance;
+            });
+    }
+
+    std::optional<TextCaretRange> WordAt(PageText const& text, PdfPagePoint point) noexcept
+    {
+        for (auto const& line : text.lines)
+        {
+            if (!HasCharacters(line, text) || !ContainsPoint(line.bounds, point)) { continue; }
+            for (auto i = line.firstChar; i < line.endChar; ++i)
+            {
+                auto const& hit = text.chars[i];
+                if (!ContainsPoint(hit.bounds, point)) { continue; }
+                if (IsWordSeparator(hit.codepoint)) { return std::nullopt; }
+
+                return ExpandWord(text, line, i);
+            }
+        }
+        return std::nullopt;
+    }
+
+    TextCaretRange WordDragCarets(PageText const& text, PdfPagePoint point) noexcept
+    {
+        if (const auto word = WordAt(text, point)) { return *word; }
+        const auto caret = HitTest(text, point);
+        for (auto const& line : text.lines)
+        {
+            if (caret <= line.firstChar || caret >= line.endChar || !HasCharacters(line, text)) { continue; }
+            if (!IsWordSeparator(text.chars[caret - 1].codepoint) && !IsWordSeparator(text.chars[caret].codepoint))
+            {
+                return ExpandWord(text, line, caret);
+            }
+            break;
+        }
+        return { caret, caret };
+    }
+
+    TextSelection ExtendWordSelection(TextSelection const& anchorWord, int page, TextCaretRange focus) noexcept
+    {
+        const TextPosition first{ page, focus.first };
+        const TextPosition last{ page, focus.second };
+        if (first < anchorWord.anchor) { return { anchorWord.focus, first }; }
+        if (last > anchorWord.focus) { return { anchorWord.anchor, last }; }
+        return anchorWord;
+    }
+
+    std::vector<PdfPageBounds> SelectionRects(PageText const& text, std::uint32_t firstCaret, std::uint32_t lastCaret)
+    {
+        std::vector<PdfPageBounds> rectangles;
+        if (firstCaret == lastCaret) { return rectangles; }
+
+        const auto [begin, end] = std::minmax(firstCaret, lastCaret);
+        for (auto const& line : text.lines)
+        {
+            if (!HasCharacters(line, text)) { continue; }
+            const auto first = (std::max)(begin, line.firstChar);
+            const auto last = (std::min)(end, line.endChar);
+            if (first >= last) { continue; }
+
+            const PdfPageBounds bounds{
+                text.chars[first].bounds.x0, line.bounds.y0,
+                text.chars[last - 1].bounds.x1, line.bounds.y1 };
+            if (bounds.x0 < bounds.x1 && bounds.y0 < bounds.y1) { rectangles.push_back(bounds); }
+        }
+        return rectangles;
+    }
+
+    std::wstring SelectionText(PageText const& text, std::uint32_t firstCaret, std::uint32_t lastCaret)
+    {
+        std::wstring result;
+        if (firstCaret == lastCaret) { return result; }
+        const auto [begin, end] = std::minmax(firstCaret, lastCaret);
+        for (auto const& line : text.lines)
+        {
+            if (!HasCharacters(line, text)) { continue; }
+            const auto first = (std::max)(begin, line.firstChar);
+            const auto last = (std::min)(end, line.endChar);
+            if (first >= last) { continue; }
+
+            if (!result.empty()) { AppendLineBreak(result); }
+            for (auto i = first; i < last; ++i) { AppendUtf16(result, text.chars[i].codepoint); }
+        }
+        return result;
+    }
+
+    std::wstring SelectionText(std::span<PageTextSlot const> pages, TextSelection const& selection)
+    {
+        const auto [begin, end] = selection.InDocumentOrder();
+        if (begin.page < 0 || static_cast<std::size_t>(end.page) >= pages.size()) { return {}; }
+
+        std::wstring result;
+        for (auto page = static_cast<std::size_t>(begin.page); page <= static_cast<std::size_t>(end.page); ++page)
+        {
+            const auto carets = PageSelectionCarets(selection, static_cast<int>(page));
+            if (!carets || pages[page].State() == PageTextState::failed) { continue; }
+            if (pages[page].State() != PageTextState::ready) { return {}; }
+
+            const auto text = SelectionText(pages[page].Text(), carets->first, carets->second);
+            if (text.empty()) { continue; }
+            if (!result.empty()) { AppendLineBreak(result); }
+            result.append(text);
+        }
+        return result;
+    }
+}

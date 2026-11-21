@@ -10,6 +10,7 @@
 #include "PageCoordinateMapping.h"
 #include "PageOverlayState.h"
 #include "PageLinks.h"
+#include "PageText.h"
 #include "PdfPageLayout.h"
 #include "PdfRenderScale.h"
 #include "WindowCreationOptions.h"
@@ -51,6 +52,7 @@ extern "C" {
 #include <winrt/Microsoft.UI.Xaml.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 #include <winrt/Microsoft.UI.Xaml.Data.h>
+#include <winrt/Microsoft.UI.Xaml.Input.h>
 #include <winrt/Microsoft.UI.Xaml.Media.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <winrt/Microsoft.UI.Xaml.Printing.h>
@@ -250,6 +252,11 @@ namespace winrt::urPDF::implementation
         winrt::hstring m_fileName = L"unknown";
         std::vector<PageSlot> m_renderedPages;
         std::vector<urpdf::PageLinksSlot> m_pageLinks;
+        std::vector<urpdf::PageTextSlot> m_pageText;
+        std::optional<urpdf::TextSelection> m_textSelection;
+        std::optional<urpdf::PendingTextPosition> m_pendingTextAnchor;
+        std::optional<urpdf::PendingTextPosition> m_pendingTextFocus;
+        std::optional<urpdf::WordSelectionPoints> m_wordSelectionPoints;
         int32_t m_currentPageIndex = { 1 };
         urpdf::DocumentViewState m_viewState{};
         bool m_hasViewAnchor{ false };
@@ -280,6 +287,33 @@ namespace winrt::urPDF::implementation
         std::optional<PageBitmap> bitmap;
         xaml::FrameworkElement::SizeChanged_revoker sizeChangedRevoker;
         bool linkAreasBuilt{ false };
+        bool selectionBuilt{ false };
+    };
+
+    struct PageTextClick
+    {
+        std::weak_ptr<PdfTabInfo> document;
+        foundation::Point position;
+        std::uint64_t timestamp;
+        int32_t page;
+    };
+
+    struct PageTextDrag
+    {
+        xaml::UIElement capture;
+        xaml::UIElement manipulationLayer;
+        xaml::Input::Pointer pointer;
+        PageTextClick press;
+        foundation::Point position;
+        bool byWord{ false };
+        bool moved{ false };
+    };
+
+    struct PendingSelectionCopy
+    {
+        std::weak_ptr<PdfTabInfo> document;
+        int32_t nextPage{ 0 };
+        DWORD clipboardSequence{ 0 };
     };
 
     struct PendingDocumentOpen
@@ -303,6 +337,11 @@ namespace winrt::urPDF::implementation
         void ApplyTheme(winrt::hstring const& themeName);
         void ApplyBackdrop(winrt::hstring const& transparency);
         void LoadSettings();
+
+        // Selection commands for the selected PDF tab, called on the UI thread.
+        void SelectAll();
+        bool HasSelection();
+        bool CopySelectionText(); // Returns whether a clipboard request was queued.
 
         winrt::fire_and_forget OpenPdfFileAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         winrt::fire_and_forget OpenPdfInNewWindowAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
@@ -331,8 +370,18 @@ namespace winrt::urPDF::implementation
         winrt::fire_and_forget EmptyTab_Drop(foundation::IInspectable const& sender, xaml::DragEventArgs const& args);
         void RenderVisiblePagesAsync();
         winrt::fire_and_forget PdfScrollViewer_ViewChanged(foundation::IInspectable const& sender, controls::ScrollViewerViewChangedEventArgs const& args);
+        void CopyPdfText_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
+        void ClearPdfSelection_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
+        void PdfScrollViewer_Tapped(foundation::IInspectable const& sender, xaml::Input::TappedRoutedEventArgs const& args);
         void PagesRepeater_ElementPrepared(foundation::IInspectable const& sender, controls::ItemsRepeaterElementPreparedEventArgs const& args);
         void PagesRepeater_ElementClearing(foundation::IInspectable const& sender, controls::ItemsRepeaterElementClearingEventArgs const& args);
+        void TextSelectionLayer_PointerEntered(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
+        void TextSelectionLayer_PointerPressed(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
+        void TextSelectionLayer_PointerMoved(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
+        void PageText_PointerMoved(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
+        void PageText_PointerReleased(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
+        void PageText_PointerCanceled(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
+        void PageText_DoubleTapped(foundation::IInspectable const& sender, xaml::Input::DoubleTappedRoutedEventArgs const& args);
         void SettingsButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
         winrt::fire_and_forget RotateButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
         void PageNumberBox_ValueChanged(controls::NumberBox const& sender, controls::NumberBoxValueChangedEventArgs const& args);
@@ -393,6 +442,8 @@ namespace winrt::urPDF::implementation
         bool m_zoomWasEnabled{ false };
         bool m_isVisibleRenderRunning{ false };
         bool m_isPageLinksLoadRunning{ false };
+        bool m_isPageTextLoadRunning{ false };
+        std::deque<std::pair<std::weak_ptr<PdfTabInfo>, int32_t>> m_pageTextLoadQueue;
         bool m_isClosed{ false };
         urpdf::WindowState m_windowState;
         winrt::Microsoft::UI::Windowing::AppWindow m_observedAppWindow{ nullptr };
@@ -419,6 +470,10 @@ namespace winrt::urPDF::implementation
         PageBitmapCache m_pageBitmapCache{ 256ull * 1024ull * 1024ull };
         foundation::Collections::IObservableVector<foundation::IInspectable> m_pageRepeaterItems{ nullptr };
         std::map<xaml::UIElement, std::shared_ptr<PageOverlayElement>> m_pageOverlays;
+        std::optional<PageTextDrag> m_pageTextDrag;
+        std::optional<PageTextClick> m_lastPageTextClick;
+        dispatching::DispatcherQueueTimer m_pageTextScrollTimer{ nullptr };
+        std::optional<PendingSelectionCopy> m_pendingSelectionCopy;
 
         void CloseTab(controls::TabViewItem const& tab);
         winrt::fire_and_forget CompleteDeferredPresentation();
@@ -467,6 +522,24 @@ namespace winrt::urPDF::implementation
             int32_t pageIndex, std::uint64_t requestId, std::vector<urpdf::PageLink> links, bool loaded, std::exception_ptr error);
         void BuildPageLinkAreas(xaml::UIElement const& element, PageOverlayElement& entry,
             std::shared_ptr<PdfTabInfo> const& document, urpdf::PageOverlayState::Binding binding);
+        void EnsurePageText(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex, bool prioritize = false);
+        void StartNextPageTextLoad();
+        void CompletePageTextLoad(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
+            int32_t pageIndex, std::uint64_t requestId, urpdf::PageText text, bool loaded, std::exception_ptr error);
+        void ResolvePendingTextPositions(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
+        void UpdateWordTextSelection(std::shared_ptr<PdfTabInfo> const& document);
+        std::shared_ptr<PdfTabInfo> SelectedPdfDocument();
+        void SetPageTextSelection(std::shared_ptr<PdfTabInfo> const& document, std::optional<urpdf::TextSelection> selection);
+        void RefreshPageTextSelection(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
+        void ClearPageTextSelection(std::shared_ptr<PdfTabInfo> const& document);
+        void CancelSelectionCopy(std::shared_ptr<PdfTabInfo> const& document) noexcept;
+        void ContinueSelectionCopy();
+        bool OwnsPageTextPointer(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) const;
+        std::optional<urpdf::PendingTextPosition> PageTextPositionAtPointer(std::shared_ptr<PdfTabInfo> const& document,
+            foundation::Point position, bool requireInsidePage = false);
+        void UpdatePageTextDrag(foundation::Point position);
+        void ScrollPageTextDragAtEdge();
+        void EndPageTextDrag(bool released = false);
         void RefreshPageOverlay(xaml::UIElement const& element, urpdf::PageOverlayState::Binding binding);
         void RefreshRealizedPageOverlays();
         void ReleasePageOverlay(xaml::UIElement const& element);

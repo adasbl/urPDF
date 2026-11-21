@@ -1,0 +1,8 @@
+namespace urPDF
+{
+    [default_interface]
+    runtimeclass TextSelectionLayer : Microsoft.UI.Xaml.Controls.Grid
+    {
+        TextSelectionLayer();
+    }
+}

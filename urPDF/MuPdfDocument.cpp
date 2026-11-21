@@ -146,6 +146,31 @@ namespace
         return links;
     }
 
+    // Ligatures are not preserved: MuPDF then splits "fi" into separate letters with
+    // split bounds, so copied text stays searchable.
+    fz_stext_page* LoadStructuredText(fz_context* ctx, fz_document* document, int pageIndex)
+    {
+        fz_page* page = nullptr;
+        fz_stext_page* text = nullptr;
+        fz_stext_options options{};
+        options.flags = FZ_STEXT_PRESERVE_WHITESPACE;
+        fz_var(page);
+        fz_try(ctx)
+        {
+            page = fz_load_page(ctx, document, pageIndex);
+            text = fz_new_stext_page_from_page(ctx, page, &options);
+        }
+        fz_always(ctx)
+        {
+            fz_drop_page(ctx, page);
+        }
+        fz_catch(ctx)
+        {
+            ThrowMuPdfError(ctx);
+        }
+        return text;
+    }
+
     int ResolvePageLink(fz_context* ctx, fz_document* document, char const* uri)
     {
         int page = -1;
@@ -245,6 +270,33 @@ namespace urpdf
                     result.push_back({ *rect, PageLinkKind::internal, link->uri, target });
                 }
             }
+        }
+        return result;
+    }
+
+    PageText LoadPageText(fz_context* ctx, fz_document* document, int pageIndex)
+    {
+        const auto drop = [ctx](fz_stext_page* text) { fz_drop_stext_page(ctx, text); };
+        std::unique_ptr<fz_stext_page, decltype(drop)> text(LoadStructuredText(ctx, document, pageIndex), drop);
+        PageText result;
+        std::uint32_t blockIndex = 0;
+        for (auto block = text->first_block; block; block = block->next)
+        {
+            if (block->type != FZ_STEXT_BLOCK_TEXT) { continue; }
+            for (auto line = block->u.t.first_line; line; line = line->next)
+            {
+                const auto firstChar = static_cast<std::uint32_t>(result.chars.size());
+                for (auto ch = line->first_char; ch; ch = ch->next)
+                {
+                    const auto bounds = fz_rect_from_quad(ch->quad);
+                    result.chars.push_back({ static_cast<char32_t>(ch->c), { bounds.x0, bounds.y0, bounds.x1, bounds.y1 } });
+                }
+                const auto endChar = static_cast<std::uint32_t>(result.chars.size());
+                if (firstChar == endChar) { continue; }
+                result.lines.push_back({ firstChar, endChar, blockIndex,
+                    { line->bbox.x0, line->bbox.y0, line->bbox.x1, line->bbox.y1 } });
+            }
+            ++blockIndex;
         }
         return result;
     }

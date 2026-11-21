@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PageLinks.h"
+#include "PageText.h"
 
 extern "C" {
 #include <mupdf/fitz.h>
@@ -17,4 +18,5 @@ namespace urpdf
     int CountDocumentPages(fz_context* ctx, fz_document* document);
     std::vector<fz_rect> CollectPageBounds(fz_context* ctx, fz_document* document, int pageCount);
     std::vector<PageLink> CollectPageLinks(fz_context* ctx, fz_document* document, int pageIndex);
+    PageText LoadPageText(fz_context* ctx, fz_document* document, int pageIndex);
 }
