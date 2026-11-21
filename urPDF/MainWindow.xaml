@@ -312,6 +312,7 @@
                     <Grid Grid.Row="1">
                         <ScrollViewer
                             x:Name="PdfScrollViewer"
+                            KeyboardAcceleratorPlacementMode="Hidden"
                             ZoomMode="Enabled"
                             MinZoomFactor="0.5"
                             MaxZoomFactor="3.0"
