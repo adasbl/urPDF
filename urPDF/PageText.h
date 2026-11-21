@@ -2,8 +2,11 @@
 
 #include "PageCoordinateGeometry.h"
 
+#include <compare>
 #include <cstdint>
+#include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -33,12 +36,14 @@ namespace urpdf
         std::vector<TextLine> lines;
     };
 
-    // A caret between characters, in the range 0..chars.size().
+    // A caret between characters, or the end of a page whose text may be unloaded.
+    inline constexpr auto kPageEnd = (std::numeric_limits<std::uint32_t>::max)();
+
     struct TextPosition
     {
         int page{ 0 };
         std::uint32_t caret{ 0 };
-        bool operator==(TextPosition const&) const = default;
+        auto operator<=>(TextPosition const&) const = default;
     };
 
     struct TextSelection
@@ -46,16 +51,22 @@ namespace urpdf
         TextPosition anchor;
         TextPosition focus;
         bool operator==(TextSelection const&) const = default;
+        std::pair<TextPosition, TextPosition> InDocumentOrder() const noexcept;
     };
 
-    // A press can arrive before the page's text is loaded. Keep the PDF points
-    // until the text is ready, even if the pointer has already been released.
-    struct PendingTextPress
+    // Keep the PDF position even after pointer release until the caret can be resolved.
+    struct PendingTextPosition
     {
         int page{ 0 };
-        PdfPagePoint pressed;
-        PdfPagePoint moved;
+        PdfPagePoint point;
+        bool operator==(PendingTextPosition const& other) const noexcept
+        {
+            return page == other.page && point.x == other.point.x && point.y == other.point.y;
+        }
     };
+
+    using TextCaretRange = std::pair<std::uint32_t, std::uint32_t>;
+    std::optional<TextCaretRange> PageSelectionCarets(TextSelection const& selection, int page) noexcept;
 
     // Picks the line under (or nearest to) the point first, so points between lines or
     // columns do not jump to an unrelated character elsewhere on the page.
@@ -106,4 +117,7 @@ namespace urpdf
         std::uint64_t m_requestId{ 0 };
         PageText m_text;
     };
+
+    // Only complete selections can be copied. Failed and empty pages are skipped.
+    std::wstring SelectionText(std::span<PageTextSlot const> pages, TextSelection const& selection);
 }

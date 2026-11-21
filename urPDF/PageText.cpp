@@ -35,10 +35,31 @@ namespace urpdf
             text.push_back(static_cast<wchar_t>(0xDC00 + (codepoint & 0x3FF)));
         }
 
+        void AppendLineBreak(std::wstring& text)
+        {
+            while (!text.empty() && text.back() == L' ') { text.pop_back(); }
+            text.append(L"\r\n");
+        }
+
         PdfPagePoint DistanceFromLine(PdfPagePoint point, PdfPageBounds bounds) noexcept
         {
             return { DistanceOutside(point.x, bounds.x0, bounds.x1), DistanceOutside(point.y, bounds.y0, bounds.y1) };
         }
+    }
+
+    std::pair<TextPosition, TextPosition> TextSelection::InDocumentOrder() const noexcept
+    {
+        return std::minmax(anchor, focus);
+    }
+
+    std::optional<TextCaretRange> PageSelectionCarets(TextSelection const& selection, int page) noexcept
+    {
+        const auto [begin, end] = selection.InDocumentOrder();
+        if (page < begin.page || page > end.page) { return std::nullopt; }
+        const auto first = page == begin.page ? begin.caret : 0;
+        const auto last = page == end.page ? end.caret : kPageEnd;
+        if (first == last) { return std::nullopt; }
+        return TextCaretRange{ first, last };
     }
 
     std::uint32_t HitTest(PageText const& text, PdfPagePoint point) noexcept
@@ -113,12 +134,28 @@ namespace urpdf
             const auto last = (std::min)(end, line.endChar);
             if (first >= last) { continue; }
 
-            if (!result.empty())
-            {
-                while (!result.empty() && result.back() == L' ') { result.pop_back(); }
-                result.append(L"\r\n");
-            }
+            if (!result.empty()) { AppendLineBreak(result); }
             for (auto i = first; i < last; ++i) { AppendUtf16(result, text.chars[i].codepoint); }
+        }
+        return result;
+    }
+
+    std::wstring SelectionText(std::span<PageTextSlot const> pages, TextSelection const& selection)
+    {
+        const auto [begin, end] = selection.InDocumentOrder();
+        if (begin.page < 0 || static_cast<std::size_t>(end.page) >= pages.size()) { return {}; }
+
+        std::wstring result;
+        for (auto page = static_cast<std::size_t>(begin.page); page <= static_cast<std::size_t>(end.page); ++page)
+        {
+            const auto carets = PageSelectionCarets(selection, static_cast<int>(page));
+            if (!carets || pages[page].State() == PageTextState::failed) { continue; }
+            if (pages[page].State() != PageTextState::ready) { return {}; }
+
+            const auto text = SelectionText(pages[page].Text(), carets->first, carets->second);
+            if (text.empty()) { continue; }
+            if (!result.empty()) { AppendLineBreak(result); }
+            result.append(text);
         }
         return result;
     }

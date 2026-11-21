@@ -162,6 +162,57 @@ namespace urPDFTests
             Assert::AreEqual(expected.c_str(), urpdf::SelectionText(text, 0, 3).c_str());
         }
 
+        TEST_METHOD(MultiPageSelectionNormalizesBothDirectionsAndUsesPageEnd)
+        {
+            const urpdf::TextSelection forward{ { 1, 4 }, { 3, 2 } };
+            const urpdf::TextSelection reverse{ forward.focus, forward.anchor };
+
+            for (auto const& selection : { forward, reverse })
+            {
+                Assert::IsFalse(urpdf::PageSelectionCarets(selection, 0).has_value());
+                Assert::IsTrue(urpdf::PageSelectionCarets(selection, 1) == urpdf::TextCaretRange{ 4, urpdf::kPageEnd });
+                Assert::IsTrue(urpdf::PageSelectionCarets(selection, 2) == urpdf::TextCaretRange{ 0, urpdf::kPageEnd });
+                Assert::IsTrue(urpdf::PageSelectionCarets(selection, 3) == urpdf::TextCaretRange{ 0, 2 });
+                Assert::IsFalse(urpdf::PageSelectionCarets(selection, 4).has_value());
+            }
+            Assert::IsTrue(urpdf::PageSelectionCarets({ { 0, 4 }, { 0, 2 } }, 0) == urpdf::TextCaretRange{ 2, 4 });
+            Assert::IsFalse(urpdf::PageSelectionCarets({ { 0, 2 }, { 0, 2 } }, 0).has_value());
+        }
+
+        TEST_METHOD(MultiPageCopyWaitsForTextAndSkipsFailedAndEmptyPages)
+        {
+            std::vector<urpdf::PageTextSlot> pages(5);
+            const auto load = [&](int page, std::u32string_view line)
+            {
+                urpdf::PageText text;
+                if (!line.empty()) { AppendLine(text, line, 0, 0); }
+                Assert::IsTrue(pages[page].Complete(*pages[page].BeginLoad(), std::move(text), true, false));
+            };
+            load(0, U"abc  ");
+            load(1, U"middle");
+            load(3, U"");
+            load(4, U"end");
+            const urpdf::TextSelection selection{ { 4, 2 }, { 0, 1 } };
+            Assert::IsTrue(urpdf::SelectionText(pages, selection).empty());
+            const auto request = *pages[2].BeginLoad();
+            Assert::IsTrue(urpdf::SelectionText(pages, selection).empty());
+            Assert::IsTrue(pages[2].Complete(request, {}, false, true));
+
+            Assert::AreEqual(L"bc\r\nmiddle\r\nen", urpdf::SelectionText(pages, selection).c_str());
+            Assert::AreEqual(L"bc\r\nmiddle\r\nen", urpdf::SelectionText(pages, { selection.focus, selection.anchor }).c_str());
+        }
+
+        TEST_METHOD(MultiPageCopyExcludesAnEmptyFinalRange)
+        {
+            std::vector<urpdf::PageTextSlot> pages(2);
+            urpdf::PageText text;
+            AppendLine(text, U"abc", 0, 0);
+            Assert::IsTrue(pages[0].Complete(*pages[0].BeginLoad(), std::move(text), true, false));
+
+            Assert::AreEqual(L"bc", urpdf::SelectionText(pages, { { 0, 1 }, { 1, 0 } }).c_str());
+            Assert::IsTrue(urpdf::SelectionText(pages, { { 0, 0 }, { 2, 1 } }).empty());
+        }
+
         TEST_METHOD(IsOverTextUsesLineBoundsAndTolerance)
         {
             urpdf::PageText text;
