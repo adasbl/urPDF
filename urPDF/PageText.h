@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -63,6 +64,8 @@ namespace urpdf
 
     // One rectangle per line intersecting the half-open range between the carets.
     std::vector<PdfPageBounds> SelectionRects(PageText const& text, std::uint32_t firstCaret, std::uint32_t lastCaret);
+    // Windows UTF-16 text for the same range, with CRLF between selected lines.
+    std::wstring SelectionText(PageText const& text, std::uint32_t firstCaret, std::uint32_t lastCaret);
 
     enum class PageTextState { notLoaded, loading, ready, failed };
 

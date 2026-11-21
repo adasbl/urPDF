@@ -319,6 +319,10 @@
                             VerticalScrollBarVisibility="Auto"
                             ViewChanged="PdfScrollViewer_ViewChanged">
 
+                            <ScrollViewer.KeyboardAccelerators>
+                                <KeyboardAccelerator Key="C" Modifiers="Control" Invoked="CopyPdfText_Invoked"/>
+                            </ScrollViewer.KeyboardAccelerators>
+
                             <ItemsRepeater x:Name="PagesRepeater"
                                            HorizontalAlignment="Center"
                                            Margin="0,20"

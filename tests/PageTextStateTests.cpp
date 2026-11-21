@@ -129,6 +129,39 @@ namespace urPDFTests
             Assert::IsTrue(urpdf::SelectionRects({}, 0, 1).empty());
         }
 
+        TEST_METHOD(SelectionTextCopiesTheSameRangeInEitherDirection)
+        {
+            urpdf::PageText text;
+            AppendLine(text, U"abc", 0, 0);
+            AppendLine(text, U"def", 0, 20);
+
+            Assert::AreEqual(L"bc\r\nde", urpdf::SelectionText(text, 1, 5).c_str());
+            Assert::AreEqual(L"bc\r\nde", urpdf::SelectionText(text, 5, 1).c_str());
+            Assert::AreEqual(L"abc", urpdf::SelectionText(text, 0, 3).c_str());
+            Assert::IsTrue(urpdf::SelectionText(text, 2, 2).empty());
+            Assert::IsTrue(urpdf::SelectionText(text, 6, 9).empty());
+        }
+
+        TEST_METHOD(SelectionTextTrimsSpacesBeforeCrLf)
+        {
+            urpdf::PageText text;
+            AppendLine(text, U"a b  ", 0, 0);
+            AppendLine(text, U"  ", 0, 20);
+            AppendLine(text, U" c ", 0, 40, 1);
+
+            Assert::AreEqual(L"a b\r\n\r\n c ", urpdf::SelectionText(text, 0, 10).c_str());
+        }
+
+        TEST_METHOD(SelectionTextEncodesUnicodeAsUtf16)
+        {
+            urpdf::PageText text;
+            AppendLine(text, U"\u0141\U0001F600x", 0, 0);
+            text.chars[2].codepoint = 0xD800;
+
+            const std::wstring expected{ L'\u0141', 0xD83D, 0xDE00, 0xFFFD };
+            Assert::AreEqual(expected.c_str(), urpdf::SelectionText(text, 0, 3).c_str());
+        }
+
         TEST_METHOD(IsOverTextUsesLineBoundsAndTolerance)
         {
             urpdf::PageText text;

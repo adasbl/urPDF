@@ -3204,6 +3204,48 @@ namespace winrt::urPDF::implementation
         if (currentPage >= 0) { refreshSelection(currentPage); }
     }
 
+    void MainWindow::CopyPdfText_Invoked(xaml::Input::KeyboardAccelerator const&, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args)
+    {
+        if (m_isClosed) { return; }
+        const auto root = PdfScrollViewer().XamlRoot();
+        if (!root) { return; }
+        auto focused = xaml::Input::FocusManager::GetFocusedElement(root).try_as<xaml::DependencyObject>();
+        while (focused)
+        {
+            if (focused.try_as<controls::TextBox>() || focused.try_as<controls::RichEditBox>()
+                || focused.try_as<controls::PasswordBox>() || focused.try_as<controls::NumberBox>()) { return; }
+            focused = media::VisualTreeHelper::GetParent(focused);
+        }
+
+        const auto tab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
+        if (!tab) { return; }
+        const auto found = m_openedTabs.find(tab);
+        if (found == m_openedTabs.end()) { return; }
+        auto const& document = *found->second;
+        auto const& selection = document.m_textSelection;
+        if (!selection || selection->anchor.page != selection->focus.page) { return; }
+        const auto pageIndex = selection->anchor.page;
+        if (pageIndex < 0 || static_cast<std::size_t>(pageIndex) >= document.m_pageText.size()) { return; }
+        auto const& slot = document.m_pageText[pageIndex];
+        if (slot.State() != urpdf::PageTextState::ready) { return; }
+
+        const auto text = urpdf::SelectionText(slot.Text(), selection->anchor.caret, selection->focus.caret);
+        if (text.empty()) { return; }
+
+        try
+        {
+            using namespace winrt::Windows::ApplicationModel::DataTransfer;
+            DataPackage data;
+            data.SetText(text);
+            Clipboard::SetContent(data);
+            args.Handled(true);
+        }
+        catch (winrt::hresult_error const&)
+        {
+            OutputDebugStringW(L"urPDF: could not copy PDF text to the clipboard.\n");
+        }
+    }
+
     void MainWindow::TextSelectionLayer_PointerEntered(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args)
     {
         if (m_isClosed) { return; }
@@ -3247,6 +3289,7 @@ namespace winrt::urPDF::implementation
         const bool directContact = device == PointerDeviceType::Touch || device == PointerDeviceType::Pen;
         m_pageTextDrag = PageTextDrag{ element, layer, pointer, directContact };
         args.Handled(true);
+        PdfScrollViewer().Focus(xaml::FocusState::Pointer);
         document->m_pendingTextPress = urpdf::PendingTextPress{ pageIndex, *pdfPoint, *pdfPoint };
 
         if (directContact)

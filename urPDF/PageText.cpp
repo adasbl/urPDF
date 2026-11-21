@@ -19,6 +19,22 @@ namespace urpdf
             return line.firstChar < line.endChar && line.endChar <= text.chars.size();
         }
 
+        void AppendUtf16(std::wstring& text, char32_t codepoint)
+        {
+            if (codepoint > 0x10FFFF || (codepoint >= 0xD800 && codepoint <= 0xDFFF))
+            {
+                codepoint = 0xFFFD;
+            }
+            if (codepoint <= 0xFFFF)
+            {
+                text.push_back(static_cast<wchar_t>(codepoint));
+                return;
+            }
+            codepoint -= 0x10000;
+            text.push_back(static_cast<wchar_t>(0xD800 + (codepoint >> 10)));
+            text.push_back(static_cast<wchar_t>(0xDC00 + (codepoint & 0x3FF)));
+        }
+
         PdfPagePoint DistanceFromLine(PdfPagePoint point, PdfPageBounds bounds) noexcept
         {
             return { DistanceOutside(point.x, bounds.x0, bounds.x1), DistanceOutside(point.y, bounds.y0, bounds.y1) };
@@ -83,5 +99,27 @@ namespace urpdf
             if (bounds.x0 < bounds.x1 && bounds.y0 < bounds.y1) { rectangles.push_back(bounds); }
         }
         return rectangles;
+    }
+
+    std::wstring SelectionText(PageText const& text, std::uint32_t firstCaret, std::uint32_t lastCaret)
+    {
+        std::wstring result;
+        if (firstCaret == lastCaret) { return result; }
+        const auto [begin, end] = std::minmax(firstCaret, lastCaret);
+        for (auto const& line : text.lines)
+        {
+            if (!HasCharacters(line, text)) { continue; }
+            const auto first = (std::max)(begin, line.firstChar);
+            const auto last = (std::min)(end, line.endChar);
+            if (first >= last) { continue; }
+
+            if (!result.empty())
+            {
+                while (!result.empty() && result.back() == L' ') { result.pop_back(); }
+                result.append(L"\r\n");
+            }
+            for (auto i = first; i < last; ++i) { AppendUtf16(result, text.chars[i].codepoint); }
+        }
+        return result;
     }
 }
