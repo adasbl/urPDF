@@ -638,6 +638,14 @@ namespace winrt::urPDF::implementation
             }
         });
 
+        m_pageTextScrollTimer = DispatcherQueue().CreateTimer();
+        m_pageTextScrollTimer.Interval(std::chrono::milliseconds(20));
+        m_pageTextScrollTimer.IsRepeating(true);
+        m_pageTextScrollTimer.Tick([weakThis = get_weak()](auto const&, auto const&)
+        {
+            if (auto self = weakThis.get()) { self->ScrollPageTextDragAtEdge(); }
+        });
+
         PdfScrollViewer().Loaded([weakThis = get_weak()](auto const&, auto const&)
         {
             if (auto self = weakThis.get())
@@ -650,6 +658,7 @@ namespace winrt::urPDF::implementation
         {
             if (auto self = weakThis.get())
             {
+                if (self->m_pageTextDrag) { self->EndPageTextDrag(); }
                 self->DetachDpiObserver();
             }
         });
@@ -673,9 +682,13 @@ namespace winrt::urPDF::implementation
 
         Activated([weakThis = get_weak()](auto const&, xaml::WindowActivatedEventArgs const& args)
         {
-            if (args.WindowActivationState() == xaml::WindowActivationState::Deactivated) { return; }
             auto self = weakThis.get();
             if (!self || self->m_isClosed) { return; }
+            if (args.WindowActivationState() == xaml::WindowActivationState::Deactivated)
+            {
+                if (self->m_pageTextDrag) { self->EndPageTextDrag(); }
+                return;
+            }
             xaml::Application::Current().as<App>()->WindowActivated(*self);
         });
 
@@ -2761,7 +2774,6 @@ namespace winrt::urPDF::implementation
 
     void MainWindow::ReleasePageOverlay(xaml::UIElement const& element)
     {
-        if (m_pageTextDrag && m_pageTextDrag->directContactElement == element) { EndPageTextDrag(); }
         auto found = m_pageOverlays.find(element);
         if (found != m_pageOverlays.end())
         {
@@ -2813,7 +2825,6 @@ namespace winrt::urPDF::implementation
         if (!parts) { ReleasePageOverlay(element); return; }
         if (!entry.bitmap || parts->image.Source() != entry.bitmap->source)
         {
-            if (m_pageTextDrag && m_pageTextDrag->directContactElement == element) { EndPageTextDrag(); }
             entry.bitmap.reset();
             entry.state.ClearRaster(binding);
             ClearPageOverlay(*parts, &entry);
@@ -2900,7 +2911,6 @@ namespace winrt::urPDF::implementation
         if (!binding) { ReleasePageOverlay(element); return; }
         if (previousBinding != binding)
         {
-            if (m_pageTextDrag && m_pageTextDrag->directContactElement == element) { EndPageTextDrag(); }
             entry->sizeChangedRevoker.revoke();
             ClearPageElement(*parts, entry.get());
             entry->bitmap.reset();
@@ -2923,7 +2933,6 @@ namespace winrt::urPDF::implementation
         // A failed/pending replacement may leave a valid older bitmap visible.
         if (!page.bitmap || !page.bitmap->source)
         {
-            if (m_pageTextDrag && m_pageTextDrag->directContactElement == element) { EndPageTextDrag(); }
             entry->bitmap.reset();
             entry->state.ClearRaster(*binding);
             ClearPageElement(*parts, entry.get());
@@ -3400,13 +3409,13 @@ namespace winrt::urPDF::implementation
         using winrt::Microsoft::UI::Input::PointerDeviceType;
         const auto device = pointer.PointerDeviceType();
         const bool directContact = device == PointerDeviceType::Touch || device == PointerDeviceType::Pen;
-        const xaml::UIElement capture = directContact ? xaml::UIElement(layer) : PagesRepeater();
+        // Keep capture as the layout recycles the page where the gesture began.
+        const auto capture = PagesRepeater();
         if (!capture.CapturePointer(pointer)) { return; }
         const auto pressed = args.GetCurrentPoint(PdfScrollViewer()).Position();
-        m_pageTextDrag = PageTextDrag{ directContact ? element : nullptr, capture, pointer, document,
-            pressed, pressed, directContact };
+        m_pageTextDrag = PageTextDrag{ capture, directContact ? xaml::UIElement(layer) : nullptr,
+            pointer, document, pressed, pressed };
         args.Handled(true);
-        PdfScrollViewer().Focus(xaml::FocusState::Pointer);
 
         if (directContact)
         {
@@ -3414,8 +3423,9 @@ namespace winrt::urPDF::implementation
             // Restore system gestures when this selection ends.
             layer.ManipulationMode(xaml::Input::ManipulationModes::None);
             layer.CancelDirectManipulations();
-            if (!OwnsPageTextPointer(sender, args)) { return; }
         }
+        PdfScrollViewer().Focus(xaml::FocusState::Pointer);
+        if (!OwnsPageTextPointer(capture, args)) { return; }
 
         const bool ready = slot.State() == urpdf::PageTextState::ready;
         const urpdf::TextPosition caret{ pageIndex, ready ? urpdf::HitTest(slot.Text(), *pdfPoint) : 0 };
@@ -3434,15 +3444,17 @@ namespace winrt::urPDF::implementation
             && m_pageTextDrag->pointer.PointerId() == args.Pointer().PointerId();
     }
 
-    void MainWindow::PageText_PointerMoved(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args)
+    void MainWindow::TextSelectionLayer_PointerMoved(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args)
     {
         if (m_isClosed) { return; }
-        if (auto layer = sender.try_as<winrt::urPDF::TextSelectionLayer>())
-        {
-            auto found = m_pageOverlays.find(GetPageElementForTextSelectionLayer(layer));
-            UpdatePageTextCursor(layer, found != m_pageOverlays.end() ? found->second.get() : nullptr, args);
-        }
-        if (!OwnsPageTextPointer(sender, args)) { return; }
+        const auto layer = sender.as<winrt::urPDF::TextSelectionLayer>();
+        const auto found = m_pageOverlays.find(GetPageElementForTextSelectionLayer(layer));
+        UpdatePageTextCursor(layer, found != m_pageOverlays.end() ? found->second.get() : nullptr, args);
+    }
+
+    void MainWindow::PageText_PointerMoved(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args)
+    {
+        if (m_isClosed || !OwnsPageTextPointer(sender, args)) { return; }
         UpdatePageTextDrag(args.GetCurrentPoint(PdfScrollViewer()).Position());
         args.Handled(true);
     }
@@ -3465,6 +3477,10 @@ namespace winrt::urPDF::implementation
     {
         const auto repeater = PagesRepeater();
         const auto scrollViewer = PdfScrollViewer();
+        const auto width = static_cast<float>(scrollViewer.ViewportWidth());
+        const auto height = static_cast<float>(scrollViewer.ViewportHeight());
+        if (std::isfinite(width) && width > 0.0f) { viewPosition.X = std::clamp(viewPosition.X, 0.0f, width); }
+        if (std::isfinite(height) && height > 0.0f) { viewPosition.Y = std::clamp(viewPosition.Y, 0.0f, height); }
         const auto position = scrollViewer.TransformToVisual(repeater).TransformPoint(viewPosition);
         if (!std::isfinite(position.X) || !std::isfinite(position.Y)) { return std::nullopt; }
         auto const& rects = winrt::get_self<winrt::urPDF::implementation::PdfPageLayout>(PagesLayout())->PageRects();
@@ -3510,6 +3526,7 @@ namespace winrt::urPDF::implementation
             constexpr float dragThreshold = 3.0f;
             if (std::abs(position.X - pressed.X) < dragThreshold && std::abs(position.Y - pressed.Y) < dragThreshold) { return; }
             m_pageTextDrag->moved = true;
+            m_pageTextScrollTimer.Start();
         }
 
         const auto target = PageTextPositionAtPointer(document, position);
@@ -3528,13 +3545,37 @@ namespace winrt::urPDF::implementation
         if (document->m_pendingTextFocus) { EnsurePageText(document, target->page, true); }
     }
 
+    void MainWindow::ScrollPageTextDragAtEdge()
+    {
+        if (m_isClosed || !m_pageTextDrag || !m_pageTextDrag->moved || m_viewStateGuard.IsPending()) { return; }
+        const auto document = m_pageTextDrag->document.lock();
+        if (!document || m_presentedTab.lock() != document) { return; }
+
+        const auto viewer = PdfScrollViewer();
+        const auto position = m_pageTextDrag->position;
+        const auto offsetX = viewer.HorizontalOffset();
+        const auto offsetY = viewer.VerticalOffset();
+        const auto targetX = urpdf::SelectionEdgeScrollOffset(position.X, viewer.ViewportWidth(), offsetX, viewer.ScrollableWidth());
+        const auto targetY = urpdf::SelectionEdgeScrollOffset(position.Y, viewer.ViewportHeight(), offsetY, viewer.ScrollableHeight());
+        if (!targetX && !targetY) { return; }
+
+        const foundation::IReference<double> scrollX = targetX && *targetX != offsetX ? foundation::IReference<double>{ *targetX } : nullptr;
+        const foundation::IReference<double> scrollY = targetY && *targetY != offsetY ? foundation::IReference<double>{ *targetY } : nullptr;
+        if ((scrollX || scrollY) && viewer.ChangeView(scrollX, scrollY, nullptr, true)) { return; }
+
+        // ViewChanged tracks the caret while scrolling. At a limit a newly rendered
+        // page can still move the caret after the last offset change.
+        if (m_pageTextDrag) { UpdatePageTextDrag(position); }
+    }
+
     void MainWindow::EndPageTextDrag()
     {
         auto drag = std::move(*m_pageTextDrag);
         m_pageTextDrag.reset();
-        if (drag.restoreSystemManipulation)
+        m_pageTextScrollTimer.Stop();
+        if (drag.manipulationLayer)
         {
-            drag.capture.ManipulationMode(xaml::Input::ManipulationModes::System);
+            drag.manipulationLayer.ManipulationMode(xaml::Input::ManipulationModes::System);
         }
         drag.capture.ReleasePointerCapture(drag.pointer);
         if (auto document = drag.document.lock(); document && !drag.moved) { ClearPageTextSelection(document); }
@@ -4080,7 +4121,7 @@ namespace winrt::urPDF::implementation
             {
                 RenderVisiblePagesAsync();
             }
-            if (m_pageTextDrag && m_pageTextDrag->moved && !m_pageTextDrag->restoreSystemManipulation)
+            if (m_pageTextDrag && m_pageTextDrag->moved)
             {
                 UpdatePageTextDrag(m_pageTextDrag->position);
             }

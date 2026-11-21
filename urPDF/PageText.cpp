@@ -62,6 +62,24 @@ namespace urpdf
         return TextCaretRange{ first, last };
     }
 
+    std::optional<double> SelectionEdgeScrollOffset(double pointer, double viewport, double offset, double scrollable) noexcept
+    {
+        if (!std::isfinite(pointer) || !std::isfinite(viewport) || viewport <= 0.0
+            || !std::isfinite(offset) || !std::isfinite(scrollable) || scrollable <= 0.0) { return std::nullopt; }
+
+        constexpr double edgeWidth = 32.0;
+        constexpr double minStep = 2.0;
+        constexpr double maxStep = 20.0;
+        const double zone = (std::min)(edgeWidth, viewport / 2.0);
+        const bool nearStart = pointer < zone;
+        const double distanceInside = nearStart ? pointer : viewport - pointer;
+        if (distanceInside >= zone) { return std::nullopt; }
+
+        const double proximity = 1.0 - std::clamp(distanceInside / zone, 0.0, 1.0);
+        const double step = minStep + proximity * (maxStep - minStep);
+        return std::clamp(offset + (nearStart ? -step : step), 0.0, scrollable);
+    }
+
     std::uint32_t HitTest(PageText const& text, PdfPagePoint point) noexcept
     {
         TextLine const* nearest = nullptr;

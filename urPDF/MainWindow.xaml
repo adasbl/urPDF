@@ -352,10 +352,7 @@
                                                                           ManipulationMode="System"
                                                                           PointerEntered="TextSelectionLayer_PointerEntered"
                                                                           PointerPressed="TextSelectionLayer_PointerPressed"
-                                                                          PointerMoved="PageText_PointerMoved"
-                                                                          PointerReleased="PageText_PointerReleased"
-                                                                          PointerCanceled="PageText_PointerCanceled"
-                                                                          PointerCaptureLost="PageText_PointerCanceled">
+                                                                          PointerMoved="TextSelectionLayer_PointerMoved">
                                                     <local:TextSelectionLayer.Clip>
                                                         <RectangleGeometry Rect="0,0,0,0"/>
                                                     </local:TextSelectionLayer.Clip>

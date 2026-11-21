@@ -68,6 +68,10 @@ namespace urpdf
     using TextCaretRange = std::pair<std::uint32_t, std::uint32_t>;
     std::optional<TextCaretRange> PageSelectionCarets(TextSelection const& selection, int page) noexcept;
 
+    // Returns the next offset on a scrollable axis when the pointer is in its edge zone.
+    // At the scroll limit the returned offset stays unchanged.
+    std::optional<double> SelectionEdgeScrollOffset(double pointer, double viewport, double offset, double scrollable) noexcept;
+
     // Picks the line under (or nearest to) the point first, so points between lines or
     // columns do not jump to an unrelated character elsewhere on the page.
     std::uint32_t HitTest(PageText const& text, PdfPagePoint point) noexcept;

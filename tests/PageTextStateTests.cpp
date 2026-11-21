@@ -213,6 +213,35 @@ namespace urPDFTests
             Assert::IsTrue(urpdf::SelectionText(pages, { { 0, 0 }, { 2, 1 } }).empty());
         }
 
+        TEST_METHOD(SelectionEdgeScrollSpeedsUpTowardsEitherEdge)
+        {
+            const auto start = urpdf::SelectionEdgeScrollOffset(13, 200, 100, 300);
+            const auto end = urpdf::SelectionEdgeScrollOffset(187, 200, 100, 300);
+            const auto edge = urpdf::SelectionEdgeScrollOffset(200, 200, 100, 300);
+            const auto beyond = urpdf::SelectionEdgeScrollOffset(250, 200, 100, 300);
+
+            Assert::IsTrue(start && *start < 100);
+            Assert::IsTrue(end && *end > 100);
+            Assert::AreEqual(100 - *start, *end - 100, 1e-9);
+            Assert::IsTrue(edge && *edge > *end);
+            Assert::IsTrue(edge == beyond);
+            Assert::IsFalse(urpdf::SelectionEdgeScrollOffset(100, 200, 100, 300).has_value());
+        }
+
+        TEST_METHOD(SelectionEdgeScrollClampsOffsetsAndKeepsSmallViewportCenterNeutral)
+        {
+            Assert::IsTrue(urpdf::SelectionEdgeScrollOffset(0, 200, 5, 300) == 0);
+            Assert::IsTrue(urpdf::SelectionEdgeScrollOffset(200, 200, 295, 300) == 300);
+            Assert::IsTrue(urpdf::SelectionEdgeScrollOffset(200, 200, 300, 300) == 300);
+            Assert::IsFalse(urpdf::SelectionEdgeScrollOffset(0, 200, 0, 0).has_value());
+            Assert::IsFalse(urpdf::SelectionEdgeScrollOffset(0, 0, 0, 300).has_value());
+            Assert::IsFalse(urpdf::SelectionEdgeScrollOffset(15, 30, 100, 300).has_value());
+            const auto start = urpdf::SelectionEdgeScrollOffset(14, 30, 100, 300);
+            const auto end = urpdf::SelectionEdgeScrollOffset(16, 30, 100, 300);
+            Assert::IsTrue(start && *start < 100);
+            Assert::IsTrue(end && *end > 100);
+        }
+
         TEST_METHOD(IsOverTextUsesLineBoundsAndTolerance)
         {
             urpdf::PageText text;
