@@ -336,6 +336,7 @@ namespace winrt::urPDF::implementation
 
         void ApplyTheme(winrt::hstring const& themeName);
         void ApplyBackdrop(winrt::hstring const& transparency);
+        void ApplyTextSelectionColor(bool useWindowsAccentColor);
         void LoadSettings();
 
         // Selection commands for the selected PDF tab, called on the UI thread.
@@ -470,6 +471,7 @@ namespace winrt::urPDF::implementation
         PageBitmapCache m_pageBitmapCache{ 256ull * 1024ull * 1024ull };
         foundation::Collections::IObservableVector<foundation::IInspectable> m_pageRepeaterItems{ nullptr };
         std::map<xaml::UIElement, std::shared_ptr<PageOverlayElement>> m_pageOverlays;
+        bool m_useWindowsAccentColorForTextSelection{ true };
         std::optional<PageTextDrag> m_pageTextDrag;
         std::optional<PageTextClick> m_lastPageTextClick;
         dispatching::DispatcherQueueTimer m_pageTextScrollTimer{ nullptr };

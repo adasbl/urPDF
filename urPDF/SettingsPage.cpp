@@ -62,6 +62,16 @@ namespace winrt::urPDF::implementation
         urpdf::AppSettings::Instance().SetOpenFilesInExistingWindow(toggleSwitch.IsOn());
     }
 
+    void SettingsPage::UseWindowsAccentColorForTextSelectionToggle_Toggled(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& /* args */)
+    {
+        if (m_isInitializing) { return; }
+
+        auto toggleSwitch = sender.as<controls::ToggleSwitch>();
+        const bool enabled = toggleSwitch.IsOn();
+        urpdf::AppSettings::Instance().SetUseWindowsAccentColorForTextSelection(enabled);
+        m_textSelectionColorChangedEvent(*this, enabled);
+    }
+
     void SettingsPage::ThemeSelection_SelectionChanged(foundation::IInspectable const& sender, controls::SelectionChangedEventArgs const& e)
     {
         if (m_isInitializing == true) { return; }
@@ -128,6 +138,16 @@ namespace winrt::urPDF::implementation
         m_backdropChangedEvent.remove(token);
     }
 
+    winrt::event_token SettingsPage::TextSelectionColorChanged(foundation::EventHandler<bool> const& handler)
+    {
+        return m_textSelectionColorChangedEvent.add(handler);
+    }
+
+    void SettingsPage::TextSelectionColorChanged(winrt::event_token const& token) noexcept
+    {
+        m_textSelectionColorChangedEvent.remove(token);
+    }
+
     winrt::event_token SettingsPage::BackRequested(foundation::EventHandler<foundation::IInspectable> const& handler)
     {
         return m_backRequestedEvent.add(handler);
@@ -153,5 +173,6 @@ namespace winrt::urPDF::implementation
         TransparencyComboBox().SelectedIndex(static_cast<int32_t>(settings.backdrop));
         WindowStartupModeComboBox().SelectedIndex(static_cast<int32_t>(settings.windowStartupMode));
         OpenFilesInExistingWindowToggle().IsOn(settings.openFilesInExistingWindow);
+        UseWindowsAccentColorForTextSelectionToggle().IsOn(settings.useWindowsAccentColorForTextSelection);
     }
 }
