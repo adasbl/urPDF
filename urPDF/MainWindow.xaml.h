@@ -338,6 +338,11 @@ namespace winrt::urPDF::implementation
         void ApplyBackdrop(winrt::hstring const& transparency);
         void LoadSettings();
 
+        // Selection commands for the selected PDF tab, called on the UI thread.
+        void SelectAll();
+        bool HasSelection();
+        bool CopySelectionText(); // Returns whether a clipboard request was queued.
+
         winrt::fire_and_forget OpenPdfFileAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         winrt::fire_and_forget OpenPdfInNewWindowAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         void OpenDocument(urpdf::WindowCreationOptions const& document, std::optional<winrt::weak_ref<controls::TabViewItem>> targetTab = std::nullopt);
@@ -523,6 +528,7 @@ namespace winrt::urPDF::implementation
             int32_t pageIndex, std::uint64_t requestId, urpdf::PageText text, bool loaded, std::exception_ptr error);
         void ResolvePendingTextPositions(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
         void UpdateWordTextSelection(std::shared_ptr<PdfTabInfo> const& document);
+        std::shared_ptr<PdfTabInfo> SelectedPdfDocument();
         void SetPageTextSelection(std::shared_ptr<PdfTabInfo> const& document, std::optional<urpdf::TextSelection> selection);
         void RefreshPageTextSelection(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
         void ClearPageTextSelection(std::shared_ptr<PdfTabInfo> const& document);

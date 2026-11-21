@@ -279,6 +279,22 @@ namespace urPDFTests
             Assert::IsTrue(urpdf::SelectionText(pages, { { 0, 0 }, { 2, 1 } }).empty());
         }
 
+        TEST_METHOD(FullDocumentCopyWaitsAndIncludesTheEndOfTheLastPage)
+        {
+            std::vector<urpdf::PageTextSlot> pages(2);
+            const urpdf::TextSelection selection{ { 0, 0 }, { 1, urpdf::kPageEnd } };
+            urpdf::PageText first;
+            AppendLine(first, U"first page", 0, 0);
+            Assert::IsTrue(pages[0].Complete(*pages[0].BeginLoad(), std::move(first), true, false));
+
+            Assert::IsTrue(urpdf::SelectionText(pages, selection).empty());
+
+            urpdf::PageText last;
+            AppendLine(last, U"last page", 0, 0);
+            Assert::IsTrue(pages[1].Complete(*pages[1].BeginLoad(), std::move(last), true, false));
+            Assert::AreEqual(L"first page\r\nlast page", urpdf::SelectionText(pages, selection).c_str());
+        }
+
         TEST_METHOD(SelectionEdgeScrollSpeedsUpTowardsEitherEdge)
         {
             const auto start = urpdf::SelectionEdgeScrollOffset(13, 200, 100, 300);

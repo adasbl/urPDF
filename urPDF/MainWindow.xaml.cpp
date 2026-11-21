@@ -3327,6 +3327,57 @@ namespace winrt::urPDF::implementation
         if (m_pageTextDrag && m_pageTextDrag->press.document.lock() == document) { EndPageTextDrag(); }
     }
 
+    std::shared_ptr<PdfTabInfo> MainWindow::SelectedPdfDocument()
+    {
+        if (m_isClosed) { return nullptr; }
+        const auto tab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
+        const auto found = m_openedTabs.find(tab);
+        return found != m_openedTabs.end() ? found->second : nullptr;
+    }
+
+    void MainWindow::SelectAll()
+    {
+        const auto document = SelectedPdfDocument();
+        if (!document || document->m_pagecount <= 0) { return; }
+
+        const urpdf::TextSelection all{ { 0, 0 }, { document->m_pagecount - 1, urpdf::kPageEnd } };
+        if (document->m_textSelection == all && !document->m_pendingTextAnchor && !document->m_pendingTextFocus
+            && !document->m_wordSelectionPoints && !m_pageTextDrag) { return; }
+
+        ClearPageTextSelection(document);
+        // The sentinel does not require loading the last page. The same overlay path
+        // used for dragging loads text only for realized pages until a copy is requested.
+        SetPageTextSelection(document, all);
+    }
+
+    bool MainWindow::HasSelection()
+    {
+        const auto document = SelectedPdfDocument();
+        return document && document->m_textSelection
+            && document->m_textSelection->anchor != document->m_textSelection->focus;
+    }
+
+    bool MainWindow::CopySelectionText()
+    {
+        const auto document = SelectedPdfDocument();
+        if (!document) { return false; }
+
+        auto const& selection = document->m_textSelection;
+        auto const& word = document->m_wordSelectionPoints;
+        const bool pendingDrag = document->m_pendingTextFocus && document->m_pendingTextFocus != document->m_pendingTextAnchor;
+        if (!word && (!selection || (selection->anchor == selection->focus && !pendingDrag))) { return false; }
+
+        const auto firstPage = word ? (std::min)(word->anchor.page, word->focus.page) : selection->InDocumentOrder().first.page;
+        const auto clipboardSequence = GetClipboardSequenceNumber();
+        if (!DispatcherQueue().TryEnqueue([weakThis = get_weak()]
+            {
+                if (auto self = weakThis.get()) { self->ContinueSelectionCopy(); }
+            })) { return false; }
+
+        m_pendingSelectionCopy = PendingSelectionCopy{ document, firstPage, clipboardSequence };
+        return true;
+    }
+
     void MainWindow::ClearPdfSelection_Invoked(xaml::Input::KeyboardAccelerator const&, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args)
     {
         if (auto document = m_presentedTab.lock(); document && (document->m_textSelection || document->m_wordSelectionPoints))
@@ -3364,19 +3415,7 @@ namespace winrt::urPDF::implementation
             focused = media::VisualTreeHelper::GetParent(focused);
         }
 
-        const auto tab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
-        if (!tab) { return; }
-        const auto found = m_openedTabs.find(tab);
-        if (found == m_openedTabs.end()) { return; }
-        auto const& document = found->second;
-        auto const& selection = document->m_textSelection;
-        auto const& word = document->m_wordSelectionPoints;
-        if (!word && (!selection || (selection->anchor == selection->focus && (!document->m_pendingTextFocus
-            || document->m_pendingTextFocus == document->m_pendingTextAnchor)))) { return; }
-        const auto firstPage = word ? (std::min)(word->anchor.page, word->focus.page) : selection->InDocumentOrder().first.page;
-        m_pendingSelectionCopy = PendingSelectionCopy{ document, firstPage, GetClipboardSequenceNumber() };
-        args.Handled(true);
-        ContinueSelectionCopy();
+        if (CopySelectionText()) { args.Handled(true); }
     }
 
     void MainWindow::ContinueSelectionCopy()
