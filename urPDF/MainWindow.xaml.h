@@ -320,6 +320,12 @@ namespace winrt::urPDF::implementation
         DWORD clipboardSequence{ 0 };
     };
 
+    struct ContextMenuImageTarget
+    {
+        std::weak_ptr<PdfTabInfo> document;
+        urpdf::PageImageSelection selection;
+    };
+
     struct PendingDocumentOpen
     {
         urpdf::WindowCreationOptions document;
@@ -347,6 +353,7 @@ namespace winrt::urPDF::implementation
         bool HasSelection();
         bool HasImageSelection();
         bool CopySelectionText(); // Returns whether a clipboard request was queued.
+        bool CopySelectedImage(); // Returns whether an image clipboard request was queued.
 
         winrt::fire_and_forget OpenPdfFileAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         winrt::fire_and_forget OpenPdfInNewWindowAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
@@ -378,6 +385,9 @@ namespace winrt::urPDF::implementation
         void CopyPdfText_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
         void ClearPdfSelection_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
         void PdfScrollViewer_Tapped(foundation::IInspectable const& sender, xaml::Input::TappedRoutedEventArgs const& args);
+        void PdfScrollViewer_ContextRequested(xaml::UIElement const& sender, xaml::Input::ContextRequestedEventArgs const& args);
+        void CopyImageMenuItem_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
+        winrt::fire_and_forget SaveImageAsMenuItem_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         void PagesRepeater_ElementPrepared(foundation::IInspectable const& sender, controls::ItemsRepeaterElementPreparedEventArgs const& args);
         void PagesRepeater_ElementClearing(foundation::IInspectable const& sender, controls::ItemsRepeaterElementClearingEventArgs const& args);
         void TextSelectionLayer_PointerEntered(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
@@ -479,6 +489,7 @@ namespace winrt::urPDF::implementation
         std::optional<PageTextClick> m_lastPageTextClick;
         dispatching::DispatcherQueueTimer m_pageTextScrollTimer{ nullptr };
         std::optional<PendingSelectionCopy> m_pendingSelectionCopy;
+        std::optional<ContextMenuImageTarget> m_contextMenuImage;
 
         void CloseTab(controls::TabViewItem const& tab);
         winrt::fire_and_forget CompleteDeferredPresentation();
@@ -541,6 +552,11 @@ namespace winrt::urPDF::implementation
         void RefreshPageImageSelection(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
         void ClearPageImageSelection(std::shared_ptr<PdfTabInfo> const& document);
         void ResolvePendingImageClick(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
+        bool QueueImageCopy(std::shared_ptr<PdfTabInfo> const& document, urpdf::PageImageSelection selection);
+        winrt::fire_and_forget CompleteImageCopy(std::vector<std::uint8_t> pngBytes, DWORD clipboardSequence);
+        foundation::IAsyncOperation<storage::StorageFile> PickImageSaveFileAsync(winrt::hstring const& suggestedFileName);
+        void QueueImageSave(std::shared_ptr<PdfTabInfo> const& document, urpdf::PageImageSelection selection, storage::StorageFile file);
+        winrt::fire_and_forget CompleteImageSave(storage::StorageFile file, std::vector<std::uint8_t> pngBytes);
         void CancelSelectionCopy(std::shared_ptr<PdfTabInfo> const& document) noexcept;
         void ContinueSelectionCopy();
         bool OwnsPageTextPointer(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) const;

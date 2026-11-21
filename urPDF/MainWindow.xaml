@@ -319,7 +319,23 @@
                             HorizontalScrollBarVisibility="Auto"
                             VerticalScrollBarVisibility="Auto"
                             Tapped="PdfScrollViewer_Tapped"
+                            ContextRequested="PdfScrollViewer_ContextRequested"
                             ViewChanged="PdfScrollViewer_ViewChanged">
+
+                            <ScrollViewer.Resources>
+                                <MenuFlyout x:Key="DocumentContextMenu" x:Name="DocumentContextMenu">
+                                    <MenuFlyoutItem x:Name="CopyImageMenuItem" Text="Copy image" Click="CopyImageMenuItem_Click">
+                                        <MenuFlyoutItem.Icon>
+                                            <SymbolIcon Symbol="Copy"/>
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem x:Name="SaveImageAsMenuItem" Text="Save image as..." Click="SaveImageAsMenuItem_Click">
+                                        <MenuFlyoutItem.Icon>
+                                            <SymbolIcon Symbol="Save"/>
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                </MenuFlyout>
+                            </ScrollViewer.Resources>
 
                             <ScrollViewer.KeyboardAccelerators>
                                 <KeyboardAccelerator Key="C" Modifiers="Control" Invoked="CopyPdfText_Invoked"/>
