@@ -257,6 +257,8 @@ namespace winrt::urPDF::implementation
         std::optional<urpdf::PendingTextPosition> m_pendingTextAnchor;
         std::optional<urpdf::PendingTextPosition> m_pendingTextFocus;
         std::optional<urpdf::WordSelectionPoints> m_wordSelectionPoints;
+        std::optional<urpdf::PageImageSelection> m_selectedImage;
+        std::optional<urpdf::PendingTextPosition> m_pendingImageClick;
         int32_t m_currentPageIndex = { 1 };
         urpdf::DocumentViewState m_viewState{};
         bool m_hasViewAnchor{ false };
@@ -287,6 +289,7 @@ namespace winrt::urPDF::implementation
         std::optional<PageBitmap> bitmap;
         xaml::FrameworkElement::SizeChanged_revoker sizeChangedRevoker;
         bool linkAreasBuilt{ false };
+        bool imageAreasBuilt{ false };
         bool selectionBuilt{ false };
     };
 
@@ -305,6 +308,7 @@ namespace winrt::urPDF::implementation
         xaml::Input::Pointer pointer;
         PageTextClick press;
         foundation::Point position;
+        std::optional<urpdf::PendingTextPosition> pdfPress;
         bool byWord{ false };
         bool moved{ false };
     };
@@ -341,6 +345,7 @@ namespace winrt::urPDF::implementation
         // Selection commands for the selected PDF tab, called on the UI thread.
         void SelectAll();
         bool HasSelection();
+        bool HasImageSelection();
         bool CopySelectionText(); // Returns whether a clipboard request was queued.
 
         winrt::fire_and_forget OpenPdfFileAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
@@ -532,6 +537,10 @@ namespace winrt::urPDF::implementation
         void SetPageTextSelection(std::shared_ptr<PdfTabInfo> const& document, std::optional<urpdf::TextSelection> selection);
         void RefreshPageTextSelection(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
         void ClearPageTextSelection(std::shared_ptr<PdfTabInfo> const& document);
+        void SetSelectedPageImage(std::shared_ptr<PdfTabInfo> const& document, std::optional<urpdf::PageImageSelection> selection);
+        void RefreshPageImageSelection(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
+        void ClearPageImageSelection(std::shared_ptr<PdfTabInfo> const& document);
+        void ResolvePendingImageClick(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
         void CancelSelectionCopy(std::shared_ptr<PdfTabInfo> const& document) noexcept;
         void ContinueSelectionCopy();
         bool OwnsPageTextPointer(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) const;

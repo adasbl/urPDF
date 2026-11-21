@@ -360,6 +360,18 @@
                                                     </local:TextSelectionLayer.Clip>
                                                     <Canvas IsHitTestVisible="False">
                                                         <Canvas.Resources>
+                                                            <Style x:Key="PageImageSelectionBorderStyle" TargetType="Border">
+                                                                <Setter Property="BorderBrush" Value="{ThemeResource AccentFillColorDefaultBrush}"/>
+                                                                <Setter Property="BorderThickness" Value="2"/>
+                                                            </Style>
+                                                            <Style x:Key="PageImageSelectionFillStyle" TargetType="Rectangle">
+                                                                <Setter Property="Fill" Value="{ThemeResource AccentFillColorDefaultBrush}"/>
+                                                                <Setter Property="Opacity" Value="0.22"/>
+                                                            </Style>
+                                                        </Canvas.Resources>
+                                                    </Canvas>
+                                                    <Canvas IsHitTestVisible="False">
+                                                        <Canvas.Resources>
                                                             <Style x:Key="PageSelectionRectangleStyle" TargetType="Rectangle">
                                                                 <Setter Property="Fill" Value="{ThemeResource AccentFillColorDefaultBrush}"/>
                                                                 <Setter Property="Opacity" Value="0.35"/>
