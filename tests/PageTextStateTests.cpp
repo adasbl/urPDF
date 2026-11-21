@@ -85,6 +85,47 @@ namespace urPDFTests
             Assert::AreEqual(0u, urpdf::HitTest(malformed, { 5, 5 }));
         }
 
+        TEST_METHOD(WordAtSelectsTheGlyphWordOnEitherSideOfTheCaretMidpoint)
+        {
+            urpdf::PageText text;
+            AppendLine(text, U"alpha beta", 100, 50);
+
+            for (double x : { 100.0, 124.0, 146.0, 149.0 })
+            {
+                Assert::IsTrue(urpdf::WordAt(text, { x, 56 }) == urpdf::TextCaretRange{ 0, 5 });
+            }
+            Assert::IsFalse(urpdf::WordAt(text, { 150, 56 }).has_value());
+            Assert::IsTrue(urpdf::WordAt(text, { 160, 56 }) == urpdf::TextCaretRange{ 6, 10 });
+            Assert::IsFalse(urpdf::WordAt(text, { 200, 56 }).has_value());
+        }
+
+        TEST_METHOD(WordAtStopsAtUnicodePunctuationAndWhitespace)
+        {
+            urpdf::PageText text;
+            AppendLine(text, U"one\u2014two\u00a0three\U00010100four", 0, 0);
+
+            Assert::IsTrue(urpdf::WordAt(text, { 25, 5 }) == urpdf::TextCaretRange{ 0, 3 });
+            Assert::IsTrue(urpdf::WordAt(text, { 65, 5 }) == urpdf::TextCaretRange{ 4, 7 });
+            Assert::IsTrue(urpdf::WordAt(text, { 125, 5 }) == urpdf::TextCaretRange{ 8, 13 });
+            Assert::IsTrue(urpdf::WordAt(text, { 145, 5 }) == urpdf::TextCaretRange{ 14, 18 });
+            for (double x : { 35.0, 75.0, 135.0 })
+            {
+                Assert::IsFalse(urpdf::WordAt(text, { x, 5 }).has_value());
+            }
+        }
+
+        TEST_METHOD(WordAtStaysOnTheClickedLine)
+        {
+            urpdf::PageText text;
+            AppendLine(text, U"Za\u017c\u00f3\u0142\u0107", 0, 0);
+            AppendLine(text, U"g\u0119\u015bl\u0105", 0, 20);
+
+            Assert::IsTrue(urpdf::WordAt(text, { 55, 5 }) == urpdf::TextCaretRange{ 0, 6 });
+            Assert::IsFalse(urpdf::WordAt(text, { 10, 16 }).has_value());
+            Assert::IsTrue(urpdf::WordAt(text, { 0, 25 }) == urpdf::TextCaretRange{ 6, 11 });
+            Assert::IsFalse(urpdf::WordAt({}, { 10, 5 }).has_value());
+        }
+
         TEST_METHOD(SelectionRectsJoinsCharactersAtLineHeight)
         {
             urpdf::PageText text;

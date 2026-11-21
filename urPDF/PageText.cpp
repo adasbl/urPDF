@@ -1,5 +1,7 @@
 #include "PageText.h"
 
+#include <icucommon.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -17,6 +19,17 @@ namespace urpdf
         bool HasCharacters(TextLine const& line, PageText const& text) noexcept
         {
             return line.firstChar < line.endChar && line.endChar <= text.chars.size();
+        }
+
+        bool ContainsPoint(PdfPageBounds bounds, PdfPagePoint point) noexcept
+        {
+            return bounds.x0 <= point.x && point.x < bounds.x1 && bounds.y0 <= point.y && point.y < bounds.y1;
+        }
+
+        bool IsWordSeparator(char32_t codepoint) noexcept
+        {
+            return codepoint <= 0x10FFFF && (u_isUWhiteSpace(static_cast<UChar32>(codepoint))
+                || u_ispunct(static_cast<UChar32>(codepoint)));
         }
 
         void AppendUtf16(std::wstring& text, char32_t codepoint)
@@ -117,6 +130,27 @@ namespace urpdf
                 const auto [dx, dy] = DistanceFromLine(point, line.bounds);
                 return std::hypot(dx, dy) <= LineHitTolerance;
             });
+    }
+
+    std::optional<TextCaretRange> WordAt(PageText const& text, PdfPagePoint point) noexcept
+    {
+        for (auto const& line : text.lines)
+        {
+            if (!HasCharacters(line, text) || !ContainsPoint(line.bounds, point)) { continue; }
+            for (auto i = line.firstChar; i < line.endChar; ++i)
+            {
+                auto const& hit = text.chars[i];
+                if (!ContainsPoint(hit.bounds, point)) { continue; }
+                if (IsWordSeparator(hit.codepoint)) { return std::nullopt; }
+
+                auto first = i;
+                auto last = i + 1;
+                while (first > line.firstChar && !IsWordSeparator(text.chars[first - 1].codepoint)) { --first; }
+                while (last < line.endChar && !IsWordSeparator(text.chars[last].codepoint)) { ++last; }
+                return TextCaretRange{ first, last };
+            }
+        }
+        return std::nullopt;
     }
 
     std::vector<PdfPageBounds> SelectionRects(PageText const& text, std::uint32_t firstCaret, std::uint32_t lastCaret)

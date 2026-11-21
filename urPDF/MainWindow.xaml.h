@@ -256,6 +256,7 @@ namespace winrt::urPDF::implementation
         std::optional<urpdf::TextSelection> m_textSelection;
         std::optional<urpdf::PendingTextPosition> m_pendingTextAnchor;
         std::optional<urpdf::PendingTextPosition> m_pendingTextFocus;
+        std::optional<urpdf::PendingTextPosition> m_pendingTextWord;
         int32_t m_currentPageIndex = { 1 };
         urpdf::DocumentViewState m_viewState{};
         bool m_hasViewAnchor{ false };
@@ -367,6 +368,7 @@ namespace winrt::urPDF::implementation
         void PageText_PointerMoved(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
         void PageText_PointerReleased(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
         void PageText_PointerCanceled(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
+        void PageText_DoubleTapped(foundation::IInspectable const& sender, xaml::Input::DoubleTappedRoutedEventArgs const& args);
         void SettingsButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
         winrt::fire_and_forget RotateButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
         void PageNumberBox_ValueChanged(controls::NumberBox const& sender, controls::NumberBoxValueChangedEventArgs const& args);
@@ -511,6 +513,7 @@ namespace winrt::urPDF::implementation
         void CompletePageTextLoad(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
             int32_t pageIndex, std::uint64_t requestId, urpdf::PageText text, bool loaded, std::exception_ptr error);
         void ResolvePendingTextPositions(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
+        void SelectPageWord(std::shared_ptr<PdfTabInfo> const& document, urpdf::PendingTextPosition const& position);
         void SetPageTextSelection(std::shared_ptr<PdfTabInfo> const& document, std::optional<urpdf::TextSelection> selection);
         void RefreshPageTextSelection(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
         void ClearPageTextSelection(std::shared_ptr<PdfTabInfo> const& document);
@@ -518,7 +521,7 @@ namespace winrt::urPDF::implementation
         void ContinueSelectionCopy();
         bool OwnsPageTextPointer(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) const;
         std::optional<urpdf::PendingTextPosition> PageTextPositionAtPointer(std::shared_ptr<PdfTabInfo> const& document,
-            foundation::Point position);
+            foundation::Point position, bool requireInsidePage = false);
         void UpdatePageTextDrag(foundation::Point position);
         void ScrollPageTextDragAtEdge();
         void EndPageTextDrag();

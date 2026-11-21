@@ -130,6 +130,10 @@
       <PreprocessorDefinitions>DISABLE_XAML_GENERATED_MAIN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
     </ClCompile>
+    <Link>
+      <!-- The legacy ICU import supports Windows 10 version 1809. -->
+      <AdditionalDependencies>icuuc.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
     <ResourceCompile>
       <!-- Consumed by urPDF.version.rc (VERSIONINFO of urPDF.exe). -->
       <PreprocessorDefinitions>URPDF_VERSION_MAJOR=$(UrPDFVersion.Split('.')[0]);URPDF_VERSION_MINOR=$(UrPDFVersion.Split('.')[1]);URPDF_VERSION_PATCH=$(UrPDFVersion.Split('.')[2]);%(PreprocessorDefinitions)</PreprocessorDefinitions>

@@ -76,6 +76,8 @@ namespace urpdf
     // columns do not jump to an unrelated character elsewhere on the page.
     std::uint32_t HitTest(PageText const& text, PdfPagePoint point) noexcept;
     bool IsOverText(PageText const& text, PdfPagePoint point) noexcept;
+    // Select the word under a glyph, bounded by the line and Unicode separators.
+    std::optional<TextCaretRange> WordAt(PageText const& text, PdfPagePoint point) noexcept;
 
     // One rectangle per line intersecting the half-open range between the carets.
     std::vector<PdfPageBounds> SelectionRects(PageText const& text, std::uint32_t firstCaret, std::uint32_t lastCaret);

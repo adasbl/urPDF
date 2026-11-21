@@ -331,6 +331,7 @@
                                            Margin="0,20"
                                            ElementPrepared="PagesRepeater_ElementPrepared"
                                            ElementClearing="PagesRepeater_ElementClearing"
+                                           DoubleTapped="PageText_DoubleTapped"
                                            PointerMoved="PageText_PointerMoved"
                                            PointerReleased="PageText_PointerReleased"
                                            PointerCanceled="PageText_PointerCanceled"
