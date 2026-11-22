@@ -473,28 +473,43 @@
                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                 BorderThickness="1"
                                 Canvas.ZIndex="10">
-                            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                            <Grid ColumnSpacing="4" VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="220"/>
+                                    <ColumnDefinition Width="112"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
                                 <TextBox x:Name="SearchTextBox"
-                                         Width="220"
+                                         Grid.Column="0"
                                          PlaceholderText="Find in document"
                                          AutomationProperties.Name="Find in document"
                                          TextChanged="SearchTextBox_TextChanged"
                                          KeyDown="SearchTextBox_KeyDown"/>
-                                <ProgressRing x:Name="SearchProgressRing"
-                                              Width="16"
-                                              Height="16"
-                                              Margin="4,0,0,0"
-                                              IsActive="False"
-                                              Visibility="Collapsed"
-                                              VerticalAlignment="Center"/>
-                                <TextBlock x:Name="SearchStatusText"
-                                           MinWidth="64"
-                                           Margin="6,0,4,0"
-                                           VerticalAlignment="Center"
-                                           TextAlignment="Right"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                           IsTextSelectionEnabled="False"/>
+                                <Grid Grid.Column="1" Margin="6,0,4,0" VerticalAlignment="Center">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ProgressRing x:Name="SearchProgressRing"
+                                                  Grid.Column="0"
+                                                  Width="16"
+                                                  Height="16"
+                                                  Margin="0,0,6,0"
+                                                  IsActive="False"
+                                                  Visibility="Collapsed"
+                                                  VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="SearchStatusText"
+                                               Grid.Column="1"
+                                               VerticalAlignment="Center"
+                                               TextAlignment="Right"
+                                               TextTrimming="CharacterEllipsis"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               IsTextSelectionEnabled="False"/>
+                                </Grid>
                                 <Button x:Name="SearchPreviousButton"
+                                        Grid.Column="2"
                                         Click="SearchPreviousButton_Click"
                                         IsEnabled="False"
                                         Padding="6"
@@ -503,6 +518,7 @@
                                     <FontIcon Glyph="&#xE70E;" FontSize="12"/>
                                 </Button>
                                 <Button x:Name="SearchNextButton"
+                                        Grid.Column="3"
                                         Click="SearchNextButton_Click"
                                         IsEnabled="False"
                                         Padding="6"
@@ -511,13 +527,14 @@
                                     <FontIcon Glyph="&#xE70D;" FontSize="12"/>
                                 </Button>
                                 <Button x:Name="SearchCloseButton"
+                                        Grid.Column="4"
                                         Click="SearchCloseButton_Click"
                                         Padding="6"
                                         AutomationProperties.Name="Close search"
                                         ToolTipService.ToolTip="Close (Esc)">
                                     <FontIcon Glyph="&#xE711;" FontSize="12"/>
                                 </Button>
-                            </StackPanel>
+                            </Grid>
                         </Border>
 
                         <Border x:Name="EmptyTabDropZone"
