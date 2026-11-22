@@ -84,6 +84,8 @@ namespace
     constexpr int SlotRetainMarginPages = 3;
     constexpr auto ZoomRenderDebounce = std::chrono::milliseconds(200);
     constexpr auto DpiRenderDebounce = std::chrono::milliseconds(200);
+    constexpr auto SearchDebounce = std::chrono::milliseconds(200);
+    constexpr std::size_t SearchPublishBatchPages = 8;
     constexpr wchar_t TabDragProperty[] = L"urPDF.Tab";
 
     bool NeedsPageText(urpdf::PageTextSlot const& slot) noexcept
@@ -238,6 +240,11 @@ namespace
     {
         urpdf::PageText text;
         bool loaded{ false };
+    };
+
+    struct DocumentSearchResult
+    {
+        bool completed{ false };
     };
 
     winrt::fire_and_forget LaunchExternalUriAsync(std::string utf8Uri)
@@ -649,12 +656,18 @@ namespace winrt::urPDF::implementation
             m_moveSizeInput = nullptr;
         }
         m_workCancelled->store(true, std::memory_order_release);
+        CancelPendingSearchDebounce();
         for (auto const& tabEntry : m_openedTabs)
         {
+            CancelActiveSearchSession(tabEntry.second);
             ++tabEntry.second->m_renderGeneration;
             for (auto& slot : tabEntry.second->m_renderedPages) { slot.bitmap.reset(); }
         }
-        if (m_loadingTab) { ++m_loadingTab->m_renderGeneration; }
+        if (m_loadingTab)
+        {
+            CancelActiveSearchSession(m_loadingTab);
+            ++m_loadingTab->m_renderGeneration;
+        }
         m_loadingTab.reset();
         m_loadingTargetTab.reset();
         m_openedTabs.clear();
@@ -719,6 +732,14 @@ namespace winrt::urPDF::implementation
         m_pageTextScrollTimer.Tick([weakThis = get_weak()](auto const&, auto const&)
         {
             if (auto self = weakThis.get()) { self->ScrollPageTextDragAtEdge(); }
+        });
+
+        m_searchDebounceTimer = DispatcherQueue().CreateTimer();
+        m_searchDebounceTimer.IsRepeating(false);
+        m_searchDebounceTimer.Interval(SearchDebounce);
+        m_searchDebounceTimer.Tick([weakThis = get_weak()](auto const&, auto const&)
+        {
+            if (auto self = weakThis.get()) { self->ExecutePendingDebouncedSearch(); }
         });
 
         PdfScrollViewer().Loaded([weakThis = get_weak()](auto const&, auto const&)
@@ -1056,6 +1077,7 @@ namespace winrt::urPDF::implementation
 
     PdfTabInfo::~PdfTabInfo()
     {
+        if (m_searchCancelled) { m_searchCancelled->store(true, std::memory_order_release); }
         fz_drop_document(m_ctx.get(), m_doc);
     }
 
@@ -1473,6 +1495,7 @@ namespace winrt::urPDF::implementation
 
         ClearPageTextSelection(pdfTab);
         ClearPageImageSelection(pdfTab);
+        ResetPendingDocumentSearch(pdfTab);
         const auto generation = pdfTab->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
         for (auto& links : pdfTab->m_pageLinks) { links.ResetPending(); }
         for (auto& text : pdfTab->m_pageText) { text.ResetPending(); }
@@ -1848,6 +1871,9 @@ namespace winrt::urPDF::implementation
             }
             ClearPageTextSelection(openedTab->second);
             ClearPageImageSelection(openedTab->second);
+            CancelPendingSearchDebounce(openedTab->second);
+            CancelActiveSearchSession(openedTab->second);
+            openedTab->second->m_search.Clear();
             ++openedTab->second->m_renderGeneration;
             ClearPageOverlays(openedTab->second->m_documentId);
             for (auto& slot : openedTab->second->m_renderedPages) { slot.bitmap.reset(); }
@@ -3308,6 +3334,457 @@ namespace winrt::urPDF::implementation
                 if (auto self = weakThis.get()) { self->ContinueSelectionCopy(); }
             });
         }
+    }
+
+    // DOCUMENT SEARCH
+    bool MainWindow::OwnsDocument(std::shared_ptr<PdfTabInfo> const& document, std::uint64_t documentId) const noexcept
+    {
+        return document && documentId != 0 && document->m_documentId == documentId
+            && std::any_of(m_openedTabs.begin(), m_openedTabs.end(),
+                [&](auto const& tab) { return tab.second == document; });
+    }
+
+    void MainWindow::CancelPendingSearchDebounce(std::shared_ptr<PdfTabInfo> const& document) noexcept
+    {
+        if (document && m_pendingSearchTab.lock() != document) { return; }
+        if (m_searchDebounceTimer)
+        {
+            try { m_searchDebounceTimer.Stop(); } catch (...) {}
+        }
+        m_pendingSearchTab.reset();
+        m_pendingSearchQuery.clear();
+    }
+
+    void MainWindow::CancelActiveSearchSession(std::shared_ptr<PdfTabInfo> const& document) noexcept
+    {
+        if (!document || !document->m_searchCancelled) { return; }
+        document->m_searchCancelled->store(true, std::memory_order_release);
+        document->m_searchCancelled.reset();
+    }
+
+    void MainWindow::ScheduleDocumentSearch(std::shared_ptr<PdfTabInfo> const& document, std::wstring query)
+    {
+        if (m_isClosed || !document || !OwnsDocument(document, document->m_documentId)) { return; }
+        document->m_searchDraftQuery = query;
+        if (urpdf::IsBlankSearchQuery(query))
+        {
+            ClearDocumentSearch(document);
+            return;
+        }
+        if (m_searchDebounceTimer)
+        {
+            m_searchDebounceTimer.Stop();
+            m_pendingSearchTab = document;
+            m_pendingSearchQuery = std::move(query);
+            m_searchDebounceTimer.Start();
+            return;
+        }
+        StartDocumentSearch(document, query);
+    }
+
+    void MainWindow::ExecutePendingDebouncedSearch()
+    {
+        auto document = m_pendingSearchTab.lock();
+        auto query = std::move(m_pendingSearchQuery);
+        m_pendingSearchTab.reset();
+        m_pendingSearchQuery.clear();
+        if (m_isClosed || !document || !OwnsDocument(document, document->m_documentId)) { return; }
+        StartDocumentSearch(document, query);
+    }
+
+    void MainWindow::TriggerImmediateDocumentSearch(std::shared_ptr<PdfTabInfo> const& document, std::wstring_view query)
+    {
+        if (m_isClosed || !document || !OwnsDocument(document, document->m_documentId)) { return; }
+        CancelPendingSearchDebounce(document);
+        document->m_searchDraftQuery.assign(query);
+
+        if (urpdf::IsBlankSearchQuery(query))
+        {
+            ClearDocumentSearch(document);
+            return;
+        }
+
+        if (document->m_search.Query() == query)
+        {
+            const auto state = document->m_search.State();
+            if (state == urpdf::SearchStatus::ready)
+            {
+                NavigateToNextSearchMatch(document);
+                return;
+            }
+            if (state == urpdf::SearchStatus::searching)
+            {
+                return;
+            }
+        }
+
+        StartDocumentSearch(document, query);
+    }
+
+    void MainWindow::StartDocumentSearch(std::shared_ptr<PdfTabInfo> const& document, std::wstring_view query)
+    {
+        if (m_isClosed || m_workCancelled->load(std::memory_order_acquire)
+            || !document || !document->m_layoutLoaded || !document->m_doc
+            || !OwnsDocument(document, document->m_documentId))
+        {
+            return;
+        }
+
+        CancelPendingSearchDebounce(document);
+        document->m_searchDraftQuery.assign(query);
+
+        if (urpdf::IsBlankSearchQuery(query))
+        {
+            ClearDocumentSearch(document);
+            return;
+        }
+
+        CancelActiveSearchSession(document);
+
+        if (document->m_pagecount <= 0)
+        {
+            if (const auto requestId = document->m_search.BeginSearch(query))
+            {
+                document->m_search.Complete(*requestId, true, false);
+            }
+            RefreshAllSearchHighlights(document);
+            UpdateSearchBarStatus(document);
+            return;
+        }
+
+        auto registration = m_runtime->Work().TryRegister();
+        if (!registration) { return; }
+
+        const auto requestIdOpt = document->m_search.BeginSearch(query);
+        if (!requestIdOpt)
+        {
+            RefreshAllSearchHighlights(document);
+            UpdateSearchBarStatus(document);
+            return;
+        }
+        const std::uint64_t requestId = *requestIdOpt;
+
+        auto sessionCancelled = std::make_shared<std::atomic<bool>>(false);
+        document->m_searchCancelled = sessionCancelled;
+        RefreshAllSearchHighlights(document);
+        UpdateSearchBarStatus(document);
+
+        const std::uint64_t documentId = document->m_documentId;
+        const int pageCount = document->m_pagecount;
+        const auto weakTab = std::weak_ptr<PdfTabInfo>(document);
+
+        try
+        {
+            std::string utf8Needle = winrt::to_string(query);
+            auto context = m_runtime->CloneContext();
+            auto windowCancelled = m_workCancelled;
+            auto dispatcher = DispatcherQueue();
+            auto weakThis = get_weak();
+
+            QueueMuPdfWork(std::move(registration),
+                [document, context = std::move(context), windowCancelled, sessionCancelled, dispatcher,
+                 weakThis, weakTab, documentId, requestId, pageCount, utf8Needle = std::move(utf8Needle)]() mutable
+                {
+                    DocumentSearchResult result;
+                    std::vector<PageSearchBatch> pendingBatch;
+                    pendingBatch.reserve(SearchPublishBatchPages);
+                    bool publishedAny = false;
+
+                    auto flushBatch = [&]() noexcept -> bool
+                    {
+                        if (pendingBatch.empty()) { return true; }
+                        if (windowCancelled->load(std::memory_order_acquire)
+                            || sessionCancelled->load(std::memory_order_acquire))
+                        {
+                            return false;
+                        }
+                        auto batchToPublish = std::move(pendingBatch);
+                        pendingBatch.clear();
+                        publishedAny = true;
+                        return TryPublishResult(dispatcher, windowCancelled,
+                            [weakThis, weakTab, windowCancelled, sessionCancelled, documentId, requestId,
+                             batch = std::move(batchToPublish)]() mutable
+                            {
+                                auto self = weakThis.get();
+                                if (!self || self->m_isClosed
+                                    || windowCancelled->load(std::memory_order_acquire)
+                                    || sessionCancelled->load(std::memory_order_acquire))
+                                {
+                                    return;
+                                }
+                                self->ApplyDocumentSearchBatch(weakTab, documentId, requestId, std::move(batch));
+                            });
+                    };
+
+                    for (int pageIndex = 0; pageIndex < pageCount; ++pageIndex)
+                    {
+                        if (windowCancelled->load(std::memory_order_acquire)
+                            || sessionCancelled->load(std::memory_order_acquire))
+                        {
+                            return result;
+                        }
+
+                        // Release m_documentMutex between pages so rendering and page interaction stay responsive.
+                        // Intentionally independent of m_renderGeneration (zoom/rotation/DPI do not alter text).
+                        std::vector<urpdf::SearchMatch> pageMatches;
+                        {
+                            std::lock_guard lock(document->m_documentMutex);
+                            if (windowCancelled->load(std::memory_order_acquire)
+                                || sessionCancelled->load(std::memory_order_acquire)
+                                || !document->m_doc)
+                            {
+                                return result;
+                            }
+                            pageMatches = urpdf::SearchPage(context.get(), document->m_doc, pageIndex, utf8Needle.c_str());
+                        }
+
+                        if (!pageMatches.empty())
+                        {
+                            pendingBatch.push_back(PageSearchBatch{ pageIndex, std::move(pageMatches) });
+                            if (!publishedAny || pendingBatch.size() >= SearchPublishBatchPages)
+                            {
+                                if (!flushBatch()) { return result; }
+                            }
+                        }
+                    }
+
+                    if (!flushBatch()) { return result; }
+                    if (windowCancelled->load(std::memory_order_acquire)
+                        || sessionCancelled->load(std::memory_order_acquire))
+                    {
+                        return result;
+                    }
+
+                    result.completed = true;
+                    return result;
+                },
+                [weakThis, weakTab, windowCancelled, sessionCancelled, dispatcher, documentId, requestId]
+                (std::optional<DocumentSearchResult> result, std::exception_ptr error)
+                {
+                    if (sessionCancelled->load(std::memory_order_acquire)) { return; }
+                    const bool completed = result && result->completed;
+                    TryPublishResult(dispatcher, windowCancelled,
+                        [weakThis, weakTab, windowCancelled, sessionCancelled, documentId, requestId, completed, error]() mutable
+                        {
+                            auto self = weakThis.get();
+                            if (!self || self->m_isClosed
+                                || windowCancelled->load(std::memory_order_acquire)
+                                || sessionCancelled->load(std::memory_order_acquire))
+                            {
+                                return;
+                            }
+                            self->CompleteDocumentSearch(weakTab, documentId, requestId, completed, error);
+                        });
+                });
+        }
+        catch (...)
+        {
+            CompleteDocumentSearch(weakTab, documentId, requestId, false, std::current_exception());
+        }
+    }
+
+    void MainWindow::ClearDocumentSearch(std::shared_ptr<PdfTabInfo> const& document)
+    {
+        if (!document) { return; }
+        CancelPendingSearchDebounce(document);
+        CancelActiveSearchSession(document);
+        document->m_searchDraftQuery.clear();
+        document->m_search.Clear();
+        RefreshAllSearchHighlights(document);
+        UpdateSearchBarStatus(document);
+    }
+
+    void MainWindow::CloseDocumentSearch(std::shared_ptr<PdfTabInfo> const& document)
+    {
+        if (!document) { return; }
+        document->m_searchBarOpen = false;
+        ClearDocumentSearch(document);
+    }
+
+    void MainWindow::ResetPendingDocumentSearch(std::shared_ptr<PdfTabInfo> const& document) noexcept
+    {
+        if (!document) { return; }
+        CancelPendingSearchDebounce(document);
+        CancelActiveSearchSession(document);
+        document->m_search.ResetPending();
+    }
+
+    void MainWindow::ApplyDocumentSearchBatch(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
+        std::uint64_t requestId, std::vector<PageSearchBatch> batches)
+    {
+        if (m_isClosed) { return; }
+        auto document = weakTab.lock();
+        if (!OwnsDocument(document, documentId)) { return; }
+        if (document->m_search.State() != urpdf::SearchStatus::searching
+            || document->m_search.RequestId() != requestId)
+        {
+            return;
+        }
+
+        const int32_t currentPage = CurrentSearchPageIndex(document);
+        bool reachedCurrentOrLater = false;
+        std::vector<int32_t> updatedPages;
+        updatedPages.reserve(batches.size());
+
+        for (auto& batch : batches)
+        {
+            const bool hadMatches = !batch.matches.empty();
+            if (document->m_search.AppendPageMatches(requestId, batch.pageIndex, std::move(batch.matches)) && hadMatches)
+            {
+                updatedPages.push_back(batch.pageIndex);
+                if (batch.pageIndex >= currentPage)
+                {
+                    reachedCurrentOrLater = true;
+                }
+            }
+        }
+
+        bool selectedNow = false;
+        if (!document->m_search.ActiveMatchIndex() && reachedCurrentOrLater)
+        {
+            selectedNow = document->m_search.SelectInitialMatch(currentPage).has_value();
+        }
+
+        for (int32_t pageIndex : updatedPages)
+        {
+            RefreshPageSearchHighlights(document, pageIndex);
+        }
+
+        if (selectedNow)
+        {
+            if (auto const* active = document->m_search.ActiveMatch())
+            {
+                ScrollToSearchMatch(document, *active);
+            }
+        }
+
+        UpdateSearchBarStatus(document);
+    }
+
+    void MainWindow::CompleteDocumentSearch(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
+        std::uint64_t requestId, bool completed, std::exception_ptr error)
+    {
+        if (m_isClosed) { return; }
+        auto document = weakTab.lock();
+        if (!OwnsDocument(document, documentId)) { return; }
+        if (!document->m_search.Complete(requestId, completed, error != nullptr))
+        {
+            return;
+        }
+
+        document->m_searchCancelled.reset();
+
+        if (document->m_search.State() == urpdf::SearchStatus::ready)
+        {
+            if (!document->m_search.ActiveMatchIndex() && document->m_search.MatchCount() > 0)
+            {
+                const int32_t currentPage = CurrentSearchPageIndex(document);
+                if (document->m_search.SelectInitialMatch(currentPage))
+                {
+                    if (auto const* active = document->m_search.ActiveMatch())
+                    {
+                        RefreshPageSearchHighlights(document, active->pageIndex);
+                        ScrollToSearchMatch(document, *active);
+                    }
+                }
+            }
+        }
+        else
+        {
+            RefreshAllSearchHighlights(document);
+        }
+
+        UpdateSearchBarStatus(document);
+    }
+
+    int32_t MainWindow::CurrentSearchPageIndex(std::shared_ptr<PdfTabInfo> const& document)
+    {
+        if (!document) { return 0; }
+        if (document == SelectedPdfDocument())
+        {
+            if (const auto visible = VisiblePageNumber(document))
+            {
+                return (std::max)(*visible - 1, 0);
+            }
+        }
+        return (std::max)(document->m_currentPageIndex - 1, 0);
+    }
+
+    void MainWindow::ScrollToSearchMatch(std::shared_ptr<PdfTabInfo> const& document, urpdf::SearchMatch const& match)
+    {
+        if (m_isClosed || !document || document != SelectedPdfDocument()) { return; }
+        if (match.pageIndex < 0
+            || static_cast<std::size_t>(match.pageIndex) >= document->m_pageBounds.size())
+        {
+            return;
+        }
+
+        std::vector<urpdf::PageRect> pages;
+        urpdf::ViewportGeometry viewport;
+        ReadViewGeometry(document, pages, viewport);
+        if (static_cast<std::size_t>(match.pageIndex) >= pages.size()) { return; }
+
+        auto const& rawBounds = document->m_pageBounds[match.pageIndex];
+        const urpdf::PdfPageBounds pageBounds{ rawBounds.x0, rawBounds.y0, rawBounds.x1, rawBounds.y1 };
+        const auto matchBounds = urpdf::TrySearchMatchBounds(match.rects, pageBounds);
+        if (!matchBounds) { return; }
+
+        const auto offsets = urpdf::CalculateSearchMatchScrollOffsets(
+            *matchBounds, pageBounds, pages[match.pageIndex], viewport, document->m_viewState.rotation);
+        if (!offsets) { return; }
+
+        PdfScrollViewer().ChangeView(offsets->x, offsets->y, nullptr);
+    }
+
+    void MainWindow::NavigateToNextSearchMatch(std::shared_ptr<PdfTabInfo> const& document)
+    {
+        if (m_isClosed || !document || document->m_search.MatchCount() == 0) { return; }
+        const std::optional<int32_t> previousPage = document->m_search.ActiveMatch()
+            ? std::optional<int32_t>{ document->m_search.ActiveMatch()->pageIndex }
+            : std::nullopt;
+        if (!document->m_search.NextMatch()) { return; }
+        auto const* active = document->m_search.ActiveMatch();
+        if (!active) { return; }
+        if (previousPage && *previousPage != active->pageIndex)
+        {
+            RefreshPageSearchHighlights(document, *previousPage);
+        }
+        RefreshPageSearchHighlights(document, active->pageIndex);
+        ScrollToSearchMatch(document, *active);
+        UpdateSearchBarStatus(document);
+    }
+
+    void MainWindow::NavigateToPreviousSearchMatch(std::shared_ptr<PdfTabInfo> const& document)
+    {
+        if (m_isClosed || !document || document->m_search.MatchCount() == 0) { return; }
+        const std::optional<int32_t> previousPage = document->m_search.ActiveMatch()
+            ? std::optional<int32_t>{ document->m_search.ActiveMatch()->pageIndex }
+            : std::nullopt;
+        if (!document->m_search.PreviousMatch()) { return; }
+        auto const* active = document->m_search.ActiveMatch();
+        if (!active) { return; }
+        if (previousPage && *previousPage != active->pageIndex)
+        {
+            RefreshPageSearchHighlights(document, *previousPage);
+        }
+        RefreshPageSearchHighlights(document, active->pageIndex);
+        ScrollToSearchMatch(document, *active);
+        UpdateSearchBarStatus(document);
+    }
+
+    void MainWindow::RefreshPageSearchHighlights(std::shared_ptr<PdfTabInfo> const&, int32_t)
+    {
+        // Search overlay rendering is wired in step 1.4.
+    }
+
+    void MainWindow::RefreshAllSearchHighlights(std::shared_ptr<PdfTabInfo> const&)
+    {
+        // Search overlay rendering is wired in step 1.4.
+    }
+
+    void MainWindow::UpdateSearchBarStatus(std::shared_ptr<PdfTabInfo> const&)
+    {
+        // Search bar UI status display is wired in step 1.5.
     }
 
     void MainWindow::ResolvePendingTextPositions(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex)

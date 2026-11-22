@@ -10,6 +10,7 @@
 #include "PageCoordinateMapping.h"
 #include "PageOverlayState.h"
 #include "PageLinks.h"
+#include "PageSearch.h"
 #include "PageText.h"
 #include "PdfPageLayout.h"
 #include "PdfRenderScale.h"
@@ -259,6 +260,10 @@ namespace winrt::urPDF::implementation
         std::optional<urpdf::WordSelectionPoints> m_wordSelectionPoints;
         std::optional<urpdf::PageImageSelection> m_selectedImage;
         std::optional<urpdf::PendingTextPosition> m_pendingImageClick;
+        urpdf::DocumentSearchState m_search;
+        std::shared_ptr<std::atomic<bool>> m_searchCancelled;
+        bool m_searchBarOpen{ false };
+        std::wstring m_searchDraftQuery;
         int32_t m_currentPageIndex = { 1 };
         urpdf::DocumentViewState m_viewState{};
         bool m_hasViewAnchor{ false };
@@ -324,6 +329,12 @@ namespace winrt::urPDF::implementation
     {
         std::weak_ptr<PdfTabInfo> document;
         urpdf::PageImageSelection selection;
+    };
+
+    struct PageSearchBatch
+    {
+        int32_t pageIndex{ 0 };
+        std::vector<urpdf::SearchMatch> matches;
     };
 
     struct PendingDocumentOpen
@@ -490,6 +501,9 @@ namespace winrt::urPDF::implementation
         dispatching::DispatcherQueueTimer m_pageTextScrollTimer{ nullptr };
         std::optional<PendingSelectionCopy> m_pendingSelectionCopy;
         std::optional<ContextMenuImageTarget> m_contextMenuImage;
+        dispatching::DispatcherQueueTimer m_searchDebounceTimer{ nullptr };
+        std::weak_ptr<PdfTabInfo> m_pendingSearchTab;
+        std::wstring m_pendingSearchQuery;
 
         void CloseTab(controls::TabViewItem const& tab);
         winrt::fire_and_forget CompleteDeferredPresentation();
@@ -542,6 +556,27 @@ namespace winrt::urPDF::implementation
         void StartNextPageTextLoad();
         void CompletePageTextLoad(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
             int32_t pageIndex, std::uint64_t requestId, urpdf::PageText text, bool loaded, std::exception_ptr error);
+        bool OwnsDocument(std::shared_ptr<PdfTabInfo> const& document, std::uint64_t documentId) const noexcept;
+        void CancelPendingSearchDebounce(std::shared_ptr<PdfTabInfo> const& document = nullptr) noexcept;
+        void CancelActiveSearchSession(std::shared_ptr<PdfTabInfo> const& document) noexcept;
+        void ScheduleDocumentSearch(std::shared_ptr<PdfTabInfo> const& document, std::wstring query);
+        void ExecutePendingDebouncedSearch();
+        void TriggerImmediateDocumentSearch(std::shared_ptr<PdfTabInfo> const& document, std::wstring_view query);
+        void StartDocumentSearch(std::shared_ptr<PdfTabInfo> const& document, std::wstring_view query);
+        void ClearDocumentSearch(std::shared_ptr<PdfTabInfo> const& document);
+        void CloseDocumentSearch(std::shared_ptr<PdfTabInfo> const& document);
+        void ResetPendingDocumentSearch(std::shared_ptr<PdfTabInfo> const& document) noexcept;
+        void ApplyDocumentSearchBatch(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
+            std::uint64_t requestId, std::vector<PageSearchBatch> batches);
+        void CompleteDocumentSearch(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
+            std::uint64_t requestId, bool completed, std::exception_ptr error);
+        int32_t CurrentSearchPageIndex(std::shared_ptr<PdfTabInfo> const& document);
+        void ScrollToSearchMatch(std::shared_ptr<PdfTabInfo> const& document, urpdf::SearchMatch const& match);
+        void NavigateToNextSearchMatch(std::shared_ptr<PdfTabInfo> const& document);
+        void NavigateToPreviousSearchMatch(std::shared_ptr<PdfTabInfo> const& document);
+        void RefreshPageSearchHighlights(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
+        void RefreshAllSearchHighlights(std::shared_ptr<PdfTabInfo> const& document);
+        void UpdateSearchBarStatus(std::shared_ptr<PdfTabInfo> const& document);
         void ResolvePendingTextPositions(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
         void UpdateWordTextSelection(std::shared_ptr<PdfTabInfo> const& document);
         std::shared_ptr<PdfTabInfo> SelectedPdfDocument();
