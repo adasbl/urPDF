@@ -21,7 +21,13 @@
                 Grid.RowSpan="2"
                 Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"/>
 
-        <Grid x:Name="MainWindowUI" Grid.Row="0" Grid.RowSpan="2">
+        <Grid x:Name="MainWindowUI" Grid.Row="0" Grid.RowSpan="2" KeyboardAcceleratorPlacementMode="Hidden">
+            <Grid.KeyboardAccelerators>
+                <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="FindInDocument_Invoked"/>
+                <KeyboardAccelerator Key="F3" Invoked="FindNext_Invoked"/>
+                <KeyboardAccelerator Key="F3" Modifiers="Shift" Invoked="FindPrevious_Invoked"/>
+                <KeyboardAccelerator Key="Escape" Invoked="ClearPdfSelection_Invoked"/>
+            </Grid.KeyboardAccelerators>
             <Grid.RowDefinitions>
                 <RowDefinition Height="40"/>
                 <RowDefinition Height="*"/>
@@ -249,6 +255,18 @@
 
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="4">
 
+                            <Button x:Name="SearchButton"
+                                    Click="SearchButton_Click"
+                                    IsEnabled="False"
+                                    AutomationProperties.Name="Find in document"
+                                    ToolTipService.ToolTip="Find in document (Ctrl+F)">
+                                <Button.Content>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon Glyph="&#xE721;"/>
+                                    </StackPanel>
+                                </Button.Content>
+                            </Button>
+
                             <Button x:Name="ZoomInButton" 
                                     Click="ZoomInButton_Click"
                                     ToolTipService.ToolTip="Zoom in">
@@ -339,7 +357,6 @@
 
                             <ScrollViewer.KeyboardAccelerators>
                                 <KeyboardAccelerator Key="C" Modifiers="Control" Invoked="CopyPdfText_Invoked"/>
-                                <KeyboardAccelerator Key="Escape" Invoked="ClearPdfSelection_Invoked"/>
                             </ScrollViewer.KeyboardAccelerators>
 
                             <ItemsRepeater x:Name="PagesRepeater"
@@ -444,6 +461,64 @@
                             </ItemsRepeater>
 
                         </ScrollViewer>
+
+                        <Border x:Name="SearchBar"
+                                Visibility="Collapsed"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Top"
+                                Margin="0,12,24,0"
+                                Padding="8,6"
+                                CornerRadius="8"
+                                Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                Canvas.ZIndex="10">
+                            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                <TextBox x:Name="SearchTextBox"
+                                         Width="220"
+                                         PlaceholderText="Find in document"
+                                         AutomationProperties.Name="Find in document"
+                                         TextChanged="SearchTextBox_TextChanged"
+                                         KeyDown="SearchTextBox_KeyDown"/>
+                                <ProgressRing x:Name="SearchProgressRing"
+                                              Width="16"
+                                              Height="16"
+                                              Margin="4,0,0,0"
+                                              IsActive="False"
+                                              Visibility="Collapsed"
+                                              VerticalAlignment="Center"/>
+                                <TextBlock x:Name="SearchStatusText"
+                                           MinWidth="64"
+                                           Margin="6,0,4,0"
+                                           VerticalAlignment="Center"
+                                           TextAlignment="Right"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           IsTextSelectionEnabled="False"/>
+                                <Button x:Name="SearchPreviousButton"
+                                        Click="SearchPreviousButton_Click"
+                                        IsEnabled="False"
+                                        Padding="6"
+                                        AutomationProperties.Name="Previous match"
+                                        ToolTipService.ToolTip="Previous match (Shift+Enter)">
+                                    <FontIcon Glyph="&#xE70E;" FontSize="12"/>
+                                </Button>
+                                <Button x:Name="SearchNextButton"
+                                        Click="SearchNextButton_Click"
+                                        IsEnabled="False"
+                                        Padding="6"
+                                        AutomationProperties.Name="Next match"
+                                        ToolTipService.ToolTip="Next match (Enter)">
+                                    <FontIcon Glyph="&#xE70D;" FontSize="12"/>
+                                </Button>
+                                <Button x:Name="SearchCloseButton"
+                                        Click="SearchCloseButton_Click"
+                                        Padding="6"
+                                        AutomationProperties.Name="Close search"
+                                        ToolTipService.ToolTip="Close (Esc)">
+                                    <FontIcon Glyph="&#xE711;" FontSize="12"/>
+                                </Button>
+                            </StackPanel>
+                        </Border>
 
                         <Border x:Name="EmptyTabDropZone"
                             AllowDrop="True"

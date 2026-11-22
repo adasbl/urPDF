@@ -396,6 +396,15 @@ namespace winrt::urPDF::implementation
         winrt::fire_and_forget PdfScrollViewer_ViewChanged(foundation::IInspectable const& sender, controls::ScrollViewerViewChangedEventArgs const& args);
         void CopyPdfText_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
         void ClearPdfSelection_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
+        void FindInDocument_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
+        void FindNext_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
+        void FindPrevious_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
+        void SearchButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
+        void SearchTextBox_TextChanged(foundation::IInspectable const& sender, controls::TextChangedEventArgs const& args);
+        void SearchTextBox_KeyDown(foundation::IInspectable const& sender, xaml::Input::KeyRoutedEventArgs const& args);
+        void SearchPreviousButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
+        void SearchNextButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
+        void SearchCloseButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         void PdfScrollViewer_Tapped(foundation::IInspectable const& sender, xaml::Input::TappedRoutedEventArgs const& args);
         void PdfScrollViewer_ContextRequested(xaml::UIElement const& sender, xaml::Input::ContextRequestedEventArgs const& args);
         void CopyImageMenuItem_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
@@ -505,6 +514,7 @@ namespace winrt::urPDF::implementation
         dispatching::DispatcherQueueTimer m_searchDebounceTimer{ nullptr };
         std::weak_ptr<PdfTabInfo> m_pendingSearchTab;
         std::wstring m_pendingSearchQuery;
+        bool m_isSyncingSearchText{ false };
 
         void CloseTab(controls::TabViewItem const& tab);
         winrt::fire_and_forget CompleteDeferredPresentation();
@@ -578,6 +588,11 @@ namespace winrt::urPDF::implementation
         void RefreshPageSearchHighlights(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
         void RefreshAllSearchHighlights(std::shared_ptr<PdfTabInfo> const& document);
         void UpdateSearchBarStatus(std::shared_ptr<PdfTabInfo> const& document);
+        bool CanUseDocumentSearch();
+        bool IsFocusInsideElement(xaml::DependencyObject const& container);
+        void OpenSearchBar();
+        void CloseSearchBar();
+        void SyncSearchBarToDocument(std::shared_ptr<PdfTabInfo> const& document);
         void ResolvePendingTextPositions(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
         void UpdateWordTextSelection(std::shared_ptr<PdfTabInfo> const& document);
         std::shared_ptr<PdfTabInfo> SelectedPdfDocument();

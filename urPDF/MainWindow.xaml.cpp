@@ -60,6 +60,7 @@ extern "C" {
 #include <winrt/Microsoft.UI.Xaml.Printing.h>
 #include <winrt/Microsoft.UI.Windowing.h>
 #include <winrt/Microsoft.UI.Input.h>
+#include <winrt/Windows.UI.Core.h>
 #include <winrt/Windows.UI.Xaml.Interop.h>
 
 #pragma comment(lib, "dwmapi.lib")
@@ -1446,6 +1447,7 @@ namespace winrt::urPDF::implementation
             {
                 SaveViewState(removedEntry->second);
                 CancelSelectionCopy(removedEntry->second);
+                CancelPendingSearchDebounce(removedEntry->second);
             }
         }
         ClearPageOverlays();
@@ -1472,6 +1474,7 @@ namespace winrt::urPDF::implementation
         if (pdfInfo)
         {
             RestoreViewState(pdfInfo);
+            SyncSearchBarToDocument(pdfInfo);
             return;
         }
 
@@ -1481,6 +1484,7 @@ namespace winrt::urPDF::implementation
         m_pageRepeaterItems = nullptr;
 
         EmptyTabDropZone().Visibility(currentTab ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+        SyncSearchBarToDocument(nullptr);
         DisplayPageNumber(0);
         DisplayPageCount(0);
         PagesLayout().PageSizes(nullptr);
@@ -2356,6 +2360,7 @@ namespace winrt::urPDF::implementation
             targetTab.IconSource(tabIcon);
             m_openedTabs[targetTab] = pdfTab;
             RestoreViewState(pdfTab);
+            SyncSearchBarToDocument(pdfTab);
             ReleaseRenderingLock();
             if (!m_viewStateGuard.IsPending()) { RenderVisiblePagesAsync(); }
         }
@@ -3471,6 +3476,10 @@ namespace winrt::urPDF::implementation
             }
             if (state == urpdf::SearchStatus::searching)
             {
+                if (document->m_search.MatchCount() > 0)
+                {
+                    NavigateToNextSearchMatch(document);
+                }
                 return;
             }
         }
@@ -3862,9 +3871,265 @@ namespace winrt::urPDF::implementation
         }
     }
 
-    void MainWindow::UpdateSearchBarStatus(std::shared_ptr<PdfTabInfo> const&)
+    void MainWindow::UpdateSearchBarStatus(std::shared_ptr<PdfTabInfo> const& document)
     {
-        // Search bar UI status display is wired in step 1.5.
+        if (m_isClosed || !document || document != SelectedPdfDocument()) { return; }
+
+        const auto state = document->m_search.State();
+        const std::size_t total = document->m_search.MatchCount();
+        const auto active = document->m_search.ActiveMatchIndex();
+        const bool isSearching = state == urpdf::SearchStatus::searching;
+
+        SearchProgressRing().IsActive(isSearching);
+        SearchProgressRing().Visibility(isSearching ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+
+        std::wstring statusText;
+        if (total > 0)
+        {
+            if (active)
+            {
+                statusText = std::to_wstring(*active + 1) + L" of " + std::to_wstring(total);
+            }
+            else
+            {
+                statusText = std::to_wstring(total);
+            }
+        }
+        else if (isSearching)
+        {
+            statusText = L"Searching...";
+        }
+        else if (state == urpdf::SearchStatus::ready)
+        {
+            statusText = L"No results";
+        }
+        else if (state == urpdf::SearchStatus::failed)
+        {
+            statusText = L"Search failed";
+        }
+
+        SearchStatusText().Text(statusText);
+        const bool canNavigate = total > 0;
+        SearchPreviousButton().IsEnabled(canNavigate);
+        SearchNextButton().IsEnabled(canNavigate);
+    }
+
+    bool MainWindow::CanUseDocumentSearch()
+    {
+        if (m_isClosed
+            || SettingsOverlay().Visibility() == xaml::Visibility::Visible
+            || RootFrame().Visibility() == xaml::Visibility::Visible)
+        {
+            return false;
+        }
+        auto document = SelectedPdfDocument();
+        return document && document->m_layoutLoaded;
+    }
+
+    bool MainWindow::IsFocusInsideElement(xaml::DependencyObject const& container)
+    {
+        if (m_isClosed || !container) { return false; }
+        auto root = MainWindowUI().XamlRoot();
+        if (!root) { return false; }
+        auto focused = xaml::Input::FocusManager::GetFocusedElement(root).try_as<xaml::DependencyObject>();
+        while (focused)
+        {
+            if (focused == container) { return true; }
+            focused = media::VisualTreeHelper::GetParent(focused);
+        }
+        return false;
+    }
+
+    void MainWindow::SyncSearchBarToDocument(std::shared_ptr<PdfTabInfo> const& document)
+    {
+        if (m_isClosed) { return; }
+
+        if (!document || !document->m_layoutLoaded)
+        {
+            SearchButton().IsEnabled(false);
+            SearchBar().Visibility(xaml::Visibility::Collapsed);
+            m_isSyncingSearchText = true;
+            SearchTextBox().Text(L"");
+            m_isSyncingSearchText = false;
+            SearchProgressRing().IsActive(false);
+            SearchProgressRing().Visibility(xaml::Visibility::Collapsed);
+            SearchStatusText().Text(L"");
+            SearchPreviousButton().IsEnabled(false);
+            SearchNextButton().IsEnabled(false);
+            return;
+        }
+
+        SearchButton().IsEnabled(true);
+        SearchBar().Visibility(document->m_searchBarOpen ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+
+        std::wstring const& queryText = !document->m_searchDraftQuery.empty()
+            ? document->m_searchDraftQuery
+            : document->m_search.Query();
+        if (std::wstring_view{ SearchTextBox().Text() } != queryText)
+        {
+            m_isSyncingSearchText = true;
+            SearchTextBox().Text(queryText);
+            m_isSyncingSearchText = false;
+        }
+
+        if (document->m_searchBarOpen
+            && document->m_search.State() == urpdf::SearchStatus::idle
+            && !urpdf::IsBlankSearchQuery(queryText))
+        {
+            StartDocumentSearch(document, queryText);
+            return;
+        }
+
+        UpdateSearchBarStatus(document);
+    }
+
+    void MainWindow::OpenSearchBar()
+    {
+        if (!CanUseDocumentSearch()) { return; }
+        auto document = SelectedPdfDocument();
+        if (!document) { return; }
+
+        document->m_searchBarOpen = true;
+        SyncSearchBarToDocument(document);
+        if (SearchTextBox().Focus(xaml::FocusState::Programmatic))
+        {
+            SearchTextBox().SelectAll();
+        }
+        else
+        {
+            DispatcherQueue().TryEnqueue([weakThis = get_weak()]()
+            {
+                if (auto self = weakThis.get(); self && !self->m_isClosed
+                    && self->SearchBar().Visibility() == xaml::Visibility::Visible)
+                {
+                    self->SearchTextBox().Focus(xaml::FocusState::Programmatic);
+                    self->SearchTextBox().SelectAll();
+                }
+            });
+        }
+    }
+
+    void MainWindow::CloseSearchBar()
+    {
+        if (m_isClosed) { return; }
+        if (auto document = SelectedPdfDocument())
+        {
+            CloseDocumentSearch(document);
+        }
+        SearchBar().Visibility(xaml::Visibility::Collapsed);
+        m_isSyncingSearchText = true;
+        SearchTextBox().Text(L"");
+        m_isSyncingSearchText = false;
+        SearchProgressRing().IsActive(false);
+        SearchProgressRing().Visibility(xaml::Visibility::Collapsed);
+        SearchStatusText().Text(L"");
+        SearchPreviousButton().IsEnabled(false);
+        SearchNextButton().IsEnabled(false);
+        PdfScrollViewer().Focus(xaml::FocusState::Programmatic);
+    }
+
+    void MainWindow::SearchButton_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        OpenSearchBar();
+    }
+
+    void MainWindow::FindInDocument_Invoked(xaml::Input::KeyboardAccelerator const&,
+        xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args)
+    {
+        if (!CanUseDocumentSearch()) { return; }
+        OpenSearchBar();
+        args.Handled(true);
+    }
+
+    void MainWindow::FindNext_Invoked(xaml::Input::KeyboardAccelerator const&,
+        xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args)
+    {
+        if (!CanUseDocumentSearch()) { return; }
+        auto document = SelectedPdfDocument();
+        if (!document || !document->m_searchBarOpen) { return; }
+
+        std::wstring query{ SearchTextBox().Text() };
+        TriggerImmediateDocumentSearch(document, query);
+        args.Handled(true);
+    }
+
+    void MainWindow::FindPrevious_Invoked(xaml::Input::KeyboardAccelerator const&,
+        xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args)
+    {
+        if (!CanUseDocumentSearch()) { return; }
+        auto document = SelectedPdfDocument();
+        if (!document || !document->m_searchBarOpen) { return; }
+
+        std::wstring query{ SearchTextBox().Text() };
+        const auto state = document->m_search.State();
+        if (document->m_search.Query() == query
+            && (state == urpdf::SearchStatus::ready
+                || (state == urpdf::SearchStatus::searching && document->m_search.MatchCount() > 0)))
+        {
+            NavigateToPreviousSearchMatch(document);
+        }
+        else
+        {
+            TriggerImmediateDocumentSearch(document, query);
+        }
+        args.Handled(true);
+    }
+
+    void MainWindow::SearchTextBox_TextChanged(foundation::IInspectable const&, controls::TextChangedEventArgs const&)
+    {
+        if (m_isClosed || m_isSyncingSearchText) { return; }
+        auto document = SelectedPdfDocument();
+        if (!document || !document->m_searchBarOpen) { return; }
+
+        std::wstring query{ SearchTextBox().Text() };
+        ScheduleDocumentSearch(document, std::move(query));
+    }
+
+    void MainWindow::SearchTextBox_KeyDown(foundation::IInspectable const&, xaml::Input::KeyRoutedEventArgs const& args)
+    {
+        if (m_isClosed || args.Key() != winrt::Windows::System::VirtualKey::Enter) { return; }
+        auto document = SelectedPdfDocument();
+        if (!document || !document->m_searchBarOpen) { return; }
+
+        const auto shiftState = winrt::Microsoft::UI::Input::InputKeyboardSource::GetKeyStateForCurrentThread(
+            winrt::Windows::System::VirtualKey::Shift);
+        const bool shiftPressed = (shiftState & winrt::Windows::UI::Core::CoreVirtualKeyStates::Down)
+            == winrt::Windows::UI::Core::CoreVirtualKeyStates::Down;
+
+        std::wstring query{ SearchTextBox().Text() };
+        const auto state = document->m_search.State();
+        if (shiftPressed && document->m_search.Query() == query
+            && (state == urpdf::SearchStatus::ready
+                || (state == urpdf::SearchStatus::searching && document->m_search.MatchCount() > 0)))
+        {
+            NavigateToPreviousSearchMatch(document);
+        }
+        else
+        {
+            TriggerImmediateDocumentSearch(document, query);
+        }
+        args.Handled(true);
+    }
+
+    void MainWindow::SearchPreviousButton_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        if (auto document = SelectedPdfDocument())
+        {
+            NavigateToPreviousSearchMatch(document);
+        }
+    }
+
+    void MainWindow::SearchNextButton_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        if (auto document = SelectedPdfDocument())
+        {
+            NavigateToNextSearchMatch(document);
+        }
+    }
+
+    void MainWindow::SearchCloseButton_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        CloseSearchBar();
     }
 
     void MainWindow::ResolvePendingTextPositions(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex)
@@ -4372,9 +4637,28 @@ namespace winrt::urPDF::implementation
 
     void MainWindow::ClearPdfSelection_Invoked(xaml::Input::KeyboardAccelerator const&, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args)
     {
-        if (auto document = m_presentedTab.lock(); document
-            && (document->m_textSelection || document->m_wordSelectionPoints
-                || document->m_selectedImage || document->m_pendingImageClick))
+        if (m_isClosed
+            || SettingsOverlay().Visibility() == xaml::Visibility::Visible
+            || RootFrame().Visibility() == xaml::Visibility::Visible)
+        {
+            return;
+        }
+
+        auto document = SelectedPdfDocument();
+        if (!document) { document = m_presentedTab.lock(); }
+        if (!document) { return; }
+
+        const bool hasSelection = document->m_textSelection || document->m_wordSelectionPoints
+            || document->m_selectedImage || document->m_pendingImageClick;
+
+        if (document->m_searchBarOpen && (IsFocusInsideElement(SearchBar()) || !hasSelection))
+        {
+            CloseSearchBar();
+            args.Handled(true);
+            return;
+        }
+
+        if (hasSelection)
         {
             ClearPageTextSelection(document);
             ClearPageImageSelection(document);
