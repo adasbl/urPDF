@@ -64,14 +64,17 @@
     <ClCompile Include="ExternalUriPolicyTests.cpp" />
     <ClCompile Include="PageLinksStateTests.cpp" />
     <ClCompile Include="PageImagesStateTests.cpp" />
+    <ClCompile Include="PageSearchTests.cpp" />
     <ClCompile Include="PageTextStateTests.cpp" />
     <ClCompile Include="..\urPDF\ExternalUriPolicy.cpp" />
     <ClCompile Include="..\urPDF\PageLinks.cpp" />
     <ClCompile Include="..\urPDF\PageImages.cpp" />
+    <ClCompile Include="..\urPDF\PageSearch.cpp" />
     <ClCompile Include="..\urPDF\PageText.cpp" />
     <ClInclude Include="..\urPDF\ExternalUriPolicy.h" />
     <ClInclude Include="..\urPDF\PageLinks.h" />
     <ClInclude Include="..\urPDF\PageImages.h" />
+    <ClInclude Include="..\urPDF\PageSearch.h" />
     <ClInclude Include="..\urPDF\PageText.h" />
     <ClCompile Include="DocumentOperationTests.cpp" />
     <ClCompile Include="BackgroundWorkTests.cpp" />

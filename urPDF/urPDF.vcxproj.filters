@@ -24,6 +24,7 @@
     <ClCompile Include="ExternalUriPolicy.cpp" />
     <ClCompile Include="PageLinks.cpp" />
     <ClCompile Include="PageImages.cpp" />
+    <ClCompile Include="PageSearch.cpp" />
     <ClCompile Include="PageText.cpp" />
     <ClCompile Include="LinkHitArea.cpp" />
     <ClCompile Include="TextSelectionLayer.cpp" />
@@ -54,6 +55,7 @@
     <ClInclude Include="ExternalUriPolicy.h" />
     <ClInclude Include="PageLinks.h" />
     <ClInclude Include="PageImages.h" />
+    <ClInclude Include="PageSearch.h" />
     <ClInclude Include="PageText.h" />
     <ClInclude Include="LinkHitArea.h" />
     <ClInclude Include="TextSelectionLayer.h" />

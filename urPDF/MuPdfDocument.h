@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PageLinks.h"
+#include "PageSearch.h"
 #include "PageText.h"
 
 extern "C" {
@@ -20,5 +21,6 @@ namespace urpdf
     std::vector<fz_rect> CollectPageBounds(fz_context* ctx, fz_document* document, int pageCount);
     std::vector<PageLink> CollectPageLinks(fz_context* ctx, fz_document* document, int pageIndex);
     PageText LoadPageText(fz_context* ctx, fz_document* document, int pageIndex);
+    std::vector<SearchMatch> SearchPage(fz_context* ctx, fz_document* document, int pageIndex, char const* utf8Needle);
     std::vector<std::uint8_t> ExtractPageImagePng(fz_context* ctx, fz_document* document, int pageIndex, std::uint32_t imageIndex);
 }
