@@ -284,6 +284,67 @@ namespace
         }
         return page;
     }
+
+    bool IsUnicodeWhitespace(int codepoint) noexcept
+    {
+        return (codepoint >= 0x0009 && codepoint <= 0x000D)
+            || codepoint == 0x0020
+            || codepoint == 0x0085
+            || codepoint == 0x00A0
+            || codepoint == 0x1680
+            || (codepoint >= 0x2000 && codepoint <= 0x200A)
+            || codepoint == 0x2028
+            || codepoint == 0x2029
+            || codepoint == 0x202F
+            || codepoint == 0x205F
+            || codepoint == 0x3000;
+    }
+
+    bool IsBlankUtf8Needle(char const* utf8Needle) noexcept
+    {
+        if (!utf8Needle || !*utf8Needle) { return true; }
+        char const* cursor = utf8Needle;
+        while (*cursor)
+        {
+            int rune = 0;
+            const int step = fz_chartorune(&rune, cursor);
+            if (step <= 0) { return false; }
+            if (!IsUnicodeWhitespace(rune)) { return false; }
+            cursor += step;
+        }
+        return true;
+    }
+
+    // Keep MuPDF's longjmp frame free of C++ owners; page is always dropped.
+    int SearchPageQuads(
+        fz_context* ctx,
+        fz_document* document,
+        int pageIndex,
+        char const* utf8Needle,
+        int* hitMarks,
+        fz_quad* hitQuads,
+        int hitMax,
+        fz_rect* pageBounds)
+    {
+        fz_page* page = nullptr;
+        int hitCount = 0;
+        fz_var(page);
+        fz_try(ctx)
+        {
+            page = fz_load_page(ctx, document, pageIndex);
+            if (pageBounds) { *pageBounds = fz_bound_page(ctx, page); }
+            hitCount = fz_search_page(ctx, page, utf8Needle, hitMarks, hitQuads, hitMax);
+        }
+        fz_always(ctx)
+        {
+            fz_drop_page(ctx, page);
+        }
+        fz_catch(ctx)
+        {
+            ThrowMuPdfError(ctx);
+        }
+        return hitCount;
+    }
 }
 
 namespace urpdf
@@ -407,6 +468,66 @@ namespace urpdf
             ++blockIndex;
         }
         return result;
+    }
+
+    std::vector<SearchMatch> SearchPage(fz_context* ctx, fz_document* document, int pageIndex, char const* utf8Needle)
+    {
+        if (IsBlankUtf8Needle(utf8Needle)) { return {}; }
+
+        constexpr int kInitialHitCapacity = 256;
+        constexpr int kMaxHitCapacity = 65536;
+
+        int capacity = kInitialHitCapacity;
+        std::vector<int> hitMarks;
+        std::vector<fz_quad> hitQuads;
+        fz_rect bounds{};
+        int hitCount = 0;
+
+        while (true)
+        {
+            hitMarks.resize(static_cast<std::size_t>(capacity));
+            hitQuads.resize(static_cast<std::size_t>(capacity));
+            hitCount = SearchPageQuads(ctx, document, pageIndex, utf8Needle,
+                hitMarks.data(), hitQuads.data(), capacity, &bounds);
+            if (hitCount < capacity || capacity >= kMaxHitCapacity)
+            {
+                break;
+            }
+            capacity = (std::min)(capacity * 2, kMaxHitCapacity);
+        }
+
+        const int safeCount = std::clamp(hitCount, 0, capacity);
+        const PdfPageBounds pageBounds{ bounds.x0, bounds.y0, bounds.x1, bounds.y1 };
+        std::vector<SearchMatch> matches;
+        std::optional<int> currentMark;
+        std::vector<PdfPageBounds> currentRects;
+
+        auto flushMatch = [&]()
+            {
+                if (!currentRects.empty())
+                {
+                    matches.push_back(SearchMatch{ pageIndex, std::move(currentRects) });
+                    currentRects.clear();
+                }
+            };
+
+        for (int i = 0; i < safeCount; ++i)
+        {
+            const int mark = hitMarks[static_cast<std::size_t>(i)];
+            if (currentMark && *currentMark != mark)
+            {
+                flushMatch();
+            }
+            currentMark = mark;
+
+            const fz_rect rect = fz_rect_from_quad(hitQuads[static_cast<std::size_t>(i)]);
+            if (const auto clipped = TryClipSearchRect({ rect.x0, rect.y0, rect.x1, rect.y1 }, pageBounds))
+            {
+                currentRects.push_back(*clipped);
+            }
+        }
+        flushMatch();
+        return matches;
     }
 
     std::vector<std::uint8_t> ExtractPageImagePng(fz_context* ctx, fz_document* document, int pageIndex, std::uint32_t imageIndex)
