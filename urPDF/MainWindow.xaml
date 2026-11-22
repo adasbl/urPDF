@@ -319,7 +319,23 @@
                             HorizontalScrollBarVisibility="Auto"
                             VerticalScrollBarVisibility="Auto"
                             Tapped="PdfScrollViewer_Tapped"
+                            ContextRequested="PdfScrollViewer_ContextRequested"
                             ViewChanged="PdfScrollViewer_ViewChanged">
+
+                            <ScrollViewer.Resources>
+                                <MenuFlyout x:Key="DocumentContextMenu" x:Name="DocumentContextMenu">
+                                    <MenuFlyoutItem x:Name="CopyImageMenuItem" Text="Copy image" Click="CopyImageMenuItem_Click">
+                                        <MenuFlyoutItem.Icon>
+                                            <SymbolIcon Symbol="Copy"/>
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem x:Name="SaveImageAsMenuItem" Text="Save image as..." Click="SaveImageAsMenuItem_Click">
+                                        <MenuFlyoutItem.Icon>
+                                            <SymbolIcon Symbol="Save"/>
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                </MenuFlyout>
+                            </ScrollViewer.Resources>
 
                             <ScrollViewer.KeyboardAccelerators>
                                 <KeyboardAccelerator Key="C" Modifiers="Control" Invoked="CopyPdfText_Invoked"/>
@@ -358,6 +374,18 @@
                                                     <local:TextSelectionLayer.Clip>
                                                         <RectangleGeometry Rect="0,0,0,0"/>
                                                     </local:TextSelectionLayer.Clip>
+                                                    <Canvas IsHitTestVisible="False">
+                                                        <Canvas.Resources>
+                                                            <Style x:Key="PageImageSelectionBorderStyle" TargetType="Border">
+                                                                <Setter Property="BorderBrush" Value="{ThemeResource AccentFillColorDefaultBrush}"/>
+                                                                <Setter Property="BorderThickness" Value="2"/>
+                                                            </Style>
+                                                            <Style x:Key="PageImageSelectionFillStyle" TargetType="Rectangle">
+                                                                <Setter Property="Fill" Value="{ThemeResource AccentFillColorDefaultBrush}"/>
+                                                                <Setter Property="Opacity" Value="0.22"/>
+                                                            </Style>
+                                                        </Canvas.Resources>
+                                                    </Canvas>
                                                     <Canvas IsHitTestVisible="False">
                                                         <Canvas.Resources>
                                                             <Style x:Key="PageSelectionRectangleStyle" TargetType="Rectangle">

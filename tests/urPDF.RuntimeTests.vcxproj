@@ -57,12 +57,15 @@
   <ItemGroup>
     <ClCompile Include="MuPdfDocumentTests.cpp" />
     <ClCompile Include="PageLinksTests.cpp" />
+    <ClCompile Include="PageImagesTests.cpp" />
     <ClCompile Include="PageTextTests.cpp" />
     <ClCompile Include="..\urPDF\ExternalUriPolicy.cpp" />
     <ClCompile Include="..\urPDF\PageLinks.cpp" />
+    <ClCompile Include="..\urPDF\PageImages.cpp" />
     <ClCompile Include="..\urPDF\PageText.cpp" />
     <ClInclude Include="..\urPDF\ExternalUriPolicy.h" />
     <ClInclude Include="..\urPDF\PageLinks.h" />
+    <ClInclude Include="..\urPDF\PageImages.h" />
     <ClInclude Include="..\urPDF\PageText.h" />
     <ClCompile Include="MuPdfRuntimeTests.cpp" />
     <ClCompile Include="..\urPDF\MuPdfDocument.cpp" />
