@@ -272,6 +272,7 @@ namespace
         controls::Image image{ nullptr };
         winrt::urPDF::TextSelectionLayer selection{ nullptr };
         controls::Canvas imageAreas{ nullptr };
+        controls::Canvas searchHighlights{ nullptr };
         controls::Canvas highlights{ nullptr };
         controls::Canvas overlay{ nullptr };
     };
@@ -287,11 +288,12 @@ namespace
         auto image = content.Children().GetAt(0).try_as<controls::Image>();
         auto selection = content.Children().GetAt(1).try_as<winrt::urPDF::TextSelectionLayer>();
         auto overlay = content.Children().GetAt(2).try_as<controls::Canvas>();
-        const bool hasSelectionCanvases = selection && selection.Children().Size() == 2;
+        const bool hasSelectionCanvases = selection && selection.Children().Size() == 3;
         auto imageAreas = hasSelectionCanvases ? selection.Children().GetAt(0).try_as<controls::Canvas>() : nullptr;
-        auto highlights = hasSelectionCanvases ? selection.Children().GetAt(1).try_as<controls::Canvas>() : nullptr;
-        if (!image || !imageAreas || !highlights || !overlay) { return std::nullopt; }
-        return PageElementParts{ border, content, image, selection, imageAreas, highlights, overlay };
+        auto searchHighlights = hasSelectionCanvases ? selection.Children().GetAt(1).try_as<controls::Canvas>() : nullptr;
+        auto highlights = hasSelectionCanvases ? selection.Children().GetAt(2).try_as<controls::Canvas>() : nullptr;
+        if (!image || !imageAreas || !searchHighlights || !highlights || !overlay) { return std::nullopt; }
+        return PageElementParts{ border, content, image, selection, imageAreas, searchHighlights, highlights, overlay };
     }
 
     xaml::UIElement GetPageElementForTextSelectionLayer(winrt::urPDF::TextSelectionLayer const& layer)
@@ -346,12 +348,14 @@ namespace
     void ClearPageOverlay(PageElementParts const& parts, winrt::urPDF::implementation::PageOverlayElement* entry)
     {
         parts.imageAreas.Children().Clear();
+        parts.searchHighlights.Children().Clear();
         parts.highlights.Children().Clear();
         parts.overlay.Children().Clear();
         if (entry)
         {
             entry->linkAreasBuilt = false;
             entry->imageAreasBuilt = false;
+            entry->searchHighlightsBuilt = false;
             entry->selectionBuilt = false;
         }
     }
@@ -425,6 +429,54 @@ namespace
                 area.Child(nullptr);
             }
             ++count;
+        }
+        while (children.Size() > count) { children.RemoveAtEnd(); }
+    }
+
+    void DrawPageSearchMatches(controls::Canvas const& canvas, urpdf::PageCoordinateMapping const& mapping,
+        winrt::urPDF::implementation::PdfTabInfo const& document, int32_t pageIndex)
+    {
+        auto children = canvas.Children();
+        const auto range = document.m_search.PageMatchesRange(pageIndex);
+        if (range.Empty())
+        {
+            children.Clear();
+            return;
+        }
+
+        const auto matchStyle = canvas.Resources().Lookup(winrt::box_value(L"PageSearchMatchRectangleStyle")).as<xaml::Style>();
+        const auto activeStyle = canvas.Resources().Lookup(winrt::box_value(L"PageActiveSearchMatchRectangleStyle")).as<xaml::Style>();
+        auto const& matches = document.m_search.Matches();
+        const auto activeIndex = document.m_search.ActiveMatchIndex();
+        const std::size_t end = (std::min)(range.end, matches.size());
+
+        std::uint32_t count = 0;
+        for (std::size_t matchIndex = range.begin; matchIndex < end; ++matchIndex)
+        {
+            const bool isActive = activeIndex && *activeIndex == matchIndex;
+            auto const& style = isActive ? activeStyle : matchStyle;
+            for (auto const& bounds : matches[matchIndex].rects)
+            {
+                const auto rect = mapping.PdfToElementRect(bounds);
+                if (!rect) { continue; }
+
+                auto highlight = count < children.Size()
+                    ? children.GetAt(count).as<xaml::Shapes::Rectangle>() : nullptr;
+                if (!highlight)
+                {
+                    highlight = xaml::Shapes::Rectangle();
+                    children.Append(highlight);
+                }
+                if (highlight.Style() != style)
+                {
+                    highlight.Style(style);
+                }
+                highlight.Width(rect->width);
+                highlight.Height(rect->height);
+                controls::Canvas::SetLeft(highlight, rect->x);
+                controls::Canvas::SetTop(highlight, rect->y);
+                ++count;
+            }
         }
         while (children.Size() > count) { children.RemoveAtEnd(); }
     }
@@ -2961,6 +3013,11 @@ namespace winrt::urPDF::implementation
             DrawPageImageAreas(parts->imageAreas, *mapping, *document, binding.pageIndex);
             entry.imageAreasBuilt = true;
         }
+        if (!entry.searchHighlightsBuilt)
+        {
+            DrawPageSearchMatches(parts->searchHighlights, *mapping, *document, binding.pageIndex);
+            entry.searchHighlightsBuilt = true;
+        }
         if (!entry.selectionBuilt)
         {
             DrawPageSelection(parts->highlights, *mapping, *document, binding.pageIndex);
@@ -3772,14 +3829,37 @@ namespace winrt::urPDF::implementation
         UpdateSearchBarStatus(document);
     }
 
-    void MainWindow::RefreshPageSearchHighlights(std::shared_ptr<PdfTabInfo> const&, int32_t)
+    void MainWindow::RefreshPageSearchHighlights(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex)
     {
-        // Search overlay rendering is wired in step 1.4.
+        if (m_isClosed || !document || pageIndex < 0) { return; }
+        auto element = PagesRepeater().TryGetElement(pageIndex);
+        auto found = m_pageOverlays.find(element);
+        if (found == m_pageOverlays.end() || found->second->document.lock() != document) { return; }
+        if (const auto binding = found->second->state.CurrentBinding())
+        {
+            found->second->searchHighlightsBuilt = false;
+            RefreshPageOverlay(element, *binding);
+        }
     }
 
-    void MainWindow::RefreshAllSearchHighlights(std::shared_ptr<PdfTabInfo> const&)
+    void MainWindow::RefreshAllSearchHighlights(std::shared_ptr<PdfTabInfo> const& document)
     {
-        // Search overlay rendering is wired in step 1.4.
+        if (m_isClosed || !document) { return; }
+        std::vector<std::pair<xaml::UIElement, urpdf::PageOverlayState::Binding>> targets;
+        targets.reserve(m_pageOverlays.size());
+        for (auto const& [element, entry] : m_pageOverlays)
+        {
+            if (entry->document.lock() != document) { continue; }
+            if (const auto binding = entry->state.CurrentBinding())
+            {
+                entry->searchHighlightsBuilt = false;
+                targets.emplace_back(element, *binding);
+            }
+        }
+        for (auto const& [element, binding] : targets)
+        {
+            RefreshPageOverlay(element, binding);
+        }
     }
 
     void MainWindow::UpdateSearchBarStatus(std::shared_ptr<PdfTabInfo> const&)

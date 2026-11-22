@@ -388,6 +388,40 @@
                                                     </Canvas>
                                                     <Canvas IsHitTestVisible="False">
                                                         <Canvas.Resources>
+                                                            <ResourceDictionary>
+                                                                <ResourceDictionary.ThemeDictionaries>
+                                                                    <ResourceDictionary x:Key="Default">
+                                                                        <SolidColorBrush x:Key="PageSearchMatchFillBrush" Color="#FFFFD43B"/>
+                                                                        <SolidColorBrush x:Key="PageActiveSearchMatchFillBrush" Color="#FFFF922B"/>
+                                                                        <SolidColorBrush x:Key="PageActiveSearchMatchStrokeBrush" Color="#FFFFA94D"/>
+                                                                    </ResourceDictionary>
+                                                                    <ResourceDictionary x:Key="Light">
+                                                                        <SolidColorBrush x:Key="PageSearchMatchFillBrush" Color="#FFF7C600"/>
+                                                                        <SolidColorBrush x:Key="PageActiveSearchMatchFillBrush" Color="#FFFF8C00"/>
+                                                                        <SolidColorBrush x:Key="PageActiveSearchMatchStrokeBrush" Color="#FFD96600"/>
+                                                                    </ResourceDictionary>
+                                                                    <ResourceDictionary x:Key="HighContrast">
+                                                                        <StaticResource x:Key="PageSearchMatchFillBrush" ResourceKey="SystemColorHighlightColorBrush"/>
+                                                                        <StaticResource x:Key="PageActiveSearchMatchFillBrush" ResourceKey="SystemColorHighlightColorBrush"/>
+                                                                        <StaticResource x:Key="PageActiveSearchMatchStrokeBrush" ResourceKey="SystemColorHighlightTextColorBrush"/>
+                                                                    </ResourceDictionary>
+                                                                </ResourceDictionary.ThemeDictionaries>
+                                                                <Style x:Key="PageSearchMatchRectangleStyle" TargetType="Rectangle">
+                                                                    <Setter Property="Fill" Value="{ThemeResource PageSearchMatchFillBrush}"/>
+                                                                    <Setter Property="Opacity" Value="0.38"/>
+                                                                    <Setter Property="StrokeThickness" Value="0"/>
+                                                                </Style>
+                                                                <Style x:Key="PageActiveSearchMatchRectangleStyle" TargetType="Rectangle">
+                                                                    <Setter Property="Fill" Value="{ThemeResource PageActiveSearchMatchFillBrush}"/>
+                                                                    <Setter Property="Opacity" Value="0.58"/>
+                                                                    <Setter Property="Stroke" Value="{ThemeResource PageActiveSearchMatchStrokeBrush}"/>
+                                                                    <Setter Property="StrokeThickness" Value="1.5"/>
+                                                                </Style>
+                                                            </ResourceDictionary>
+                                                        </Canvas.Resources>
+                                                    </Canvas>
+                                                    <Canvas IsHitTestVisible="False">
+                                                        <Canvas.Resources>
                                                             <Style x:Key="PageSelectionRectangleStyle" TargetType="Rectangle">
                                                                 <Setter Property="Fill" Value="{ThemeResource AccentFillColorDefaultBrush}"/>
                                                                 <Setter Property="Opacity" Value="0.35"/>

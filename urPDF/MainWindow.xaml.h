@@ -295,6 +295,7 @@ namespace winrt::urPDF::implementation
         xaml::FrameworkElement::SizeChanged_revoker sizeChangedRevoker;
         bool linkAreasBuilt{ false };
         bool imageAreasBuilt{ false };
+        bool searchHighlightsBuilt{ false };
         bool selectionBuilt{ false };
     };
 
