@@ -204,22 +204,24 @@ jobs:
           Copy-Item -LiteralPath $store.FullName -Destination out/release/
 
       - name: Upload MSI installer
+        if: steps.release.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7
         with:
           name: msi-installer
           path: out/release/*.msi
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 7
 
       # Submit this file in Partner Center. Its manifest Identity must match the reserved
       # Store name and publisher (Package.appxmanifest) before the first submission.
       - name: Upload Microsoft Store package
+        if: steps.release.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7
         with:
           name: msix-store-upload
           path: out/release/*.msixupload
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 14
 
       - name: Summarize test results
         if: always()
@@ -240,7 +242,7 @@ jobs:
             out/ci/logs
             out/ci/test-results
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 5
 
   release:
     name: Publish GitHub Release
