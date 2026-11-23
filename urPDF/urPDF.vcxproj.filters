@@ -11,6 +11,8 @@
   <ItemGroup>
     <Midl Include="MainWindow.idl" />
     <Midl Include="PdfPageLayout.idl" />
+    <Midl Include="LinkHitArea.idl" />
+    <Midl Include="TextSelectionLayer.idl" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp" />
@@ -19,9 +21,18 @@
     <ClCompile Include="ActivationArguments.cpp" />
     <ClCompile Include="AppSettings.cpp" />
     <ClCompile Include="MuPdfDocument.cpp" />
+    <ClCompile Include="ExternalUriPolicy.cpp" />
+    <ClCompile Include="PageLinks.cpp" />
+    <ClCompile Include="PageImages.cpp" />
+    <ClCompile Include="PageSearch.cpp" />
+    <ClCompile Include="PageText.cpp" />
+    <ClCompile Include="LinkHitArea.cpp" />
+    <ClCompile Include="TextSelectionLayer.cpp" />
     <ClCompile Include="MuPdfRuntime.cpp" />
     <ClCompile Include="DocumentViewState.cpp" />
     <ClCompile Include="PageLayoutGeometry.cpp" />
+    <ClCompile Include="PageCoordinateGeometry.cpp" />
+    <ClCompile Include="PageCoordinateMapping.cpp" />
     <ClCompile Include="SettingsStore.cpp" />
     <ClCompile Include="CommandLine.cpp" />
   </ItemGroup>
@@ -30,6 +41,9 @@
     <ClInclude Include="PdfRenderScale.h" />
     <ClInclude Include="DocumentViewState.h" />
     <ClInclude Include="PageLayoutGeometry.h" />
+    <ClInclude Include="PageCoordinateGeometry.h" />
+    <ClInclude Include="PageCoordinateMapping.h" />
+    <ClInclude Include="PageOverlayState.h" />
     <ClInclude Include="DocumentOperation.h" />
     <ClInclude Include="BackgroundWork.h" />
     <ClInclude Include="resource.h" />
@@ -38,6 +52,13 @@
     <ClInclude Include="AppSettings.h" />
     <ClInclude Include="WindowPlacement.h" />
     <ClInclude Include="MuPdfDocument.h" />
+    <ClInclude Include="ExternalUriPolicy.h" />
+    <ClInclude Include="PageLinks.h" />
+    <ClInclude Include="PageImages.h" />
+    <ClInclude Include="PageSearch.h" />
+    <ClInclude Include="PageText.h" />
+    <ClInclude Include="LinkHitArea.h" />
+    <ClInclude Include="TextSelectionLayer.h" />
     <ClInclude Include="MuPdfRuntime.h" />
     <ClInclude Include="WindowCreationOptions.h" />
     <ClInclude Include="SettingsStore.h" />

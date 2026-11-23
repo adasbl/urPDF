@@ -21,7 +21,13 @@
                 Grid.RowSpan="2"
                 Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"/>
 
-        <Grid x:Name="MainWindowUI" Grid.Row="0" Grid.RowSpan="2">
+        <Grid x:Name="MainWindowUI" Grid.Row="0" Grid.RowSpan="2" KeyboardAcceleratorPlacementMode="Hidden">
+            <Grid.KeyboardAccelerators>
+                <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="FindInDocument_Invoked"/>
+                <KeyboardAccelerator Key="F3" Invoked="FindNext_Invoked"/>
+                <KeyboardAccelerator Key="F3" Modifiers="Shift" Invoked="FindPrevious_Invoked"/>
+                <KeyboardAccelerator Key="Escape" Invoked="ClearPdfSelection_Invoked"/>
+            </Grid.KeyboardAccelerators>
             <Grid.RowDefinitions>
                 <RowDefinition Height="40"/>
                 <RowDefinition Height="*"/>
@@ -249,6 +255,18 @@
 
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="4">
 
+                            <Button x:Name="SearchButton"
+                                    Click="SearchButton_Click"
+                                    IsEnabled="False"
+                                    AutomationProperties.Name="Find in document"
+                                    ToolTipService.ToolTip="Find in document (Ctrl+F)">
+                                <Button.Content>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon Glyph="&#xE721;"/>
+                                    </StackPanel>
+                                </Button.Content>
+                            </Button>
+
                             <Button x:Name="ZoomInButton" 
                                     Click="ZoomInButton_Click"
                                     ToolTipService.ToolTip="Zoom in">
@@ -312,18 +330,45 @@
                     <Grid Grid.Row="1">
                         <ScrollViewer
                             x:Name="PdfScrollViewer"
+                            KeyboardAcceleratorPlacementMode="Hidden"
                             ZoomMode="Enabled"
                             MinZoomFactor="0.5"
                             MaxZoomFactor="3.0"
                             HorizontalScrollBarVisibility="Auto"
                             VerticalScrollBarVisibility="Auto"
+                            Tapped="PdfScrollViewer_Tapped"
+                            ContextRequested="PdfScrollViewer_ContextRequested"
                             ViewChanged="PdfScrollViewer_ViewChanged">
+
+                            <ScrollViewer.Resources>
+                                <MenuFlyout x:Key="DocumentContextMenu" x:Name="DocumentContextMenu">
+                                    <MenuFlyoutItem x:Name="CopyImageMenuItem" Text="Copy image" Click="CopyImageMenuItem_Click">
+                                        <MenuFlyoutItem.Icon>
+                                            <SymbolIcon Symbol="Copy"/>
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem x:Name="SaveImageAsMenuItem" Text="Save image as..." Click="SaveImageAsMenuItem_Click">
+                                        <MenuFlyoutItem.Icon>
+                                            <SymbolIcon Symbol="Save"/>
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                </MenuFlyout>
+                            </ScrollViewer.Resources>
+
+                            <ScrollViewer.KeyboardAccelerators>
+                                <KeyboardAccelerator Key="C" Modifiers="Control" Invoked="CopyPdfText_Invoked"/>
+                            </ScrollViewer.KeyboardAccelerators>
 
                             <ItemsRepeater x:Name="PagesRepeater"
                                            HorizontalAlignment="Center"
                                            Margin="0,20"
                                            ElementPrepared="PagesRepeater_ElementPrepared"
-                                           ElementClearing="PagesRepeater_ElementClearing">
+                                           ElementClearing="PagesRepeater_ElementClearing"
+                                           DoubleTapped="PageText_DoubleTapped"
+                                           PointerMoved="PageText_PointerMoved"
+                                           PointerReleased="PageText_PointerReleased"
+                                           PointerCanceled="PageText_PointerCanceled"
+                                           PointerCaptureLost="PageText_PointerCanceled">
 
                                 <ItemsRepeater.Layout>
                                     <local:PdfPageLayout x:Name="PagesLayout" Spacing="10"/>
@@ -334,9 +379,81 @@
                                         <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                                 BorderThickness="1">
-                                            <Image Stretch="Uniform"
-                                                   HorizontalAlignment="Stretch"
-                                                   VerticalAlignment="Stretch"/>
+                                            <Grid>
+                                                <Image Stretch="Uniform"
+                                                       HorizontalAlignment="Stretch"
+                                                       VerticalAlignment="Stretch"/>
+                                                <local:TextSelectionLayer Background="Transparent"
+                                                                          ManipulationMode="System"
+                                                                          PointerEntered="TextSelectionLayer_PointerEntered"
+                                                                          PointerPressed="TextSelectionLayer_PointerPressed"
+                                                                          PointerMoved="TextSelectionLayer_PointerMoved">
+                                                    <local:TextSelectionLayer.Clip>
+                                                        <RectangleGeometry Rect="0,0,0,0"/>
+                                                    </local:TextSelectionLayer.Clip>
+                                                    <Canvas IsHitTestVisible="False">
+                                                        <Canvas.Resources>
+                                                            <Style x:Key="PageImageSelectionBorderStyle" TargetType="Border">
+                                                                <Setter Property="BorderBrush" Value="{ThemeResource AccentFillColorDefaultBrush}"/>
+                                                                <Setter Property="BorderThickness" Value="2"/>
+                                                            </Style>
+                                                            <Style x:Key="PageImageSelectionFillStyle" TargetType="Rectangle">
+                                                                <Setter Property="Fill" Value="{ThemeResource AccentFillColorDefaultBrush}"/>
+                                                                <Setter Property="Opacity" Value="0.22"/>
+                                                            </Style>
+                                                        </Canvas.Resources>
+                                                    </Canvas>
+                                                    <Canvas IsHitTestVisible="False">
+                                                        <Canvas.Resources>
+                                                            <ResourceDictionary>
+                                                                <ResourceDictionary.ThemeDictionaries>
+                                                                    <ResourceDictionary x:Key="Default">
+                                                                        <SolidColorBrush x:Key="PageSearchMatchFillBrush" Color="#FFFFD43B"/>
+                                                                        <SolidColorBrush x:Key="PageActiveSearchMatchFillBrush" Color="#FFFF922B"/>
+                                                                        <SolidColorBrush x:Key="PageActiveSearchMatchStrokeBrush" Color="#FFFFA94D"/>
+                                                                    </ResourceDictionary>
+                                                                    <ResourceDictionary x:Key="Light">
+                                                                        <SolidColorBrush x:Key="PageSearchMatchFillBrush" Color="#FFF7C600"/>
+                                                                        <SolidColorBrush x:Key="PageActiveSearchMatchFillBrush" Color="#FFFF8C00"/>
+                                                                        <SolidColorBrush x:Key="PageActiveSearchMatchStrokeBrush" Color="#FFD96600"/>
+                                                                    </ResourceDictionary>
+                                                                    <ResourceDictionary x:Key="HighContrast">
+                                                                        <StaticResource x:Key="PageSearchMatchFillBrush" ResourceKey="SystemColorHighlightColorBrush"/>
+                                                                        <StaticResource x:Key="PageActiveSearchMatchFillBrush" ResourceKey="SystemColorHighlightColorBrush"/>
+                                                                        <StaticResource x:Key="PageActiveSearchMatchStrokeBrush" ResourceKey="SystemColorHighlightTextColorBrush"/>
+                                                                    </ResourceDictionary>
+                                                                </ResourceDictionary.ThemeDictionaries>
+                                                                <Style x:Key="PageSearchMatchRectangleStyle" TargetType="Rectangle">
+                                                                    <Setter Property="Fill" Value="{ThemeResource PageSearchMatchFillBrush}"/>
+                                                                    <Setter Property="Opacity" Value="0.38"/>
+                                                                    <Setter Property="StrokeThickness" Value="0"/>
+                                                                </Style>
+                                                                <Style x:Key="PageActiveSearchMatchRectangleStyle" TargetType="Rectangle">
+                                                                    <Setter Property="Fill" Value="{ThemeResource PageActiveSearchMatchFillBrush}"/>
+                                                                    <Setter Property="Opacity" Value="0.58"/>
+                                                                    <Setter Property="Stroke" Value="{ThemeResource PageActiveSearchMatchStrokeBrush}"/>
+                                                                    <Setter Property="StrokeThickness" Value="1.5"/>
+                                                                </Style>
+                                                            </ResourceDictionary>
+                                                        </Canvas.Resources>
+                                                    </Canvas>
+                                                    <Canvas IsHitTestVisible="False">
+                                                        <Canvas.Resources>
+                                                            <Style x:Key="PageSelectionRectangleStyle" TargetType="Rectangle">
+                                                                <Setter Property="Fill" Value="{ThemeResource AccentFillColorDefaultBrush}"/>
+                                                                <Setter Property="Opacity" Value="0.35"/>
+                                                            </Style>
+                                                        </Canvas.Resources>
+                                                    </Canvas>
+                                                </local:TextSelectionLayer>
+                                                <Canvas HorizontalAlignment="Stretch"
+                                                        VerticalAlignment="Stretch"
+                                                        IsHitTestVisible="True">
+                                                    <Canvas.Clip>
+                                                        <RectangleGeometry Rect="0,0,0,0"/>
+                                                    </Canvas.Clip>
+                                                </Canvas>
+                                            </Grid>
                                         </Border>
                                     </DataTemplate>
                                 </ItemsRepeater.ItemTemplate>
@@ -344,6 +461,81 @@
                             </ItemsRepeater>
 
                         </ScrollViewer>
+
+                        <Border x:Name="SearchBar"
+                                Visibility="Collapsed"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Top"
+                                Margin="0,12,24,0"
+                                Padding="8,6"
+                                CornerRadius="8"
+                                Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                Canvas.ZIndex="10">
+                            <Grid ColumnSpacing="4" VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="220"/>
+                                    <ColumnDefinition Width="112"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="SearchTextBox"
+                                         Grid.Column="0"
+                                         PlaceholderText="Find in document"
+                                         AutomationProperties.Name="Find in document"
+                                         TextChanged="SearchTextBox_TextChanged"
+                                         KeyDown="SearchTextBox_KeyDown"/>
+                                <Grid Grid.Column="1" Margin="4,0" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ProgressRing x:Name="SearchProgressRing"
+                                                  Grid.Column="0"
+                                                  Width="16"
+                                                  Height="16"
+                                                  Margin="0,0,6,0"
+                                                  IsActive="False"
+                                                  Visibility="Collapsed"
+                                                  VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="SearchStatusText"
+                                               Grid.Column="1"
+                                               VerticalAlignment="Center"
+                                               TextAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               IsTextSelectionEnabled="False"/>
+                                </Grid>
+                                <Button x:Name="SearchPreviousButton"
+                                        Grid.Column="2"
+                                        Click="SearchPreviousButton_Click"
+                                        IsEnabled="False"
+                                        Padding="6"
+                                        AutomationProperties.Name="Previous match"
+                                        ToolTipService.ToolTip="Previous match (Shift+Enter)">
+                                    <FontIcon Glyph="&#xE70E;" FontSize="12"/>
+                                </Button>
+                                <Button x:Name="SearchNextButton"
+                                        Grid.Column="3"
+                                        Click="SearchNextButton_Click"
+                                        IsEnabled="False"
+                                        Padding="6"
+                                        AutomationProperties.Name="Next match"
+                                        ToolTipService.ToolTip="Next match (Enter)">
+                                    <FontIcon Glyph="&#xE70D;" FontSize="12"/>
+                                </Button>
+                                <Button x:Name="SearchCloseButton"
+                                        Grid.Column="4"
+                                        Click="SearchCloseButton_Click"
+                                        Padding="6"
+                                        AutomationProperties.Name="Close search"
+                                        ToolTipService.ToolTip="Close (Esc)">
+                                    <FontIcon Glyph="&#xE711;" FontSize="12"/>
+                                </Button>
+                            </Grid>
+                        </Border>
 
                         <Border x:Name="EmptyTabDropZone"
                             AllowDrop="True"

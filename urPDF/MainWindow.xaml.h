@@ -7,6 +7,11 @@
 #include "AppSettings.h"
 #include "DocumentViewState.h"
 #include "MuPdfRuntime.h"
+#include "PageCoordinateMapping.h"
+#include "PageOverlayState.h"
+#include "PageLinks.h"
+#include "PageSearch.h"
+#include "PageText.h"
 #include "PdfPageLayout.h"
 #include "PdfRenderScale.h"
 #include "WindowCreationOptions.h"
@@ -48,6 +53,7 @@ extern "C" {
 #include <winrt/Microsoft.UI.Xaml.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 #include <winrt/Microsoft.UI.Xaml.Data.h>
+#include <winrt/Microsoft.UI.Xaml.Input.h>
 #include <winrt/Microsoft.UI.Xaml.Media.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <winrt/Microsoft.UI.Xaml.Printing.h>
@@ -97,11 +103,24 @@ namespace winrt::urPDF::implementation
     };
 
 
+    // A bitmap and the exact raster geometry that produced it travel together.
+    struct PageBitmap
+    {
+        imaging::WriteableBitmap source{ nullptr };
+        urpdf::PageRasterGeometry geometry;
+    };
+
+    struct SoftwarePageBitmap
+    {
+        winrt::Windows::Graphics::Imaging::SoftwareBitmap source{ nullptr };
+        urpdf::PageRasterGeometry geometry;
+    };
+
     struct PageSlot
     {
         fz_rect pdfBounds{};
         PageRenderState state{ PageRenderState::unloaded };
-        std::optional<imaging::WriteableBitmap> bitmap;
+        std::optional<PageBitmap> bitmap;
         std::uint64_t generation{ 0 };
         int renderScaleBucket{ 0 };
 
@@ -178,7 +197,7 @@ namespace winrt::urPDF::implementation
     {
         struct CacheEntry
         {
-            imaging::WriteableBitmap bitmap{ nullptr };
+            PageBitmap bitmap;
             std::size_t memoryBytes{ 0 };
             std::list<PageBitmapCacheKey>::iterator lruPosition;
         };
@@ -198,8 +217,8 @@ namespace winrt::urPDF::implementation
     public:
         explicit PageBitmapCache(std::size_t budgetBytes);
 
-        std::optional<imaging::WriteableBitmap> TryGetBitmap(PageBitmapCacheKey const& key);
-        void StoreBitmap(PageBitmapCacheKey const& key, imaging::WriteableBitmap const& bitmap);
+        std::optional<PageBitmap> TryGetBitmap(PageBitmapCacheKey const& key);
+        void StoreBitmap(PageBitmapCacheKey const& key, PageBitmap const& bitmap);
         void ClearDocumentEntries(std::uint64_t documentId);
 
         PageBitmapCacheMetrics GetMetrics() const noexcept { return m_metrics; }
@@ -233,6 +252,18 @@ namespace winrt::urPDF::implementation
         winrt::hstring m_openedFilePath;
         winrt::hstring m_fileName = L"unknown";
         std::vector<PageSlot> m_renderedPages;
+        std::vector<urpdf::PageLinksSlot> m_pageLinks;
+        std::vector<urpdf::PageTextSlot> m_pageText;
+        std::optional<urpdf::TextSelection> m_textSelection;
+        std::optional<urpdf::PendingTextPosition> m_pendingTextAnchor;
+        std::optional<urpdf::PendingTextPosition> m_pendingTextFocus;
+        std::optional<urpdf::WordSelectionPoints> m_wordSelectionPoints;
+        std::optional<urpdf::PageImageSelection> m_selectedImage;
+        std::optional<urpdf::PendingTextPosition> m_pendingImageClick;
+        urpdf::DocumentSearchState m_search;
+        std::shared_ptr<std::atomic<bool>> m_searchCancelled;
+        bool m_searchBarOpen{ false };
+        std::wstring m_searchDraftQuery;
         int32_t m_currentPageIndex = { 1 };
         urpdf::DocumentViewState m_viewState{};
         bool m_hasViewAnchor{ false };
@@ -256,6 +287,57 @@ namespace winrt::urPDF::implementation
     };
 
 
+    struct PageOverlayElement
+    {
+        urpdf::PageOverlayState state;
+        std::weak_ptr<PdfTabInfo> document;
+        std::optional<PageBitmap> bitmap;
+        xaml::FrameworkElement::SizeChanged_revoker sizeChangedRevoker;
+        bool linkAreasBuilt{ false };
+        bool imageAreasBuilt{ false };
+        bool searchHighlightsBuilt{ false };
+        bool selectionBuilt{ false };
+    };
+
+    struct PageTextClick
+    {
+        std::weak_ptr<PdfTabInfo> document;
+        foundation::Point position;
+        std::uint64_t timestamp;
+        int32_t page;
+    };
+
+    struct PageTextDrag
+    {
+        xaml::UIElement capture;
+        xaml::UIElement manipulationLayer;
+        xaml::Input::Pointer pointer;
+        PageTextClick press;
+        foundation::Point position;
+        std::optional<urpdf::PendingTextPosition> pdfPress;
+        bool byWord{ false };
+        bool moved{ false };
+    };
+
+    struct PendingSelectionCopy
+    {
+        std::weak_ptr<PdfTabInfo> document;
+        int32_t nextPage{ 0 };
+        DWORD clipboardSequence{ 0 };
+    };
+
+    struct ContextMenuImageTarget
+    {
+        std::weak_ptr<PdfTabInfo> document;
+        urpdf::PageImageSelection selection;
+    };
+
+    struct PageSearchBatch
+    {
+        int32_t pageIndex{ 0 };
+        std::vector<urpdf::SearchMatch> matches;
+    };
+
     struct PendingDocumentOpen
     {
         urpdf::WindowCreationOptions document;
@@ -277,6 +359,13 @@ namespace winrt::urPDF::implementation
         void ApplyTheme(winrt::hstring const& themeName);
         void ApplyBackdrop(winrt::hstring const& transparency);
         void LoadSettings();
+
+        // Selection commands for the selected PDF tab, called on the UI thread.
+        void SelectAll();
+        bool HasSelection();
+        bool HasImageSelection();
+        bool CopySelectionText(); // Returns whether a clipboard request was queued.
+        bool CopySelectedImage(); // Returns whether an image clipboard request was queued.
 
         winrt::fire_and_forget OpenPdfFileAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         winrt::fire_and_forget OpenPdfInNewWindowAsync(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
@@ -305,8 +394,30 @@ namespace winrt::urPDF::implementation
         winrt::fire_and_forget EmptyTab_Drop(foundation::IInspectable const& sender, xaml::DragEventArgs const& args);
         void RenderVisiblePagesAsync();
         winrt::fire_and_forget PdfScrollViewer_ViewChanged(foundation::IInspectable const& sender, controls::ScrollViewerViewChangedEventArgs const& args);
+        void CopyPdfText_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
+        void ClearPdfSelection_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
+        void FindInDocument_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
+        void FindNext_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
+        void FindPrevious_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
+        void SearchButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
+        void SearchTextBox_TextChanged(foundation::IInspectable const& sender, controls::TextChangedEventArgs const& args);
+        void SearchTextBox_KeyDown(foundation::IInspectable const& sender, xaml::Input::KeyRoutedEventArgs const& args);
+        void SearchPreviousButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
+        void SearchNextButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
+        void SearchCloseButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
+        void PdfScrollViewer_Tapped(foundation::IInspectable const& sender, xaml::Input::TappedRoutedEventArgs const& args);
+        void PdfScrollViewer_ContextRequested(xaml::UIElement const& sender, xaml::Input::ContextRequestedEventArgs const& args);
+        void CopyImageMenuItem_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
+        winrt::fire_and_forget SaveImageAsMenuItem_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         void PagesRepeater_ElementPrepared(foundation::IInspectable const& sender, controls::ItemsRepeaterElementPreparedEventArgs const& args);
         void PagesRepeater_ElementClearing(foundation::IInspectable const& sender, controls::ItemsRepeaterElementClearingEventArgs const& args);
+        void TextSelectionLayer_PointerEntered(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
+        void TextSelectionLayer_PointerPressed(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
+        void TextSelectionLayer_PointerMoved(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
+        void PageText_PointerMoved(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
+        void PageText_PointerReleased(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
+        void PageText_PointerCanceled(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
+        void PageText_DoubleTapped(foundation::IInspectable const& sender, xaml::Input::DoubleTappedRoutedEventArgs const& args);
         void SettingsButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
         winrt::fire_and_forget RotateButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
         void PageNumberBox_ValueChanged(controls::NumberBox const& sender, controls::NumberBoxValueChangedEventArgs const& args);
@@ -366,6 +477,9 @@ namespace winrt::urPDF::implementation
         xaml::Media::CompositionTarget::Rendering_revoker m_viewStateRenderingRevoker;
         bool m_zoomWasEnabled{ false };
         bool m_isVisibleRenderRunning{ false };
+        bool m_isPageLinksLoadRunning{ false };
+        bool m_isPageTextLoadRunning{ false };
+        std::deque<std::pair<std::weak_ptr<PdfTabInfo>, int32_t>> m_pageTextLoadQueue;
         bool m_isClosed{ false };
         urpdf::WindowState m_windowState;
         winrt::Microsoft::UI::Windowing::AppWindow m_observedAppWindow{ nullptr };
@@ -391,6 +505,16 @@ namespace winrt::urPDF::implementation
         int m_layoutRotation{ 0 };
         PageBitmapCache m_pageBitmapCache{ 256ull * 1024ull * 1024ull };
         foundation::Collections::IObservableVector<foundation::IInspectable> m_pageRepeaterItems{ nullptr };
+        std::map<xaml::UIElement, std::shared_ptr<PageOverlayElement>> m_pageOverlays;
+        std::optional<PageTextDrag> m_pageTextDrag;
+        std::optional<PageTextClick> m_lastPageTextClick;
+        dispatching::DispatcherQueueTimer m_pageTextScrollTimer{ nullptr };
+        std::optional<PendingSelectionCopy> m_pendingSelectionCopy;
+        std::optional<ContextMenuImageTarget> m_contextMenuImage;
+        dispatching::DispatcherQueueTimer m_searchDebounceTimer{ nullptr };
+        std::weak_ptr<PdfTabInfo> m_pendingSearchTab;
+        std::wstring m_pendingSearchQuery;
+        bool m_isSyncingSearchText{ false };
 
         void CloseTab(controls::TabViewItem const& tab);
         winrt::fire_and_forget CompleteDeferredPresentation();
@@ -401,7 +525,7 @@ namespace winrt::urPDF::implementation
         std::shared_ptr<PdfTabInfo> DetachTabForTransfer(controls::TabViewItem const& tab, bool allowViewRestore);
         void ShutdownMuPdfWork() noexcept;
         void CompleteDocumentOpen(std::shared_ptr<PdfTabInfo> const& pdfTab, std::uint64_t generation, int pagecount, std::vector<fz_rect> pageBounds, std::exception_ptr error);
-        void CompletePageRender(std::weak_ptr<PdfTabInfo> const& weakTab, PageRenderMetrics metrics, winrt::Windows::Graphics::Imaging::SoftwareBitmap const& bitmap, bool rendered, std::exception_ptr error, bool scheduleNext = true);
+        void CompletePageRender(std::weak_ptr<PdfTabInfo> const& weakTab, PageRenderMetrics metrics, std::optional<SoftwarePageBitmap> const& bitmap, bool rendered, std::exception_ptr error, bool scheduleNext = true);
         void ReadViewGeometry(std::shared_ptr<PdfTabInfo> const& pdfTab, std::vector<urpdf::PageRect>& pages, urpdf::ViewportGeometry& viewport);
         std::optional<int32_t> VisiblePageNumber(std::shared_ptr<PdfTabInfo> const& pdfTab);
         std::optional<urpdf::DocumentViewState> CaptureViewState(std::shared_ptr<PdfTabInfo> const& pdfTab);
@@ -434,13 +558,76 @@ namespace winrt::urPDF::implementation
         void ApplyPendingDpiRefresh();
         void RebuildPagesContainer(std::shared_ptr<PdfTabInfo> const& pdfTab, std::vector<PageSlot> const& pages, urpdf::ViewStateGuard::Operation operation);
         void ConfigurePageElement(xaml::UIElement const& element, std::size_t pageIndex);
+        void EnsurePageLinks(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
+        void CompletePageLinksLoad(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
+            int32_t pageIndex, std::uint64_t requestId, std::vector<urpdf::PageLink> links, bool loaded, std::exception_ptr error);
+        void BuildPageLinkAreas(xaml::UIElement const& element, PageOverlayElement& entry,
+            std::shared_ptr<PdfTabInfo> const& document, urpdf::PageOverlayState::Binding binding);
+        void EnsurePageText(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex, bool prioritize = false);
+        void StartNextPageTextLoad();
+        void CompletePageTextLoad(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
+            int32_t pageIndex, std::uint64_t requestId, urpdf::PageText text, bool loaded, std::exception_ptr error);
+        bool OwnsDocument(std::shared_ptr<PdfTabInfo> const& document, std::uint64_t documentId) const noexcept;
+        void CancelPendingSearchDebounce(std::shared_ptr<PdfTabInfo> const& document = nullptr) noexcept;
+        void CancelActiveSearchSession(std::shared_ptr<PdfTabInfo> const& document) noexcept;
+        void ScheduleDocumentSearch(std::shared_ptr<PdfTabInfo> const& document, std::wstring query);
+        void ExecutePendingDebouncedSearch();
+        void TriggerImmediateDocumentSearch(std::shared_ptr<PdfTabInfo> const& document, std::wstring_view query);
+        void StartDocumentSearch(std::shared_ptr<PdfTabInfo> const& document, std::wstring_view query);
+        void ClearDocumentSearch(std::shared_ptr<PdfTabInfo> const& document);
+        void CloseDocumentSearch(std::shared_ptr<PdfTabInfo> const& document);
+        void ResetPendingDocumentSearch(std::shared_ptr<PdfTabInfo> const& document) noexcept;
+        void ApplyDocumentSearchBatch(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
+            std::uint64_t requestId, std::vector<PageSearchBatch> batches);
+        void CompleteDocumentSearch(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
+            std::uint64_t requestId, bool completed, std::exception_ptr error);
+        int32_t CurrentSearchPageIndex(std::shared_ptr<PdfTabInfo> const& document);
+        void ScrollToSearchMatch(std::shared_ptr<PdfTabInfo> const& document, urpdf::SearchMatch const& match);
+        void NavigateToNextSearchMatch(std::shared_ptr<PdfTabInfo> const& document);
+        void NavigateToPreviousSearchMatch(std::shared_ptr<PdfTabInfo> const& document);
+        void RefreshPageSearchHighlights(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
+        void RefreshAllSearchHighlights(std::shared_ptr<PdfTabInfo> const& document);
+        void UpdateSearchBarStatus(std::shared_ptr<PdfTabInfo> const& document);
+        bool CanUseDocumentSearch();
+        bool IsFocusInsideElement(xaml::DependencyObject const& container);
+        void OpenSearchBar();
+        void CloseSearchBar();
+        void SyncSearchBarToDocument(std::shared_ptr<PdfTabInfo> const& document);
+        void ResolvePendingTextPositions(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
+        void UpdateWordTextSelection(std::shared_ptr<PdfTabInfo> const& document);
+        std::shared_ptr<PdfTabInfo> SelectedPdfDocument();
+        void SetPageTextSelection(std::shared_ptr<PdfTabInfo> const& document, std::optional<urpdf::TextSelection> selection);
+        void RefreshPageTextSelection(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
+        void ClearPageTextSelection(std::shared_ptr<PdfTabInfo> const& document);
+        void SetSelectedPageImage(std::shared_ptr<PdfTabInfo> const& document, std::optional<urpdf::PageImageSelection> selection);
+        void RefreshPageImageSelection(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
+        void ClearPageImageSelection(std::shared_ptr<PdfTabInfo> const& document);
+        void ResolvePendingImageClick(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
+        bool QueueImageCopy(std::shared_ptr<PdfTabInfo> const& document, urpdf::PageImageSelection selection);
+        winrt::fire_and_forget CompleteImageCopy(std::vector<std::uint8_t> pngBytes, DWORD clipboardSequence);
+        foundation::IAsyncOperation<storage::StorageFile> PickImageSaveFileAsync(winrt::hstring const& suggestedFileName);
+        void QueueImageSave(std::shared_ptr<PdfTabInfo> const& document, urpdf::PageImageSelection selection, storage::StorageFile file);
+        winrt::fire_and_forget CompleteImageSave(storage::StorageFile file, std::vector<std::uint8_t> pngBytes);
+        void CancelSelectionCopy(std::shared_ptr<PdfTabInfo> const& document) noexcept;
+        void ContinueSelectionCopy();
+        bool OwnsPageTextPointer(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) const;
+        std::optional<urpdf::PendingTextPosition> PageTextPositionAtPointer(std::shared_ptr<PdfTabInfo> const& document,
+            foundation::Point position, bool requireInsidePage = false);
+        void UpdatePageTextDrag(foundation::Point position);
+        void ScrollPageTextDragAtEdge();
+        void EndPageTextDrag(bool released = false);
+        void RefreshPageOverlay(xaml::UIElement const& element, urpdf::PageOverlayState::Binding binding);
+        void RefreshRealizedPageOverlays();
+        void ReleasePageOverlay(xaml::UIElement const& element);
+        void ClearPageOverlays(std::uint64_t documentId = 0);
+        std::optional<urpdf::PageCoordinateMapping> TryGetPageCoordinateMapping(int32_t pageIndex);
         void TryRecordFirstVisiblePage(std::shared_ptr<PdfTabInfo> const& PdfTab);
         std::vector<PageRenderRequest> BuildRenderQueue(int32_t pageCount, PageViewRange& viewRange);
         void ReleaseSlotsOutsideRange(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t keepFirst, int32_t keepLast);
         void RestoreSlotsFromCache(std::shared_ptr<PdfTabInfo> const& PdfTab);
         double GetRasterizationScale();
         int GetPageRenderScaleBucket(std::shared_ptr<PdfTabInfo> const& pdfTab, int32_t pageIndex);
-        bool ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, imaging::WriteableBitmap const& bitmap, int renderScaleBucket);
+        bool ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, PageBitmap const& bitmap, int renderScaleBucket);
         void RecordPageRenderMetrics(std::shared_ptr<PdfTabInfo> const& PdfTab, PageRenderMetrics const& metrics) noexcept;
     };
 }

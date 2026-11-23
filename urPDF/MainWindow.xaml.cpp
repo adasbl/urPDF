@@ -4,6 +4,9 @@
 #include "MainWindow.xaml.h"
 #include "DocumentOperation.h"
 #include "MuPdfDocument.h"
+#include "ExternalUriPolicy.h"
+#include "LinkHitArea.h"
+#include "TextSelectionLayer.h"
 #if __has_include("MainWindow.g.cpp")
 #include "MainWindow.g.cpp"
 #endif
@@ -32,6 +35,7 @@ extern "C" {
 #include <map>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <utility>
 
 // Windows SDK / WinRT
@@ -48,11 +52,15 @@ extern "C" {
 #include <winrt/Windows.Graphics.Imaging.h>
 #include <winrt/Windows.Graphics.Printing.h>
 #include <winrt/Windows.System.Threading.h>
+#include <winrt/Windows.System.h>
+#include <winrt/Microsoft.UI.Xaml.Automation.h>
+#include <winrt/Microsoft.UI.Xaml.Input.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <winrt/Microsoft.UI.Dispatching.h>
 #include <winrt/Microsoft.UI.Xaml.Printing.h>
 #include <winrt/Microsoft.UI.Windowing.h>
 #include <winrt/Microsoft.UI.Input.h>
+#include <winrt/Windows.UI.Core.h>
 #include <winrt/Windows.UI.Xaml.Interop.h>
 
 #pragma comment(lib, "dwmapi.lib")
@@ -77,7 +85,15 @@ namespace
     constexpr int SlotRetainMarginPages = 3;
     constexpr auto ZoomRenderDebounce = std::chrono::milliseconds(200);
     constexpr auto DpiRenderDebounce = std::chrono::milliseconds(200);
+    constexpr auto SearchDebounce = std::chrono::milliseconds(200);
+    constexpr std::size_t SearchPublishBatchPages = 8;
     constexpr wchar_t TabDragProperty[] = L"urPDF.Tab";
+
+    bool NeedsPageText(urpdf::PageTextSlot const& slot) noexcept
+    {
+        const auto state = slot.State();
+        return state == urpdf::PageTextState::notLoaded || state == urpdf::PageTextState::loading;
+    }
 
     struct TabDragKeyboardState
     {
@@ -210,10 +226,300 @@ namespace
 
     struct PageRenderResult
     {
-        graphics::SoftwareBitmap bitmap{ nullptr };
+        std::optional<winrt::urPDF::implementation::SoftwarePageBitmap> bitmap;
         winrt::urPDF::implementation::PageRenderMetrics metrics;
         bool rendered{ false };
     };
+
+    struct PageLinksResult
+    {
+        std::vector<urpdf::PageLink> links;
+        bool loaded{ false };
+    };
+
+    struct PageTextResult
+    {
+        urpdf::PageText text;
+        bool loaded{ false };
+    };
+
+    struct DocumentSearchResult
+    {
+        bool completed{ false };
+    };
+
+    winrt::fire_and_forget LaunchExternalUriAsync(std::string utf8Uri)
+    {
+        try
+        {
+            const auto checked = urpdf::TryGetLaunchableExternalUri(utf8Uri);
+            if (!checked) { co_return; }
+            foundation::Uri uri{ winrt::to_hstring(*checked) };
+            if (!urpdf::IsAllowedExternalScheme(winrt::to_string(uri.SchemeName()))) { co_return; }
+            co_await winrt::Windows::System::Launcher::LaunchUriAsync(uri);
+        }
+        catch (...)
+        {
+#ifdef _DEBUG
+            OutputDebugStringW(L"urPDF: external link could not be opened.\n");
+#endif
+        }
+    }
+
+    struct PageElementParts
+    {
+        controls::Border border{ nullptr };
+        controls::Grid content{ nullptr };
+        controls::Image image{ nullptr };
+        winrt::urPDF::TextSelectionLayer selection{ nullptr };
+        controls::Canvas imageAreas{ nullptr };
+        controls::Canvas searchHighlights{ nullptr };
+        controls::Canvas highlights{ nullptr };
+        controls::Canvas overlay{ nullptr };
+    };
+
+    std::optional<PageElementParts> TryGetPageElementParts(xaml::UIElement const& element)
+    {
+        auto border = element ? element.try_as<controls::Border>() : nullptr;
+        auto content = border ? border.Child().try_as<controls::Grid>() : nullptr;
+        if (!content || content.Children().Size() != 3) { return std::nullopt; }
+
+        // Keep the template's child order in one place; Image is replaced in
+        // this slot without replacing the Grid or the overlay above it.
+        auto image = content.Children().GetAt(0).try_as<controls::Image>();
+        auto selection = content.Children().GetAt(1).try_as<winrt::urPDF::TextSelectionLayer>();
+        auto overlay = content.Children().GetAt(2).try_as<controls::Canvas>();
+        const bool hasSelectionCanvases = selection && selection.Children().Size() == 3;
+        auto imageAreas = hasSelectionCanvases ? selection.Children().GetAt(0).try_as<controls::Canvas>() : nullptr;
+        auto searchHighlights = hasSelectionCanvases ? selection.Children().GetAt(1).try_as<controls::Canvas>() : nullptr;
+        auto highlights = hasSelectionCanvases ? selection.Children().GetAt(2).try_as<controls::Canvas>() : nullptr;
+        if (!image || !imageAreas || !searchHighlights || !highlights || !overlay) { return std::nullopt; }
+        return PageElementParts{ border, content, image, selection, imageAreas, searchHighlights, highlights, overlay };
+    }
+
+    xaml::UIElement GetPageElementForTextSelectionLayer(winrt::urPDF::TextSelectionLayer const& layer)
+    {
+        auto content = layer.Parent().try_as<controls::Grid>();
+        return content ? content.Parent().try_as<controls::Border>() : nullptr;
+    }
+
+    bool IsPointerOverPageText(winrt::urPDF::implementation::PageOverlayElement const& entry,
+        winrt::urPDF::TextSelectionLayer const& layer, xaml::Input::PointerRoutedEventArgs const& args)
+    {
+        const auto binding = entry.state.CurrentBinding();
+        auto const& mapping = entry.state.Mapping();
+        auto document = entry.document.lock();
+        if (!binding || !mapping || !document || binding->pageIndex < 0
+            || static_cast<std::size_t>(binding->pageIndex) >= document->m_pageText.size()) { return false; }
+        auto const& slot = document->m_pageText[binding->pageIndex];
+        if (slot.State() != urpdf::PageTextState::ready) { return false; }
+
+        const auto position = args.GetCurrentPoint(layer).Position();
+        const urpdf::ElementPoint point{ position.X, position.Y };
+        if (mapping->IsElementPointInsidePage(point) != true) { return false; }
+        const auto pdfPoint = mapping->ElementToPdfPoint(point);
+        return pdfPoint && urpdf::IsOverText(slot.Text(), *pdfPoint);
+    }
+
+    void UpdatePageTextCursor(winrt::urPDF::TextSelectionLayer const& layer,
+        winrt::urPDF::implementation::PageOverlayElement const* entry, xaml::Input::PointerRoutedEventArgs const& args)
+    {
+        if (args.Pointer().PointerDeviceType() == winrt::Microsoft::UI::Input::PointerDeviceType::Touch) { return; }
+        winrt::get_self<winrt::urPDF::implementation::TextSelectionLayer>(layer)->SetTextCursor(
+            entry && IsPointerOverPageText(*entry, layer, args));
+    }
+
+    void UpdatePageOverlayClip(PageElementParts const& parts, std::optional<urpdf::PageCoordinateMapping> const& mapping = std::nullopt)
+    {
+        foundation::Rect bounds{};
+        if (mapping)
+        {
+            const auto rect = mapping->BitmapRect();
+            bounds = { static_cast<float>(rect.x), static_cast<float>(rect.y),
+                static_cast<float>(rect.width), static_cast<float>(rect.height) };
+        }
+        else
+        {
+            winrt::get_self<winrt::urPDF::implementation::TextSelectionLayer>(parts.selection)->SetTextCursor(false);
+        }
+        parts.selection.Clip().as<media::RectangleGeometry>().Rect(bounds);
+        parts.overlay.Clip().as<media::RectangleGeometry>().Rect(bounds);
+    }
+
+    void ClearPageOverlay(PageElementParts const& parts, winrt::urPDF::implementation::PageOverlayElement* entry)
+    {
+        parts.imageAreas.Children().Clear();
+        parts.searchHighlights.Children().Clear();
+        parts.highlights.Children().Clear();
+        parts.overlay.Children().Clear();
+        if (entry)
+        {
+            entry->linkAreasBuilt = false;
+            entry->imageAreasBuilt = false;
+            entry->searchHighlightsBuilt = false;
+            entry->selectionBuilt = false;
+        }
+    }
+
+    void ClearPageElement(PageElementParts const& parts, winrt::urPDF::implementation::PageOverlayElement* entry = nullptr)
+    {
+        parts.image.Source(nullptr);
+        ClearPageOverlay(parts, entry);
+        UpdatePageOverlayClip(parts);
+        parts.border.Opacity(0.65);
+    }
+
+    void DrawPageImageAreas(controls::Canvas const& canvas, urpdf::PageCoordinateMapping const& mapping,
+        winrt::urPDF::implementation::PdfTabInfo const& document, int32_t pageIndex)
+    {
+        auto children = canvas.Children();
+        if (pageIndex < 0
+            || static_cast<std::size_t>(pageIndex) >= document.m_pageText.size()
+            || document.m_pageText[pageIndex].State() != urpdf::PageTextState::ready)
+        {
+            children.Clear();
+            return;
+        }
+
+        auto const& images = document.m_pageText[pageIndex].Text().images;
+        if (images.empty())
+        {
+            children.Clear();
+            return;
+        }
+
+        const auto borderStyle = canvas.Resources().Lookup(winrt::box_value(L"PageImageSelectionBorderStyle")).as<xaml::Style>();
+        const auto fillStyle = canvas.Resources().Lookup(winrt::box_value(L"PageImageSelectionFillStyle")).as<xaml::Style>();
+        std::uint32_t count = 0;
+        for (auto const& image : images)
+        {
+            const auto rect = mapping.PdfToElementRect(image.bounds);
+            if (!rect) { continue; }
+
+            auto area = count < children.Size()
+                ? children.GetAt(count).as<controls::Border>() : nullptr;
+            if (!area)
+            {
+                area = controls::Border();
+                children.Append(area);
+            }
+            area.Width(rect->width);
+            area.Height(rect->height);
+            controls::Canvas::SetLeft(area, rect->x);
+            controls::Canvas::SetTop(area, rect->y);
+            xaml::Automation::AutomationProperties::SetName(area, L"Image " + winrt::to_hstring(image.index + 1));
+
+            const bool selected = document.m_selectedImage
+                && document.m_selectedImage->page == pageIndex
+                && document.m_selectedImage->imageIndex == image.index;
+            if (selected)
+            {
+                area.Style(borderStyle);
+                if (!area.Child())
+                {
+                    xaml::Shapes::Rectangle fill;
+                    fill.Style(fillStyle);
+                    area.Child(fill);
+                }
+            }
+            else
+            {
+                area.Style(nullptr);
+                area.BorderThickness({ 0.0, 0.0, 0.0, 0.0 });
+                area.BorderBrush(nullptr);
+                area.Child(nullptr);
+            }
+            ++count;
+        }
+        while (children.Size() > count) { children.RemoveAtEnd(); }
+    }
+
+    void DrawPageSearchMatches(controls::Canvas const& canvas, urpdf::PageCoordinateMapping const& mapping,
+        winrt::urPDF::implementation::PdfTabInfo const& document, int32_t pageIndex)
+    {
+        auto children = canvas.Children();
+        const auto range = document.m_search.PageMatchesRange(pageIndex);
+        if (range.Empty())
+        {
+            children.Clear();
+            return;
+        }
+
+        const auto matchStyle = canvas.Resources().Lookup(winrt::box_value(L"PageSearchMatchRectangleStyle")).as<xaml::Style>();
+        const auto activeStyle = canvas.Resources().Lookup(winrt::box_value(L"PageActiveSearchMatchRectangleStyle")).as<xaml::Style>();
+        auto const& matches = document.m_search.Matches();
+        const auto activeIndex = document.m_search.ActiveMatchIndex();
+        const std::size_t end = (std::min)(range.end, matches.size());
+
+        std::uint32_t count = 0;
+        for (std::size_t matchIndex = range.begin; matchIndex < end; ++matchIndex)
+        {
+            const bool isActive = activeIndex && *activeIndex == matchIndex;
+            auto const& style = isActive ? activeStyle : matchStyle;
+            for (auto const& bounds : matches[matchIndex].rects)
+            {
+                const auto rect = mapping.PdfToElementRect(bounds);
+                if (!rect) { continue; }
+
+                auto highlight = count < children.Size()
+                    ? children.GetAt(count).as<xaml::Shapes::Rectangle>() : nullptr;
+                if (!highlight)
+                {
+                    highlight = xaml::Shapes::Rectangle();
+                    children.Append(highlight);
+                }
+                if (highlight.Style() != style)
+                {
+                    highlight.Style(style);
+                }
+                highlight.Width(rect->width);
+                highlight.Height(rect->height);
+                controls::Canvas::SetLeft(highlight, rect->x);
+                controls::Canvas::SetTop(highlight, rect->y);
+                ++count;
+            }
+        }
+        while (children.Size() > count) { children.RemoveAtEnd(); }
+    }
+
+    void DrawPageSelection(controls::Canvas const& canvas, urpdf::PageCoordinateMapping const& mapping,
+        winrt::urPDF::implementation::PdfTabInfo const& document, int32_t pageIndex)
+    {
+        auto children = canvas.Children();
+        auto const& selection = document.m_textSelection;
+        const auto carets = selection ? urpdf::PageSelectionCarets(*selection, pageIndex) : std::nullopt;
+        if (!carets || pageIndex < 0
+            || static_cast<std::size_t>(pageIndex) >= document.m_pageText.size()
+            || document.m_pageText[pageIndex].State() != urpdf::PageTextState::ready)
+        {
+            children.Clear();
+            return;
+        }
+
+        const auto style = canvas.Resources().Lookup(winrt::box_value(L"PageSelectionRectangleStyle")).as<xaml::Style>();
+        auto const& text = document.m_pageText[pageIndex].Text();
+        std::uint32_t count = 0;
+        for (auto const& bounds : urpdf::SelectionRects(text, carets->first, carets->second))
+        {
+            const auto rect = mapping.PdfToElementRect(bounds);
+            if (!rect) { continue; }
+
+            auto highlight = count < children.Size()
+                ? children.GetAt(count).as<xaml::Shapes::Rectangle>() : nullptr;
+            if (!highlight)
+            {
+                highlight = xaml::Shapes::Rectangle();
+                highlight.Style(style);
+                children.Append(highlight);
+            }
+            highlight.Width(rect->width);
+            highlight.Height(rect->height);
+            controls::Canvas::SetLeft(highlight, rect->x);
+            controls::Canvas::SetTop(highlight, rect->y);
+            ++count;
+        }
+        while (children.Size() > count) { children.RemoveAtEnd(); }
+    }
 
     constexpr double PdfRenderScale(double zoom, double dpiScale) noexcept
     {
@@ -291,7 +597,8 @@ namespace
         return TryPageRasterBounds(pageBounds, rotation, bucket, transform, bbox) ? bucket : 0;
     }
 
-    fz_pixmap* RenderPagePixmap(fz_context* ctx, fz_document* doc, int pageIndex, fz_rect pageBounds, int bucket, int rotation)
+    fz_pixmap* RenderPagePixmap(fz_context* ctx, fz_document* doc, int pageIndex, fz_rect pageBounds, int bucket, int rotation,
+        urpdf::PageRasterGeometry& geometry)
     {
         fz_matrix transform;
         fz_irect bbox;
@@ -325,16 +632,25 @@ namespace
             pix = nullptr;
         }
 
+        if (pix)
+        {
+            geometry = { { pageBounds.x0, pageBounds.y0, pageBounds.x1, pageBounds.y1 },
+                { transform.a, transform.b, transform.c, transform.d, transform.e, transform.f },
+                { bbox.x0, bbox.y0, bbox.x1, bbox.y1 },
+                { fz_pixmap_width(ctx, pix), fz_pixmap_height(ctx, pix) } };
+        }
         return pix;
     }
 
-    graphics::SoftwareBitmap RenderPageToSoftwareBitmap(fz_context* ctx, fz_document* doc, int pageIndex, fz_rect pageBounds, int renderScaleBucket, int rotation)
+    std::optional<winrt::urPDF::implementation::SoftwarePageBitmap> RenderPageToSoftwareBitmap(
+        fz_context* ctx, fz_document* doc, int pageIndex, fz_rect pageBounds, int renderScaleBucket, int rotation)
     {
         const double renderScale = urpdf::RenderScaleForBucket(renderScaleBucket);
-        if (renderScale <= 0.0) { return nullptr; }
+        if (renderScale <= 0.0) { return std::nullopt; }
 
         graphics::SoftwareBitmap bitmap{ nullptr };
-        fz_pixmap* pix = RenderPagePixmap(ctx, doc, pageIndex, pageBounds, renderScaleBucket, rotation);
+        urpdf::PageRasterGeometry geometry;
+        fz_pixmap* pix = RenderPagePixmap(ctx, doc, pageIndex, pageBounds, renderScaleBucket, rotation, geometry);
         if (pix)
         {
             const int width = fz_pixmap_width(ctx, pix);
@@ -364,7 +680,8 @@ namespace
             fz_drop_pixmap(ctx, pix);
         }
 
-        return bitmap;
+        if (!bitmap) { return std::nullopt; }
+        return winrt::urPDF::implementation::SoftwarePageBitmap{ bitmap, geometry };
     }
 }
 
@@ -381,6 +698,7 @@ namespace winrt::urPDF::implementation
     {
         if (m_isClosed) { return; }
         m_isClosed = true;
+        try { ClearPageOverlays(); } catch (...) { m_pageOverlays.clear(); }
         try { StopTrackingWindowState(); } catch (...) {}
         m_firstFrameRenderedRevoker.revoke();
         CloseTransferredSourceWindow();
@@ -391,16 +709,24 @@ namespace winrt::urPDF::implementation
             m_moveSizeInput = nullptr;
         }
         m_workCancelled->store(true, std::memory_order_release);
+        CancelPendingSearchDebounce();
         for (auto const& tabEntry : m_openedTabs)
         {
+            CancelActiveSearchSession(tabEntry.second);
             ++tabEntry.second->m_renderGeneration;
             for (auto& slot : tabEntry.second->m_renderedPages) { slot.bitmap.reset(); }
         }
-        if (m_loadingTab) { ++m_loadingTab->m_renderGeneration; }
+        if (m_loadingTab)
+        {
+            CancelActiveSearchSession(m_loadingTab);
+            ++m_loadingTab->m_renderGeneration;
+        }
         m_loadingTab.reset();
         m_loadingTargetTab.reset();
         m_openedTabs.clear();
         m_pendingOpens.clear();
+        m_pageTextLoadQueue.clear();
+        m_pendingSelectionCopy.reset();
         m_ctx.reset();
         m_runtime.reset();
         try { if (m_openErrorDialog) { m_openErrorDialog.Hide(); } } catch (...) {}
@@ -453,6 +779,22 @@ namespace winrt::urPDF::implementation
             }
         });
 
+        m_pageTextScrollTimer = DispatcherQueue().CreateTimer();
+        m_pageTextScrollTimer.Interval(std::chrono::milliseconds(20));
+        m_pageTextScrollTimer.IsRepeating(true);
+        m_pageTextScrollTimer.Tick([weakThis = get_weak()](auto const&, auto const&)
+        {
+            if (auto self = weakThis.get()) { self->ScrollPageTextDragAtEdge(); }
+        });
+
+        m_searchDebounceTimer = DispatcherQueue().CreateTimer();
+        m_searchDebounceTimer.IsRepeating(false);
+        m_searchDebounceTimer.Interval(SearchDebounce);
+        m_searchDebounceTimer.Tick([weakThis = get_weak()](auto const&, auto const&)
+        {
+            if (auto self = weakThis.get()) { self->ExecutePendingDebouncedSearch(); }
+        });
+
         PdfScrollViewer().Loaded([weakThis = get_weak()](auto const&, auto const&)
         {
             if (auto self = weakThis.get())
@@ -465,6 +807,7 @@ namespace winrt::urPDF::implementation
         {
             if (auto self = weakThis.get())
             {
+                if (self->m_pageTextDrag) { self->EndPageTextDrag(); }
                 self->DetachDpiObserver();
             }
         });
@@ -488,9 +831,14 @@ namespace winrt::urPDF::implementation
 
         Activated([weakThis = get_weak()](auto const&, xaml::WindowActivatedEventArgs const& args)
         {
-            if (args.WindowActivationState() == xaml::WindowActivationState::Deactivated) { return; }
             auto self = weakThis.get();
             if (!self || self->m_isClosed) { return; }
+            if (args.WindowActivationState() == xaml::WindowActivationState::Deactivated)
+            {
+                self->m_lastPageTextClick.reset();
+                if (self->m_pageTextDrag) { self->EndPageTextDrag(); }
+                return;
+            }
             xaml::Application::Current().as<App>()->WindowActivated(*self);
         });
 
@@ -509,7 +857,6 @@ namespace winrt::urPDF::implementation
 
         LoadSettings();
 
-        // Torn-out tabs receive their placement from the drag operation.
         if (!options.deferPresentation) { RestoreWindowState(); }
         TrackWindowState();
     }
@@ -559,8 +906,6 @@ namespace winrt::urPDF::implementation
         StopTrackingWindowState();
         CaptureWindowState();
 
-        // AppWindow does not support the weak references required by auto_revoke.
-        // Keep the event source alive and remove the handlers explicitly.
         m_observedAppWindow = AppWindow();
         m_windowChangedToken = m_observedAppWindow.Changed(
             [weakThis = get_weak()](auto const&, auto const&)
@@ -635,7 +980,7 @@ namespace winrt::urPDF::implementation
     {
     }
 
-    std::optional<imaging::WriteableBitmap>PageBitmapCache::TryGetBitmap(PageBitmapCacheKey const& key)
+    std::optional<PageBitmap> PageBitmapCache::TryGetBitmap(PageBitmapCacheKey const& key)
     {
         auto cacheEntry = m_entries.find(key);
         if (cacheEntry == m_entries.end())
@@ -649,9 +994,9 @@ namespace winrt::urPDF::implementation
         return cacheEntry->second.bitmap;
     }
 
-    void PageBitmapCache::StoreBitmap(PageBitmapCacheKey const& key, imaging::WriteableBitmap const& bitmap)
+    void PageBitmapCache::StoreBitmap(PageBitmapCacheKey const& key, PageBitmap const& bitmap)
     {
-        const std::size_t memoryBytes = BitmapMemoryBytes(bitmap);
+        const std::size_t memoryBytes = BitmapMemoryBytes(bitmap.source);
         if (memoryBytes > m_budgetBytes)
         {
             return;
@@ -785,6 +1130,7 @@ namespace winrt::urPDF::implementation
 
     PdfTabInfo::~PdfTabInfo()
     {
+        if (m_searchCancelled) { m_searchCancelled->store(true, std::memory_order_release); }
         fz_drop_document(m_ctx.get(), m_doc);
     }
 
@@ -1100,8 +1446,11 @@ namespace winrt::urPDF::implementation
             if (removedEntry != m_openedTabs.end())
             {
                 SaveViewState(removedEntry->second);
+                CancelSelectionCopy(removedEntry->second);
+                CancelPendingSearchDebounce(removedEntry->second);
             }
         }
+        ClearPageOverlays();
         CancelPendingZoomRender();
         auto tabView = sender.as<controls::TabView>();
         auto currentTab = tabView.SelectedItem().try_as<controls::TabViewItem>();
@@ -1125,6 +1474,7 @@ namespace winrt::urPDF::implementation
         if (pdfInfo)
         {
             RestoreViewState(pdfInfo);
+            SyncSearchBarToDocument(pdfInfo);
             return;
         }
 
@@ -1134,6 +1484,7 @@ namespace winrt::urPDF::implementation
         m_pageRepeaterItems = nullptr;
 
         EmptyTabDropZone().Visibility(currentTab ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+        SyncSearchBarToDocument(nullptr);
         DisplayPageNumber(0);
         DisplayPageCount(0);
         PagesLayout().PageSizes(nullptr);
@@ -1198,7 +1549,12 @@ namespace winrt::urPDF::implementation
 
         if (tabView.SelectedItem() == tab) { SaveViewState(pdfTab); }
 
+        ClearPageTextSelection(pdfTab);
+        ClearPageImageSelection(pdfTab);
+        ResetPendingDocumentSearch(pdfTab);
         const auto generation = pdfTab->m_renderGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+        for (auto& links : pdfTab->m_pageLinks) { links.ResetPending(); }
+        for (auto& text : pdfTab->m_pageText) { text.ResetPending(); }
         if (m_pendingZoomTab.lock() == pdfTab) { CancelPendingZoomRender(); }
         if (m_presentedTab.lock() == pdfTab || m_pendingLayoutViewSaveTab.lock() == pdfTab)
         {
@@ -1207,6 +1563,7 @@ namespace winrt::urPDF::implementation
         }
 
         m_pageBitmapCache.ClearDocumentEntries(pdfTab->m_documentId);
+        ClearPageOverlays(pdfTab->m_documentId);
         ReleaseSlotsOutsideRange(pdfTab, 0, -1);
         for (auto& slot : pdfTab->m_renderedPages)
         {
@@ -1568,7 +1925,13 @@ namespace winrt::urPDF::implementation
             {
                 CancelPendingZoomRender();
             }
+            ClearPageTextSelection(openedTab->second);
+            ClearPageImageSelection(openedTab->second);
+            CancelPendingSearchDebounce(openedTab->second);
+            CancelActiveSearchSession(openedTab->second);
+            openedTab->second->m_search.Clear();
             ++openedTab->second->m_renderGeneration;
+            ClearPageOverlays(openedTab->second->m_documentId);
             for (auto& slot : openedTab->second->m_renderedPages) { slot.bitmap.reset(); }
             m_pageBitmapCache.ClearDocumentEntries(openedTab->second->m_documentId);
             m_openedTabs.erase(openedTab);
@@ -1961,7 +2324,15 @@ namespace winrt::urPDF::implementation
             pdfTab->m_pagecount = pagecount;
             pdfTab->m_pageBounds = std::move(pageBounds);
             pdfTab->m_renderedPages = std::move(slots);
+            pdfTab->m_pageLinks.resize(pagecount);
+            pdfTab->m_pageText.resize(pagecount);
             pdfTab->m_layoutLoaded = true;
+            const auto previous = m_openedTabs.find(MainTabView().SelectedItem().try_as<controls::TabViewItem>());
+            if (previous != m_openedTabs.end())
+            {
+                ClearPageTextSelection(previous->second);
+                ClearPageImageSelection(previous->second);
+            }
 
             auto targetTab = requestedTarget
                 ? requestedTarget->get()
@@ -1989,6 +2360,7 @@ namespace winrt::urPDF::implementation
             targetTab.IconSource(tabIcon);
             m_openedTabs[targetTab] = pdfTab;
             RestoreViewState(pdfTab);
+            SyncSearchBarToDocument(pdfTab);
             ReleaseRenderingLock();
             if (!m_viewStateGuard.IsPending()) { RenderVisiblePagesAsync(); }
         }
@@ -2208,6 +2580,7 @@ namespace winrt::urPDF::implementation
 
         m_dpiRefreshPending = false;
         PdfScrollViewer().UpdateLayout();
+        RefreshRealizedPageOverlays();
         RenderVisiblePagesAsync();
     }
 
@@ -2234,7 +2607,7 @@ namespace winrt::urPDF::implementation
         return LimitedPageRenderScaleBucket(bounds, pdfTab->m_viewState.rotation, urpdf::PageRenderScale(std::abs(static_cast<double>(bounds.x1) - bounds.x0), std::abs(static_cast<double>(bounds.y1) - bounds.y0), pdfTab->m_viewState.rotation, rect.Width, rect.Height, pdfTab->m_renderZoom, GetRasterizationScale()));
     }
 
-    bool MainWindow::ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, imaging::WriteableBitmap const& bitmap, int renderScaleBucket)
+    bool MainWindow::ApplyPageBitmap(std::shared_ptr<PdfTabInfo> const& PdfTab, int32_t pageIndex, PageBitmap const& bitmap, int renderScaleBucket)
     {
         if (m_isClosed || renderScaleBucket <= 0 || GetPageRenderScaleBucket(PdfTab, pageIndex) != renderScaleBucket)
         {
@@ -2383,8 +2756,8 @@ namespace winrt::urPDF::implementation
                             result.metrics.bitmapCreated = static_cast<bool>(result.bitmap);
                             if (result.bitmap)
                             {
-                                result.metrics.pixelWidth = result.bitmap.PixelWidth();
-                                result.metrics.pixelHeight = result.bitmap.PixelHeight();
+                                result.metrics.pixelWidth = result.bitmap->source.PixelWidth();
+                                result.metrics.pixelHeight = result.bitmap->source.PixelHeight();
                                 result.metrics.pixelCount = static_cast<std::uint64_t>(result.metrics.pixelWidth) * result.metrics.pixelHeight;
                                 result.metrics.estimatedBufferBytes = result.metrics.pixelCount * 4ull;
                             }
@@ -2407,7 +2780,7 @@ namespace winrt::urPDF::implementation
                 }
                 catch (...)
                 {
-                    CompletePageRender(weakTab, metrics, nullptr, false, std::current_exception(), false);
+                    CompletePageRender(weakTab, metrics, std::nullopt, false, std::current_exception(), false);
                 }
                 return;
             }
@@ -2419,7 +2792,7 @@ namespace winrt::urPDF::implementation
     }
 
     void MainWindow::CompletePageRender(std::weak_ptr<PdfTabInfo> const& weakTab, PageRenderMetrics metrics,
-        graphics::SoftwareBitmap const& bitmap, bool rendered, std::exception_ptr error, bool scheduleNext)
+        std::optional<SoftwarePageBitmap> const& bitmap, bool rendered, std::exception_ptr error, bool scheduleNext)
     {
         try
         {
@@ -2448,12 +2821,13 @@ namespace winrt::urPDF::implementation
                         if (error) { std::rethrow_exception(error); }
                         if (rendered && bitmap)
                         {
-                            imaging::WriteableBitmap writeable(bitmap.PixelWidth(), bitmap.PixelHeight());
-                            bitmap.CopyToBuffer(writeable.PixelBuffer());
+                            imaging::WriteableBitmap writeable(bitmap->source.PixelWidth(), bitmap->source.PixelHeight());
+                            bitmap->source.CopyToBuffer(writeable.PixelBuffer());
                             writeable.Invalidate();
+                            const PageBitmap pageBitmap{ writeable, bitmap->geometry };
                             m_pageBitmapCache.StoreBitmap(PageBitmapCacheKey{ pdfTab->m_documentId, pageIndex,
-                                metrics.rotation, metrics.renderScaleBucket }, writeable);
-                            metrics.status = ApplyPageBitmap(pdfTab, pageIndex, writeable, metrics.renderScaleBucket)
+                                metrics.rotation, metrics.renderScaleBucket }, pageBitmap);
+                            metrics.status = ApplyPageBitmap(pdfTab, pageIndex, pageBitmap, metrics.renderScaleBucket)
                                 ? PageRenderOutcome::applied : PageRenderOutcome::discarded;
                         }
                         else if (rendered)
@@ -2520,6 +2894,7 @@ namespace winrt::urPDF::implementation
     void MainWindow::RebuildPagesContainer(std::shared_ptr<PdfTabInfo> const& pdfTab, std::vector<PageSlot> const& pages, urpdf::ViewStateGuard::Operation operation)
     {
         if (!IsCurrentViewOperation(pdfTab, operation)) { return; }
+        ClearPageOverlays();
         m_presentedTab.reset();
         const int currentRotation = pdfTab->m_viewState.rotation;
         const bool bookView = pdfTab->m_viewState.bookView;
@@ -2562,60 +2937,2146 @@ namespace winrt::urPDF::implementation
         }
     }
 
+    void MainWindow::ReleasePageOverlay(xaml::UIElement const& element)
+    {
+        auto found = m_pageOverlays.find(element);
+        if (found != m_pageOverlays.end())
+        {
+            auto& entry = *found->second;
+            entry.sizeChangedRevoker.revoke();
+            entry.state.Clear();
+            entry.bitmap.reset();
+            entry.document.reset();
+            m_pageOverlays.erase(found);
+        }
+        if (auto parts = TryGetPageElementParts(element)) { ClearPageElement(*parts); }
+    }
+
+    void MainWindow::ClearPageOverlays(std::uint64_t documentId)
+    {
+        if (m_lastPageTextClick)
+        {
+            const auto document = m_lastPageTextClick->document.lock();
+            if (!document || documentId == 0 || document->m_documentId == documentId) { m_lastPageTextClick.reset(); }
+        }
+        if (m_pageTextDrag)
+        {
+            auto document = m_pageTextDrag->press.document.lock();
+            if (documentId == 0 || (document && document->m_documentId == documentId)) { EndPageTextDrag(); }
+        }
+        std::vector<xaml::UIElement> elements;
+        elements.reserve(m_pageOverlays.size());
+        for (auto const& [element, entry] : m_pageOverlays)
+        {
+            const auto binding = entry->state.CurrentBinding();
+            if (documentId == 0 || (binding && binding->documentId == documentId)) { elements.push_back(element); }
+        }
+        for (auto const& element : elements) { ReleasePageOverlay(element); }
+    }
+
+    void MainWindow::RefreshPageOverlay(xaml::UIElement const& element, urpdf::PageOverlayState::Binding binding)
+    {
+        auto found = m_pageOverlays.find(element);
+        if (found == m_pageOverlays.end() || !found->second->state.IsCurrent(binding)) { return; }
+        auto& entry = *found->second;
+        auto document = entry.document.lock();
+        auto tab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
+        auto opened = m_openedTabs.find(tab);
+        if (m_isClosed || !document || document->m_documentId != binding.documentId
+            || document->m_renderGeneration.load(std::memory_order_acquire) != binding.generation
+            || opened == m_openedTabs.end() || opened->second != document
+            || m_layoutRotation != NormalizeRotation(document->m_viewState.rotation)
+            || PagesRepeater().GetElementIndex(element) != binding.pageIndex)
+        {
+            ReleasePageOverlay(element);
+            return;
+        }
+        const auto parts = TryGetPageElementParts(element);
+        if (!parts) { ReleasePageOverlay(element); return; }
+        if (!entry.bitmap || parts->image.Source() != entry.bitmap->source)
+        {
+            entry.bitmap.reset();
+            entry.state.ClearRaster(binding);
+            ClearPageOverlay(*parts, &entry);
+            UpdatePageOverlayClip(*parts);
+            return;
+        }
+
+        const urpdf::ElementSize size{ parts->content.ActualWidth(), parts->content.ActualHeight() };
+        const auto previousSize = entry.state.DisplaySize();
+        if (size.width != previousSize.width || size.height != previousSize.height)
+        {
+            // Page-specific features rebuild their drawings for the new mapping.
+            ClearPageOverlay(*parts, &entry);
+        }
+        entry.state.Resize(binding, size);
+        auto const& mapping = entry.state.Mapping();
+        UpdatePageOverlayClip(*parts, mapping);
+        if (!mapping) { return; }
+        if (!entry.imageAreasBuilt)
+        {
+            DrawPageImageAreas(parts->imageAreas, *mapping, *document, binding.pageIndex);
+            entry.imageAreasBuilt = true;
+        }
+        if (!entry.searchHighlightsBuilt)
+        {
+            DrawPageSearchMatches(parts->searchHighlights, *mapping, *document, binding.pageIndex);
+            entry.searchHighlightsBuilt = true;
+        }
+        if (!entry.selectionBuilt)
+        {
+            DrawPageSelection(parts->highlights, *mapping, *document, binding.pageIndex);
+            entry.selectionBuilt = true;
+        }
+        if (!entry.linkAreasBuilt
+            && binding.pageIndex >= 0 && static_cast<std::size_t>(binding.pageIndex) < document->m_pageLinks.size()
+            && document->m_pageLinks[binding.pageIndex].State() == urpdf::PageLinksState::ready)
+        {
+            BuildPageLinkAreas(element, entry, document, binding);
+        }
+    }
+
+    void MainWindow::RefreshRealizedPageOverlays()
+    {
+        // Snapshot only realized elements; configuration may release entries.
+        std::vector<xaml::UIElement> elements;
+        elements.reserve(m_pageOverlays.size());
+        for (auto const& [element, entry] : m_pageOverlays) { elements.push_back(element); }
+        for (auto const& element : elements)
+        {
+            const auto index = PagesRepeater().GetElementIndex(element);
+            if (index < 0) { ReleasePageOverlay(element); }
+            else { ConfigurePageElement(element, static_cast<std::size_t>(index)); }
+        }
+    }
+
+    std::optional<urpdf::PageCoordinateMapping> MainWindow::TryGetPageCoordinateMapping(int32_t pageIndex)
+    {
+        if (m_isClosed || pageIndex < 0) { return std::nullopt; }
+        auto element = PagesRepeater().TryGetElement(pageIndex);
+        auto found = m_pageOverlays.find(element);
+        if (found == m_pageOverlays.end()) { return std::nullopt; }
+        const auto binding = found->second->state.CurrentBinding();
+        if (!binding) { return std::nullopt; }
+        RefreshPageOverlay(element, *binding);
+        found = m_pageOverlays.find(element);
+        if (found == m_pageOverlays.end() || !found->second->state.IsCurrent(*binding)) { return std::nullopt; }
+        return found->second->state.Mapping();
+    }
+
     void MainWindow::ConfigurePageElement(xaml::UIElement const& element, std::size_t pageIndex)
     {
-        auto border = element.try_as<controls::Border>();
-        if (!border)
-        {
-            return;
-        }
-
-        auto image = border.Child().try_as<controls::Image>();
-        if (!image)
-        {
-            return;
-        }
-
-        auto clearImage = [&]()
-        {
-            image.Source(nullptr);
-            border.Opacity(0.65);
-        };
-
+        auto parts = TryGetPageElementParts(element);
+        if (!parts) { ReleasePageOverlay(element); return; }
         auto currentTab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
-        if (!currentTab)
-        {
-            clearImage();
-            return;
-        }
-
         auto openedTab = m_openedTabs.find(currentTab);
-        if (openedTab == m_openedTabs.end() || pageIndex >= openedTab->second->m_renderedPages.size())
+        if (m_isClosed || openedTab == m_openedTabs.end()
+            || pageIndex >= openedTab->second->m_renderedPages.size()
+            || PagesRepeater().GetElementIndex(element) != static_cast<int32_t>(pageIndex))
         {
-            clearImage();
+            ReleasePageOverlay(element);
             return;
         }
 
-        auto const& page = openedTab->second->m_renderedPages[pageIndex];
-        if (!page.bitmap || page.state != PageRenderState::ready)
+        auto document = openedTab->second;
+        auto found = m_pageOverlays.find(element);
+        if (found == m_pageOverlays.end())
         {
-            clearImage();
-            return;
+            found = m_pageOverlays.emplace(element, std::make_shared<PageOverlayElement>()).first;
+        }
+        auto entry = found->second;
+        const auto previousBinding = entry->state.CurrentBinding();
+        const auto binding = entry->state.Bind(document->m_documentId, static_cast<int>(pageIndex),
+            document->m_renderGeneration.load(std::memory_order_acquire));
+        if (!binding) { ReleasePageOverlay(element); return; }
+        if (previousBinding != binding)
+        {
+            entry->sizeChangedRevoker.revoke();
+            ClearPageElement(*parts, entry.get());
+            entry->bitmap.reset();
+            entry->document = document;
+            entry->sizeChangedRevoker = parts->content.SizeChanged(winrt::auto_revoke,
+                [weakThis = get_weak(), weakElement = winrt::make_weak(element),
+                    weakEntry = std::weak_ptr<PageOverlayElement>(entry), binding = *binding](auto const&, auto const&)
+                {
+                    auto self = weakThis.get();
+                    auto element = weakElement.get();
+                    auto entry = weakEntry.lock();
+                    if (!self || !element || !entry) { return; }
+                    const auto found = self->m_pageOverlays.find(element);
+                    if (found == self->m_pageOverlays.end() || found->second != entry) { return; }
+                    self->RefreshPageOverlay(element, binding);
+                });
         }
 
-        if (image.Source() != *page.bitmap)
+        auto const& page = document->m_renderedPages[pageIndex];
+        // A failed/pending replacement may leave a valid older bitmap visible.
+        if (!page.bitmap || !page.bitmap->source)
+        {
+            entry->bitmap.reset();
+            entry->state.ClearRaster(*binding);
+            ClearPageElement(*parts, entry.get());
+            return;
+        }
+        const bool bitmapChanged = !entry->bitmap || entry->bitmap->source != page.bitmap->source;
+        if (bitmapChanged) { ClearPageOverlay(*parts, entry.get()); }
+        if (parts->image.Source() != page.bitmap->source)
         {
             controls::Image freshImage;
             freshImage.Stretch(media::Stretch::Uniform);
             freshImage.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
             freshImage.VerticalAlignment(xaml::VerticalAlignment::Stretch);
-            freshImage.Source(*page.bitmap);
-            image.Source(nullptr);
-            border.Child(freshImage);
+            freshImage.Source(page.bitmap->source);
+            parts->image.Source(nullptr);
+            parts->content.Children().SetAt(0, freshImage);
+            parts->image = freshImage;
+        }
+        if (bitmapChanged || !entry->bitmap)
+        {
+            entry->bitmap = page.bitmap;
+            entry->state.SetRaster(*binding, entry->bitmap->geometry,
+                { parts->content.ActualWidth(), parts->content.ActualHeight() });
+        }
+        RefreshPageOverlay(element, *binding);
+        EnsurePageLinks(document, static_cast<int32_t>(pageIndex));
+        if ((document->m_textSelection && urpdf::PageSelectionCarets(*document->m_textSelection, binding->pageIndex))
+            || (document->m_selectedImage && document->m_selectedImage->page == binding->pageIndex))
+        {
+            EnsurePageText(document, binding->pageIndex);
+        }
+        parts->border.Opacity(1.0);
+        TryRecordFirstVisiblePage(document);
+    }
+
+    void MainWindow::EnsurePageLinks(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex)
+    {
+        if (m_isClosed || m_isPageLinksLoadRunning || m_workCancelled->load(std::memory_order_acquire)
+            || pageIndex < 0 || static_cast<std::size_t>(pageIndex) >= document->m_pageLinks.size()) { return; }
+        auto& slot = document->m_pageLinks[pageIndex];
+        if (slot.State() != urpdf::PageLinksState::notLoaded) { return; }
+        auto registration = m_runtime->Work().TryRegister();
+        if (!registration) { return; }
+        const auto requestId = *slot.BeginLoad();
+        m_isPageLinksLoadRunning = true;
+        const auto generation = document->m_renderGeneration.load(std::memory_order_acquire);
+        const auto documentId = document->m_documentId;
+        const auto weakTab = std::weak_ptr<PdfTabInfo>(document);
+        try
+        {
+            auto context = m_runtime->CloneContext();
+            auto cancelled = m_workCancelled;
+            auto dispatcher = DispatcherQueue();
+            QueueMuPdfWork(std::move(registration),
+                [document, context = std::move(context), cancelled, generation, pageIndex]() mutable
+                {
+                    PageLinksResult result;
+                    if (cancelled->load(std::memory_order_acquire)) { return result; }
+                    urpdf::RunDocumentOperation(document->m_documentMutex, document->m_renderGeneration, generation, [&]
+                        {
+                            if (cancelled->load(std::memory_order_acquire)) { return; }
+                            result.links = urpdf::CollectPageLinks(context.get(), document->m_doc, pageIndex);
+                            result.loaded = true;
+                        });
+                    return result;
+                },
+                [weakThis = get_weak(), weakTab, cancelled, dispatcher, documentId, pageIndex, requestId]
+                (std::optional<PageLinksResult> result, std::exception_ptr error)
+                {
+                    PageLinksResult completed;
+                    if (result) { completed = std::move(*result); }
+                    TryPublishResult(dispatcher, cancelled,
+                        [weakThis, weakTab, cancelled, documentId, pageIndex, requestId, completed = std::move(completed), error]() mutable
+                        {
+                            auto self = weakThis.get();
+                            if (!self || cancelled->load(std::memory_order_acquire)) { return; }
+                            self->CompletePageLinksLoad(weakTab, documentId, pageIndex, requestId,
+                                std::move(completed.links), completed.loaded, error);
+                        });
+                });
+        }
+        catch (...)
+        {
+            CompletePageLinksLoad(weakTab, documentId, pageIndex, requestId, {}, false, std::current_exception());
+        }
+    }
+
+    void MainWindow::CompletePageLinksLoad(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
+        int32_t pageIndex, std::uint64_t requestId, std::vector<urpdf::PageLink> links, bool loaded, std::exception_ptr error)
+    {
+        m_isPageLinksLoadRunning = false;
+        if (m_isClosed) { return; }
+        try
+        {
+            auto document = weakTab.lock();
+            const bool belongsToWindow = document && document->m_documentId == documentId
+                && std::any_of(m_openedTabs.begin(), m_openedTabs.end(), [&](auto const& tab) { return tab.second == document; });
+            if (belongsToWindow && pageIndex >= 0 && static_cast<std::size_t>(pageIndex) < document->m_pageLinks.size())
+            {
+                document->m_pageLinks[pageIndex].Complete(requestId, std::move(links), loaded, error != nullptr);
+            }
+            // Also schedules pending pages after this job, including an explicit
+            // retry if a generation change discarded it AFTER the last configure.
+            // A transferred tab resets its pending slots before the new owner
+            // configures them; request IDs reject any old owner's completion.
+            RefreshRealizedPageOverlays();
+        }
+        catch (...)
+        {
+#ifdef _DEBUG
+            OutputDebugStringW(L"urPDF: page link completion could not be applied.\n");
+#endif
+        }
+    }
+
+    void MainWindow::BuildPageLinkAreas(xaml::UIElement const& element, PageOverlayElement& entry,
+        std::shared_ptr<PdfTabInfo> const& document, urpdf::PageOverlayState::Binding binding)
+    {
+        const auto parts = TryGetPageElementParts(element);
+        const auto& mapping = entry.state.Mapping();
+        if (!parts || !mapping) { return; }
+        for (auto const& link : document->m_pageLinks[binding.pageIndex].Links())
+        {
+            const auto rect = mapping->PdfToElementRect(link.rect);
+            if (!rect) { continue; }
+            auto area = winrt::make<LinkHitArea>();
+            area.Width(rect->width);
+            area.Height(rect->height);
+            controls::Canvas::SetLeft(area, rect->x);
+            controls::Canvas::SetTop(area, rect->y);
+            xaml::Automation::AutomationProperties::SetName(area, link.kind == urpdf::PageLinkKind::external
+                ? winrt::to_hstring(link.uri) : L"Page " + winrt::to_hstring(link.targetPageIndex + 1));
+            area.Tapped([weakThis = get_weak(), weakElement = winrt::make_weak(element), binding, link]
+                (foundation::IInspectable const&, xaml::Input::TappedRoutedEventArgs const& args)
+                {
+                    auto self = weakThis.get();
+                    auto element = weakElement.get();
+                    if (!self || self->m_isClosed || !element) { return; }
+                    auto overlay = self->m_pageOverlays.find(element);
+                    if (overlay == self->m_pageOverlays.end() || !overlay->second->state.IsCurrent(binding)) { return; }
+                    auto tab = self->MainTabView().SelectedItem().try_as<controls::TabViewItem>();
+                    auto opened = self->m_openedTabs.find(tab);
+                    if (opened == self->m_openedTabs.end() || opened->second->m_documentId != binding.documentId
+                        || opened->second->m_renderGeneration.load(std::memory_order_acquire) != binding.generation) { return; }
+                    self->m_lastPageTextClick.reset();
+                    args.Handled(true);
+                    if (link.kind == urpdf::PageLinkKind::external) { LaunchExternalUriAsync(link.uri); }
+                    else { self->ScrollToPage(link.targetPageIndex + 1); }
+                });
+            parts->overlay.Children().Append(area);
+        }
+        entry.linkAreasBuilt = true;
+    }
+
+    void MainWindow::EnsurePageText(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex, bool prioritize)
+    {
+        if (m_isClosed || m_workCancelled->load(std::memory_order_acquire)
+            || pageIndex < 0 || static_cast<std::size_t>(pageIndex) >= document->m_pageText.size()) { return; }
+        auto& slot = document->m_pageText[pageIndex];
+        if (slot.State() != urpdf::PageTextState::notLoaded) { return; }
+        if (m_isPageTextLoadRunning)
+        {
+            auto queued = std::find_if(m_pageTextLoadQueue.begin(), m_pageTextLoadQueue.end(),
+                [&](auto const& item) { return item.second == pageIndex && item.first.lock() == document; });
+            if (queued != m_pageTextLoadQueue.end())
+            {
+                if (!prioritize) { return; }
+                m_pageTextLoadQueue.erase(queued);
+            }
+            if (prioritize) { m_pageTextLoadQueue.emplace_front(document, pageIndex); }
+            else { m_pageTextLoadQueue.emplace_back(document, pageIndex); }
+            return;
+        }
+        auto registration = m_runtime->Work().TryRegister();
+        if (!registration) { return; }
+        const auto requestId = *slot.BeginLoad();
+        m_isPageTextLoadRunning = true;
+        const auto generation = document->m_renderGeneration.load(std::memory_order_acquire);
+        const auto documentId = document->m_documentId;
+        const auto weakTab = std::weak_ptr<PdfTabInfo>(document);
+        try
+        {
+            auto context = m_runtime->CloneContext();
+            auto cancelled = m_workCancelled;
+            auto dispatcher = DispatcherQueue();
+            QueueMuPdfWork(std::move(registration),
+                [document, context = std::move(context), cancelled, generation, pageIndex]() mutable
+                {
+                    PageTextResult result;
+                    if (cancelled->load(std::memory_order_acquire)) { return result; }
+                    urpdf::RunDocumentOperation(document->m_documentMutex, document->m_renderGeneration, generation, [&]
+                        {
+                            if (cancelled->load(std::memory_order_acquire)) { return; }
+                            result.text = urpdf::LoadPageText(context.get(), document->m_doc, pageIndex);
+                            result.loaded = true;
+                        });
+                    return result;
+                },
+                [weakThis = get_weak(), weakTab, cancelled, dispatcher, documentId, pageIndex, requestId]
+                (std::optional<PageTextResult> result, std::exception_ptr error)
+                {
+                    PageTextResult completed;
+                    if (result) { completed = std::move(*result); }
+                    TryPublishResult(dispatcher, cancelled,
+                        [weakThis, weakTab, cancelled, documentId, pageIndex, requestId, completed = std::move(completed), error]() mutable
+                        {
+                            auto self = weakThis.get();
+                            if (!self || cancelled->load(std::memory_order_acquire)) { return; }
+                            self->CompletePageTextLoad(weakTab, documentId, pageIndex, requestId,
+                                std::move(completed.text), completed.loaded, error);
+                        });
+                });
+        }
+        catch (...)
+        {
+            CompletePageTextLoad(weakTab, documentId, pageIndex, requestId, {}, false, std::current_exception());
+        }
+    }
+
+    void MainWindow::StartNextPageTextLoad()
+    {
+        while (!m_isClosed && !m_isPageTextLoadRunning && !m_pageTextLoadQueue.empty())
+        {
+            auto [weakTab, pageIndex] = m_pageTextLoadQueue.front();
+            m_pageTextLoadQueue.pop_front();
+            auto document = weakTab.lock();
+            if (document && std::any_of(m_openedTabs.begin(), m_openedTabs.end(), [&](auto const& tab) { return tab.second == document; }))
+            {
+                EnsurePageText(document, pageIndex);
+            }
+        }
+    }
+
+    void MainWindow::CompletePageTextLoad(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
+        int32_t pageIndex, std::uint64_t requestId, urpdf::PageText text, bool loaded, std::exception_ptr error)
+    {
+        m_isPageTextLoadRunning = false;
+        if (m_isClosed) { return; }
+        try
+        {
+            auto document = weakTab.lock();
+            const bool belongsToWindow = document && document->m_documentId == documentId
+                && std::any_of(m_openedTabs.begin(), m_openedTabs.end(), [&](auto const& tab) { return tab.second == document; });
+            if (belongsToWindow && pageIndex >= 0 && static_cast<std::size_t>(pageIndex) < document->m_pageText.size()
+                && document->m_pageText[pageIndex].Complete(requestId, std::move(text), loaded, error != nullptr))
+            {
+                const auto state = document->m_pageText[pageIndex].State();
+                auto const& word = document->m_wordSelectionPoints;
+                const bool wordEndpoint = word && (word->anchor.page == pageIndex || word->focus.page == pageIndex);
+                if (state == urpdf::PageTextState::ready || state == urpdf::PageTextState::failed)
+                {
+                    if (wordEndpoint) { UpdateWordTextSelection(document); }
+                    else { ResolvePendingTextPositions(document, pageIndex); }
+                    ResolvePendingImageClick(document, pageIndex);
+                    RefreshPageTextSelection(document, pageIndex);
+                    RefreshPageImageSelection(document, pageIndex);
+                }
+                else if ((document->m_pendingTextAnchor && document->m_pendingTextAnchor->page == pageIndex)
+                    || (document->m_pendingTextFocus && document->m_pendingTextFocus->page == pageIndex)
+                    || (document->m_pendingImageClick && document->m_pendingImageClick->page == pageIndex)
+                    || wordEndpoint)
+                {
+                    // The render generation changed before a newly requested caret load ran.
+                    EnsurePageText(document, pageIndex, true);
+                }
+            }
+        }
+        catch (...)
+        {
+#ifdef _DEBUG
+            OutputDebugStringW(L"urPDF: page text completion could not be applied.\n");
+#endif
+        }
+        try { StartNextPageTextLoad(); } catch (...) {}
+        if (m_pendingSelectionCopy)
+        {
+            // Starting a load can fail synchronously. Resume on the dispatcher so
+            // a run of failed pages cannot recurse through load completion.
+            DispatcherQueue().TryEnqueue([weakThis = get_weak()]
+            {
+                if (auto self = weakThis.get()) { self->ContinueSelectionCopy(); }
+            });
+        }
+    }
+
+    // DOCUMENT SEARCH
+    bool MainWindow::OwnsDocument(std::shared_ptr<PdfTabInfo> const& document, std::uint64_t documentId) const noexcept
+    {
+        return document && documentId != 0 && document->m_documentId == documentId
+            && std::any_of(m_openedTabs.begin(), m_openedTabs.end(),
+                [&](auto const& tab) { return tab.second == document; });
+    }
+
+    void MainWindow::CancelPendingSearchDebounce(std::shared_ptr<PdfTabInfo> const& document) noexcept
+    {
+        if (document && m_pendingSearchTab.lock() != document) { return; }
+        if (m_searchDebounceTimer)
+        {
+            try { m_searchDebounceTimer.Stop(); } catch (...) {}
+        }
+        m_pendingSearchTab.reset();
+        m_pendingSearchQuery.clear();
+    }
+
+    void MainWindow::CancelActiveSearchSession(std::shared_ptr<PdfTabInfo> const& document) noexcept
+    {
+        if (!document || !document->m_searchCancelled) { return; }
+        document->m_searchCancelled->store(true, std::memory_order_release);
+        document->m_searchCancelled.reset();
+    }
+
+    void MainWindow::ScheduleDocumentSearch(std::shared_ptr<PdfTabInfo> const& document, std::wstring query)
+    {
+        if (m_isClosed || !document || !OwnsDocument(document, document->m_documentId)) { return; }
+        document->m_searchDraftQuery = query;
+        if (urpdf::IsBlankSearchQuery(query))
+        {
+            ClearDocumentSearch(document);
+            return;
+        }
+        if (m_searchDebounceTimer)
+        {
+            m_searchDebounceTimer.Stop();
+            m_pendingSearchTab = document;
+            m_pendingSearchQuery = std::move(query);
+            m_searchDebounceTimer.Start();
+            return;
+        }
+        StartDocumentSearch(document, query);
+    }
+
+    void MainWindow::ExecutePendingDebouncedSearch()
+    {
+        auto document = m_pendingSearchTab.lock();
+        auto query = std::move(m_pendingSearchQuery);
+        m_pendingSearchTab.reset();
+        m_pendingSearchQuery.clear();
+        if (m_isClosed || !document || !OwnsDocument(document, document->m_documentId)) { return; }
+        StartDocumentSearch(document, query);
+    }
+
+    void MainWindow::TriggerImmediateDocumentSearch(std::shared_ptr<PdfTabInfo> const& document, std::wstring_view query)
+    {
+        if (m_isClosed || !document || !OwnsDocument(document, document->m_documentId)) { return; }
+        CancelPendingSearchDebounce(document);
+        document->m_searchDraftQuery.assign(query);
+
+        if (urpdf::IsBlankSearchQuery(query))
+        {
+            ClearDocumentSearch(document);
+            return;
         }
 
-        border.Opacity(1.0);
-        TryRecordFirstVisiblePage(openedTab->second);
+        if (document->m_search.Query() == query)
+        {
+            const auto state = document->m_search.State();
+            if (state == urpdf::SearchStatus::ready)
+            {
+                NavigateToNextSearchMatch(document);
+                return;
+            }
+            if (state == urpdf::SearchStatus::searching)
+            {
+                if (document->m_search.MatchCount() > 0)
+                {
+                    NavigateToNextSearchMatch(document);
+                }
+                return;
+            }
+        }
+
+        StartDocumentSearch(document, query);
+    }
+
+    void MainWindow::StartDocumentSearch(std::shared_ptr<PdfTabInfo> const& document, std::wstring_view query)
+    {
+        if (m_isClosed || m_workCancelled->load(std::memory_order_acquire)
+            || !document || !document->m_layoutLoaded || !document->m_doc
+            || !OwnsDocument(document, document->m_documentId))
+        {
+            return;
+        }
+
+        CancelPendingSearchDebounce(document);
+        document->m_searchDraftQuery.assign(query);
+
+        if (urpdf::IsBlankSearchQuery(query))
+        {
+            ClearDocumentSearch(document);
+            return;
+        }
+
+        CancelActiveSearchSession(document);
+
+        if (document->m_pagecount <= 0)
+        {
+            if (const auto requestId = document->m_search.BeginSearch(query))
+            {
+                document->m_search.Complete(*requestId, true, false);
+            }
+            RefreshAllSearchHighlights(document);
+            UpdateSearchBarStatus(document);
+            return;
+        }
+
+        auto registration = m_runtime->Work().TryRegister();
+        if (!registration) { return; }
+
+        const auto requestIdOpt = document->m_search.BeginSearch(query);
+        if (!requestIdOpt)
+        {
+            RefreshAllSearchHighlights(document);
+            UpdateSearchBarStatus(document);
+            return;
+        }
+        const std::uint64_t requestId = *requestIdOpt;
+
+        auto sessionCancelled = std::make_shared<std::atomic<bool>>(false);
+        document->m_searchCancelled = sessionCancelled;
+        RefreshAllSearchHighlights(document);
+        UpdateSearchBarStatus(document);
+
+        const std::uint64_t documentId = document->m_documentId;
+        const int pageCount = document->m_pagecount;
+        const auto weakTab = std::weak_ptr<PdfTabInfo>(document);
+
+        try
+        {
+            std::string utf8Needle = winrt::to_string(query);
+            auto context = m_runtime->CloneContext();
+            auto windowCancelled = m_workCancelled;
+            auto dispatcher = DispatcherQueue();
+            auto weakThis = get_weak();
+
+            QueueMuPdfWork(std::move(registration),
+                [document, context = std::move(context), windowCancelled, sessionCancelled, dispatcher,
+                 weakThis, weakTab, documentId, requestId, pageCount, utf8Needle = std::move(utf8Needle)]() mutable
+                {
+                    DocumentSearchResult result;
+                    std::vector<PageSearchBatch> pendingBatch;
+                    pendingBatch.reserve(SearchPublishBatchPages);
+                    bool publishedAny = false;
+
+                    auto flushBatch = [&]() noexcept -> bool
+                    {
+                        if (pendingBatch.empty()) { return true; }
+                        if (windowCancelled->load(std::memory_order_acquire)
+                            || sessionCancelled->load(std::memory_order_acquire))
+                        {
+                            return false;
+                        }
+                        auto batchToPublish = std::move(pendingBatch);
+                        pendingBatch.clear();
+                        publishedAny = true;
+                        return TryPublishResult(dispatcher, windowCancelled,
+                            [weakThis, weakTab, windowCancelled, sessionCancelled, documentId, requestId,
+                             batch = std::move(batchToPublish)]() mutable
+                            {
+                                auto self = weakThis.get();
+                                if (!self || self->m_isClosed
+                                    || windowCancelled->load(std::memory_order_acquire)
+                                    || sessionCancelled->load(std::memory_order_acquire))
+                                {
+                                    return;
+                                }
+                                self->ApplyDocumentSearchBatch(weakTab, documentId, requestId, std::move(batch));
+                            });
+                    };
+
+                    for (int pageIndex = 0; pageIndex < pageCount; ++pageIndex)
+                    {
+                        if (windowCancelled->load(std::memory_order_acquire)
+                            || sessionCancelled->load(std::memory_order_acquire))
+                        {
+                            return result;
+                        }
+
+                        // Release m_documentMutex between pages so rendering and page interaction stay responsive.
+                        // Intentionally independent of m_renderGeneration (zoom/rotation/DPI do not alter text).
+                        std::vector<urpdf::SearchMatch> pageMatches;
+                        {
+                            std::lock_guard lock(document->m_documentMutex);
+                            if (windowCancelled->load(std::memory_order_acquire)
+                                || sessionCancelled->load(std::memory_order_acquire)
+                                || !document->m_doc)
+                            {
+                                return result;
+                            }
+                            pageMatches = urpdf::SearchPage(context.get(), document->m_doc, pageIndex, utf8Needle.c_str());
+                        }
+
+                        if (!pageMatches.empty())
+                        {
+                            pendingBatch.push_back(PageSearchBatch{ pageIndex, std::move(pageMatches) });
+                            if (!publishedAny || pendingBatch.size() >= SearchPublishBatchPages)
+                            {
+                                if (!flushBatch()) { return result; }
+                            }
+                        }
+                    }
+
+                    if (!flushBatch()) { return result; }
+                    if (windowCancelled->load(std::memory_order_acquire)
+                        || sessionCancelled->load(std::memory_order_acquire))
+                    {
+                        return result;
+                    }
+
+                    result.completed = true;
+                    return result;
+                },
+                [weakThis, weakTab, windowCancelled, sessionCancelled, dispatcher, documentId, requestId]
+                (std::optional<DocumentSearchResult> result, std::exception_ptr error)
+                {
+                    if (sessionCancelled->load(std::memory_order_acquire)) { return; }
+                    const bool completed = result && result->completed;
+                    TryPublishResult(dispatcher, windowCancelled,
+                        [weakThis, weakTab, windowCancelled, sessionCancelled, documentId, requestId, completed, error]() mutable
+                        {
+                            auto self = weakThis.get();
+                            if (!self || self->m_isClosed
+                                || windowCancelled->load(std::memory_order_acquire)
+                                || sessionCancelled->load(std::memory_order_acquire))
+                            {
+                                return;
+                            }
+                            self->CompleteDocumentSearch(weakTab, documentId, requestId, completed, error);
+                        });
+                });
+        }
+        catch (...)
+        {
+            CompleteDocumentSearch(weakTab, documentId, requestId, false, std::current_exception());
+        }
+    }
+
+    void MainWindow::ClearDocumentSearch(std::shared_ptr<PdfTabInfo> const& document)
+    {
+        if (!document) { return; }
+        CancelPendingSearchDebounce(document);
+        CancelActiveSearchSession(document);
+        document->m_searchDraftQuery.clear();
+        document->m_search.Clear();
+        RefreshAllSearchHighlights(document);
+        UpdateSearchBarStatus(document);
+    }
+
+    void MainWindow::CloseDocumentSearch(std::shared_ptr<PdfTabInfo> const& document)
+    {
+        if (!document) { return; }
+        document->m_searchBarOpen = false;
+        ClearDocumentSearch(document);
+    }
+
+    void MainWindow::ResetPendingDocumentSearch(std::shared_ptr<PdfTabInfo> const& document) noexcept
+    {
+        if (!document) { return; }
+        CancelPendingSearchDebounce(document);
+        CancelActiveSearchSession(document);
+        document->m_search.ResetPending();
+    }
+
+    void MainWindow::ApplyDocumentSearchBatch(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
+        std::uint64_t requestId, std::vector<PageSearchBatch> batches)
+    {
+        if (m_isClosed) { return; }
+        auto document = weakTab.lock();
+        if (!OwnsDocument(document, documentId)) { return; }
+        if (document->m_search.State() != urpdf::SearchStatus::searching
+            || document->m_search.RequestId() != requestId)
+        {
+            return;
+        }
+
+        const int32_t currentPage = CurrentSearchPageIndex(document);
+        bool reachedCurrentOrLater = false;
+        std::vector<int32_t> updatedPages;
+        updatedPages.reserve(batches.size());
+
+        for (auto& batch : batches)
+        {
+            const bool hadMatches = !batch.matches.empty();
+            if (document->m_search.AppendPageMatches(requestId, batch.pageIndex, std::move(batch.matches)) && hadMatches)
+            {
+                updatedPages.push_back(batch.pageIndex);
+                if (batch.pageIndex >= currentPage)
+                {
+                    reachedCurrentOrLater = true;
+                }
+            }
+        }
+
+        bool selectedNow = false;
+        if (!document->m_search.ActiveMatchIndex() && reachedCurrentOrLater)
+        {
+            selectedNow = document->m_search.SelectInitialMatch(currentPage).has_value();
+        }
+
+        for (int32_t pageIndex : updatedPages)
+        {
+            RefreshPageSearchHighlights(document, pageIndex);
+        }
+
+        if (selectedNow)
+        {
+            if (auto const* active = document->m_search.ActiveMatch())
+            {
+                ScrollToSearchMatch(document, *active);
+            }
+        }
+
+        UpdateSearchBarStatus(document);
+    }
+
+    void MainWindow::CompleteDocumentSearch(std::weak_ptr<PdfTabInfo> const& weakTab, std::uint64_t documentId,
+        std::uint64_t requestId, bool completed, std::exception_ptr error)
+    {
+        if (m_isClosed) { return; }
+        auto document = weakTab.lock();
+        if (!OwnsDocument(document, documentId)) { return; }
+        if (!document->m_search.Complete(requestId, completed, error != nullptr))
+        {
+            return;
+        }
+
+        document->m_searchCancelled.reset();
+
+        if (document->m_search.State() == urpdf::SearchStatus::ready)
+        {
+            if (!document->m_search.ActiveMatchIndex() && document->m_search.MatchCount() > 0)
+            {
+                const int32_t currentPage = CurrentSearchPageIndex(document);
+                if (document->m_search.SelectInitialMatch(currentPage))
+                {
+                    if (auto const* active = document->m_search.ActiveMatch())
+                    {
+                        RefreshPageSearchHighlights(document, active->pageIndex);
+                        ScrollToSearchMatch(document, *active);
+                    }
+                }
+            }
+        }
+        else
+        {
+            RefreshAllSearchHighlights(document);
+        }
+
+        UpdateSearchBarStatus(document);
+    }
+
+    int32_t MainWindow::CurrentSearchPageIndex(std::shared_ptr<PdfTabInfo> const& document)
+    {
+        if (!document) { return 0; }
+        if (document == SelectedPdfDocument())
+        {
+            if (const auto visible = VisiblePageNumber(document))
+            {
+                return (std::max)(*visible - 1, 0);
+            }
+        }
+        return (std::max)(document->m_currentPageIndex - 1, 0);
+    }
+
+    void MainWindow::ScrollToSearchMatch(std::shared_ptr<PdfTabInfo> const& document, urpdf::SearchMatch const& match)
+    {
+        if (m_isClosed || !document || document != SelectedPdfDocument()) { return; }
+        if (match.pageIndex < 0
+            || static_cast<std::size_t>(match.pageIndex) >= document->m_pageBounds.size())
+        {
+            return;
+        }
+
+        std::vector<urpdf::PageRect> pages;
+        urpdf::ViewportGeometry viewport;
+        ReadViewGeometry(document, pages, viewport);
+        if (static_cast<std::size_t>(match.pageIndex) >= pages.size()) { return; }
+
+        auto const& rawBounds = document->m_pageBounds[match.pageIndex];
+        const urpdf::PdfPageBounds pageBounds{ rawBounds.x0, rawBounds.y0, rawBounds.x1, rawBounds.y1 };
+        const auto matchBounds = urpdf::TrySearchMatchBounds(match.rects, pageBounds);
+        if (!matchBounds) { return; }
+
+        const auto offsets = urpdf::CalculateSearchMatchScrollOffsets(
+            *matchBounds, pageBounds, pages[match.pageIndex], viewport, document->m_viewState.rotation);
+        if (!offsets) { return; }
+
+        PdfScrollViewer().ChangeView(offsets->x, offsets->y, nullptr);
+    }
+
+    void MainWindow::NavigateToNextSearchMatch(std::shared_ptr<PdfTabInfo> const& document)
+    {
+        if (m_isClosed || !document || document->m_search.MatchCount() == 0) { return; }
+        const std::optional<int32_t> previousPage = document->m_search.ActiveMatch()
+            ? std::optional<int32_t>{ document->m_search.ActiveMatch()->pageIndex }
+            : std::nullopt;
+        if (!document->m_search.NextMatch()) { return; }
+        auto const* active = document->m_search.ActiveMatch();
+        if (!active) { return; }
+        if (previousPage && *previousPage != active->pageIndex)
+        {
+            RefreshPageSearchHighlights(document, *previousPage);
+        }
+        RefreshPageSearchHighlights(document, active->pageIndex);
+        ScrollToSearchMatch(document, *active);
+        UpdateSearchBarStatus(document);
+    }
+
+    void MainWindow::NavigateToPreviousSearchMatch(std::shared_ptr<PdfTabInfo> const& document)
+    {
+        if (m_isClosed || !document || document->m_search.MatchCount() == 0) { return; }
+        const std::optional<int32_t> previousPage = document->m_search.ActiveMatch()
+            ? std::optional<int32_t>{ document->m_search.ActiveMatch()->pageIndex }
+            : std::nullopt;
+        if (!document->m_search.PreviousMatch()) { return; }
+        auto const* active = document->m_search.ActiveMatch();
+        if (!active) { return; }
+        if (previousPage && *previousPage != active->pageIndex)
+        {
+            RefreshPageSearchHighlights(document, *previousPage);
+        }
+        RefreshPageSearchHighlights(document, active->pageIndex);
+        ScrollToSearchMatch(document, *active);
+        UpdateSearchBarStatus(document);
+    }
+
+    void MainWindow::RefreshPageSearchHighlights(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex)
+    {
+        if (m_isClosed || !document || pageIndex < 0) { return; }
+        auto element = PagesRepeater().TryGetElement(pageIndex);
+        auto found = m_pageOverlays.find(element);
+        if (found == m_pageOverlays.end() || found->second->document.lock() != document) { return; }
+        if (const auto binding = found->second->state.CurrentBinding())
+        {
+            found->second->searchHighlightsBuilt = false;
+            RefreshPageOverlay(element, *binding);
+        }
+    }
+
+    void MainWindow::RefreshAllSearchHighlights(std::shared_ptr<PdfTabInfo> const& document)
+    {
+        if (m_isClosed || !document) { return; }
+        std::vector<std::pair<xaml::UIElement, urpdf::PageOverlayState::Binding>> targets;
+        targets.reserve(m_pageOverlays.size());
+        for (auto const& [element, entry] : m_pageOverlays)
+        {
+            if (entry->document.lock() != document) { continue; }
+            if (const auto binding = entry->state.CurrentBinding())
+            {
+                entry->searchHighlightsBuilt = false;
+                targets.emplace_back(element, *binding);
+            }
+        }
+        for (auto const& [element, binding] : targets)
+        {
+            RefreshPageOverlay(element, binding);
+        }
+    }
+
+    void MainWindow::UpdateSearchBarStatus(std::shared_ptr<PdfTabInfo> const& document)
+    {
+        if (m_isClosed || !document || document != SelectedPdfDocument()) { return; }
+
+        const auto state = document->m_search.State();
+        const std::size_t total = document->m_search.MatchCount();
+        const auto active = document->m_search.ActiveMatchIndex();
+        const bool isSearching = state == urpdf::SearchStatus::searching;
+
+        SearchProgressRing().IsActive(isSearching);
+        SearchProgressRing().Visibility(isSearching ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+
+        std::wstring statusText;
+        if (total > 0)
+        {
+            if (active)
+            {
+                statusText = std::to_wstring(*active + 1) + L" of " + std::to_wstring(total);
+            }
+            else
+            {
+                statusText = std::to_wstring(total);
+            }
+        }
+        else if (isSearching)
+        {
+            statusText = L"Searching...";
+        }
+        else if (state == urpdf::SearchStatus::ready)
+        {
+            statusText = L"No results";
+        }
+        else if (state == urpdf::SearchStatus::failed)
+        {
+            statusText = L"Search failed";
+        }
+
+        SearchStatusText().Text(statusText);
+        const bool canNavigate = total > 0;
+        SearchPreviousButton().IsEnabled(canNavigate);
+        SearchNextButton().IsEnabled(canNavigate);
+    }
+
+    bool MainWindow::CanUseDocumentSearch()
+    {
+        if (m_isClosed
+            || SettingsOverlay().Visibility() == xaml::Visibility::Visible
+            || RootFrame().Visibility() == xaml::Visibility::Visible)
+        {
+            return false;
+        }
+        auto document = SelectedPdfDocument();
+        return document && document->m_layoutLoaded;
+    }
+
+    bool MainWindow::IsFocusInsideElement(xaml::DependencyObject const& container)
+    {
+        if (m_isClosed || !container) { return false; }
+        auto root = MainWindowUI().XamlRoot();
+        if (!root) { return false; }
+        auto focused = xaml::Input::FocusManager::GetFocusedElement(root).try_as<xaml::DependencyObject>();
+        while (focused)
+        {
+            if (focused == container) { return true; }
+            focused = media::VisualTreeHelper::GetParent(focused);
+        }
+        return false;
+    }
+
+    void MainWindow::SyncSearchBarToDocument(std::shared_ptr<PdfTabInfo> const& document)
+    {
+        if (m_isClosed) { return; }
+
+        if (!document || !document->m_layoutLoaded)
+        {
+            SearchButton().IsEnabled(false);
+            SearchBar().Visibility(xaml::Visibility::Collapsed);
+            m_isSyncingSearchText = true;
+            SearchTextBox().Text(L"");
+            m_isSyncingSearchText = false;
+            SearchProgressRing().IsActive(false);
+            SearchProgressRing().Visibility(xaml::Visibility::Collapsed);
+            SearchStatusText().Text(L"");
+            SearchPreviousButton().IsEnabled(false);
+            SearchNextButton().IsEnabled(false);
+            return;
+        }
+
+        SearchButton().IsEnabled(true);
+        SearchBar().Visibility(document->m_searchBarOpen ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+
+        std::wstring const& queryText = !document->m_searchDraftQuery.empty()
+            ? document->m_searchDraftQuery
+            : document->m_search.Query();
+        if (std::wstring_view{ SearchTextBox().Text() } != queryText)
+        {
+            m_isSyncingSearchText = true;
+            SearchTextBox().Text(queryText);
+            m_isSyncingSearchText = false;
+        }
+
+        if (document->m_searchBarOpen
+            && document->m_search.State() == urpdf::SearchStatus::idle
+            && !urpdf::IsBlankSearchQuery(queryText))
+        {
+            StartDocumentSearch(document, queryText);
+            return;
+        }
+
+        UpdateSearchBarStatus(document);
+    }
+
+    void MainWindow::OpenSearchBar()
+    {
+        if (!CanUseDocumentSearch()) { return; }
+        auto document = SelectedPdfDocument();
+        if (!document) { return; }
+
+        document->m_searchBarOpen = true;
+        SyncSearchBarToDocument(document);
+        if (SearchTextBox().Focus(xaml::FocusState::Programmatic))
+        {
+            SearchTextBox().SelectAll();
+        }
+        else
+        {
+            DispatcherQueue().TryEnqueue([weakThis = get_weak()]()
+            {
+                if (auto self = weakThis.get(); self && !self->m_isClosed
+                    && self->SearchBar().Visibility() == xaml::Visibility::Visible)
+                {
+                    self->SearchTextBox().Focus(xaml::FocusState::Programmatic);
+                    self->SearchTextBox().SelectAll();
+                }
+            });
+        }
+    }
+
+    void MainWindow::CloseSearchBar()
+    {
+        if (m_isClosed) { return; }
+        if (auto document = SelectedPdfDocument())
+        {
+            CloseDocumentSearch(document);
+        }
+        SearchBar().Visibility(xaml::Visibility::Collapsed);
+        m_isSyncingSearchText = true;
+        SearchTextBox().Text(L"");
+        m_isSyncingSearchText = false;
+        SearchProgressRing().IsActive(false);
+        SearchProgressRing().Visibility(xaml::Visibility::Collapsed);
+        SearchStatusText().Text(L"");
+        SearchPreviousButton().IsEnabled(false);
+        SearchNextButton().IsEnabled(false);
+        PdfScrollViewer().Focus(xaml::FocusState::Programmatic);
+    }
+
+    void MainWindow::SearchButton_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        OpenSearchBar();
+    }
+
+    void MainWindow::FindInDocument_Invoked(xaml::Input::KeyboardAccelerator const&,
+        xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args)
+    {
+        if (!CanUseDocumentSearch()) { return; }
+        OpenSearchBar();
+        args.Handled(true);
+    }
+
+    void MainWindow::FindNext_Invoked(xaml::Input::KeyboardAccelerator const&,
+        xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args)
+    {
+        if (!CanUseDocumentSearch()) { return; }
+        auto document = SelectedPdfDocument();
+        if (!document || !document->m_searchBarOpen) { return; }
+
+        std::wstring query{ SearchTextBox().Text() };
+        TriggerImmediateDocumentSearch(document, query);
+        args.Handled(true);
+    }
+
+    void MainWindow::FindPrevious_Invoked(xaml::Input::KeyboardAccelerator const&,
+        xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args)
+    {
+        if (!CanUseDocumentSearch()) { return; }
+        auto document = SelectedPdfDocument();
+        if (!document || !document->m_searchBarOpen) { return; }
+
+        std::wstring query{ SearchTextBox().Text() };
+        const auto state = document->m_search.State();
+        if (document->m_search.Query() == query
+            && (state == urpdf::SearchStatus::ready
+                || (state == urpdf::SearchStatus::searching && document->m_search.MatchCount() > 0)))
+        {
+            NavigateToPreviousSearchMatch(document);
+        }
+        else
+        {
+            TriggerImmediateDocumentSearch(document, query);
+        }
+        args.Handled(true);
+    }
+
+    void MainWindow::SearchTextBox_TextChanged(foundation::IInspectable const&, controls::TextChangedEventArgs const&)
+    {
+        if (m_isClosed || m_isSyncingSearchText) { return; }
+        auto document = SelectedPdfDocument();
+        if (!document || !document->m_searchBarOpen) { return; }
+
+        std::wstring query{ SearchTextBox().Text() };
+        ScheduleDocumentSearch(document, std::move(query));
+    }
+
+    void MainWindow::SearchTextBox_KeyDown(foundation::IInspectable const&, xaml::Input::KeyRoutedEventArgs const& args)
+    {
+        if (m_isClosed || args.Key() != winrt::Windows::System::VirtualKey::Enter) { return; }
+        auto document = SelectedPdfDocument();
+        if (!document || !document->m_searchBarOpen) { return; }
+
+        const auto shiftState = winrt::Microsoft::UI::Input::InputKeyboardSource::GetKeyStateForCurrentThread(
+            winrt::Windows::System::VirtualKey::Shift);
+        const bool shiftPressed = (shiftState & winrt::Windows::UI::Core::CoreVirtualKeyStates::Down)
+            == winrt::Windows::UI::Core::CoreVirtualKeyStates::Down;
+
+        std::wstring query{ SearchTextBox().Text() };
+        const auto state = document->m_search.State();
+        if (shiftPressed && document->m_search.Query() == query
+            && (state == urpdf::SearchStatus::ready
+                || (state == urpdf::SearchStatus::searching && document->m_search.MatchCount() > 0)))
+        {
+            NavigateToPreviousSearchMatch(document);
+        }
+        else
+        {
+            TriggerImmediateDocumentSearch(document, query);
+        }
+        args.Handled(true);
+    }
+
+    void MainWindow::SearchPreviousButton_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        if (auto document = SelectedPdfDocument())
+        {
+            NavigateToPreviousSearchMatch(document);
+        }
+    }
+
+    void MainWindow::SearchNextButton_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        if (auto document = SelectedPdfDocument())
+        {
+            NavigateToNextSearchMatch(document);
+        }
+    }
+
+    void MainWindow::SearchCloseButton_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        CloseSearchBar();
+    }
+
+    void MainWindow::ResolvePendingTextPositions(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex)
+    {
+        if (!document->m_textSelection) { return; }
+        auto selection = *document->m_textSelection;
+        auto const& slot = document->m_pageText[pageIndex];
+        const auto resolve = [&](std::optional<urpdf::PendingTextPosition>& pending, urpdf::TextPosition& endpoint)
+        {
+            if (!pending || pending->page != pageIndex) { return; }
+            if (slot.State() == urpdf::PageTextState::ready) { endpoint.caret = urpdf::HitTest(slot.Text(), pending->point); }
+            pending.reset();
+        };
+        resolve(document->m_pendingTextAnchor, selection.anchor);
+        resolve(document->m_pendingTextFocus, selection.focus);
+        SetPageTextSelection(document, selection);
+    }
+
+    void MainWindow::UpdateWordTextSelection(std::shared_ptr<PdfTabInfo> const& document)
+    {
+        if (!document->m_wordSelectionPoints) { return; }
+        const auto [anchor, focus] = *document->m_wordSelectionPoints;
+        auto const& anchorSlot = document->m_pageText[anchor.page];
+        if (NeedsPageText(anchorSlot))
+        {
+            EnsurePageText(document, anchor.page, true);
+            return;
+        }
+
+        auto const& anchorText = anchorSlot.Text();
+        const auto word = urpdf::WordAt(anchorText, anchor.point);
+        const auto anchorCaret = word ? word->first : urpdf::HitTest(anchorText, anchor.point);
+        const urpdf::TextSelection anchorWord{ { anchor.page, anchorCaret }, { anchor.page, word ? word->second : anchorCaret } };
+
+        auto const& focusSlot = document->m_pageText[focus.page];
+        const bool focusPending = NeedsPageText(focusSlot);
+        urpdf::TextCaretRange focusRange;
+        if (word && !focusPending) { focusRange = urpdf::WordDragCarets(focusSlot.Text(), focus.point); }
+        else
+        {
+            const auto caret = focusPending ? (focus.page < anchor.page ? 0u : urpdf::kPageEnd)
+                : urpdf::HitTest(focusSlot.Text(), focus.point);
+            focusRange = { caret, caret };
+        }
+        const auto selection = urpdf::ExtendWordSelection(anchorWord, focus.page, focusRange);
+        const bool dragging = m_pageTextDrag && m_pageTextDrag->byWord && m_pageTextDrag->press.document.lock() == document;
+        if (!dragging && !focusPending) { document->m_wordSelectionPoints.reset(); }
+        SetPageTextSelection(document, selection.anchor != selection.focus ? std::optional{ selection } : std::nullopt);
+        if (focusPending)
+        {
+            EnsurePageText(document, focus.page, true);
+        }
+    }
+
+    void MainWindow::SetPageTextSelection(std::shared_ptr<PdfTabInfo> const& document, std::optional<urpdf::TextSelection> selection)
+    {
+        if (document->m_textSelection == selection) { return; }
+        const auto previous = std::exchange(document->m_textSelection, selection);
+        std::vector<int32_t> changedPages;
+        for (auto const& [element, entry] : m_pageOverlays)
+        {
+            const auto binding = entry->state.CurrentBinding();
+            if (!binding || entry->document.lock() != document) { continue; }
+            const auto page = binding->pageIndex;
+            const auto before = previous ? urpdf::PageSelectionCarets(*previous, page) : std::nullopt;
+            const auto after = selection ? urpdf::PageSelectionCarets(*selection, page) : std::nullopt;
+            if (before != after) { changedPages.push_back(page); }
+        }
+        for (auto page : changedPages)
+        {
+            RefreshPageTextSelection(document, page);
+            if (selection && urpdf::PageSelectionCarets(*selection, page)) { EnsurePageText(document, page); }
+        }
+    }
+
+    void MainWindow::RefreshPageTextSelection(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex)
+    {
+        auto element = PagesRepeater().TryGetElement(pageIndex);
+        auto found = m_pageOverlays.find(element);
+        if (found == m_pageOverlays.end() || found->second->document.lock() != document) { return; }
+        if (const auto binding = found->second->state.CurrentBinding())
+        {
+            found->second->selectionBuilt = false;
+            RefreshPageOverlay(element, *binding);
+        }
+    }
+
+    void MainWindow::CancelSelectionCopy(std::shared_ptr<PdfTabInfo> const& document) noexcept
+    {
+        if (m_pendingSelectionCopy && m_pendingSelectionCopy->document.lock() == document) { m_pendingSelectionCopy.reset(); }
+    }
+
+    void MainWindow::ClearPageTextSelection(std::shared_ptr<PdfTabInfo> const& document)
+    {
+        CancelSelectionCopy(document);
+        if (m_lastPageTextClick && m_lastPageTextClick->document.lock() == document) { m_lastPageTextClick.reset(); }
+        document->m_pendingTextAnchor.reset();
+        document->m_pendingTextFocus.reset();
+        document->m_wordSelectionPoints.reset();
+        SetPageTextSelection(document, std::nullopt);
+        if (m_pageTextDrag && m_pageTextDrag->press.document.lock() == document) { EndPageTextDrag(); }
+    }
+
+    void MainWindow::SetSelectedPageImage(std::shared_ptr<PdfTabInfo> const& document,
+        std::optional<urpdf::PageImageSelection> selection)
+    {
+        if (selection) { ClearPageTextSelection(document); }
+        if (document->m_selectedImage == selection) { return; }
+        const auto previous = std::exchange(document->m_selectedImage, selection);
+        if (previous) { RefreshPageImageSelection(document, previous->page); }
+        if (selection && (!previous || previous->page != selection->page))
+        {
+            RefreshPageImageSelection(document, selection->page);
+            EnsurePageText(document, selection->page);
+        }
+    }
+
+    void MainWindow::RefreshPageImageSelection(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex)
+    {
+        auto element = PagesRepeater().TryGetElement(pageIndex);
+        auto found = m_pageOverlays.find(element);
+        if (found == m_pageOverlays.end() || found->second->document.lock() != document) { return; }
+        if (const auto binding = found->second->state.CurrentBinding())
+        {
+            found->second->imageAreasBuilt = false;
+            RefreshPageOverlay(element, *binding);
+        }
+    }
+
+    void MainWindow::ClearPageImageSelection(std::shared_ptr<PdfTabInfo> const& document)
+    {
+        if (m_contextMenuImage && m_contextMenuImage->document.lock() == document) { m_contextMenuImage.reset(); }
+        document->m_pendingImageClick.reset();
+        SetSelectedPageImage(document, std::nullopt);
+    }
+
+    void MainWindow::ResolvePendingImageClick(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex)
+    {
+        if (!document->m_pendingImageClick || document->m_pendingImageClick->page != pageIndex) { return; }
+        const auto pending = std::exchange(document->m_pendingImageClick, std::nullopt);
+        auto const& slot = document->m_pageText[pageIndex];
+        if (slot.State() != urpdf::PageTextState::ready || urpdf::IsOverText(slot.Text(), pending->point))
+        {
+            SetSelectedPageImage(document, std::nullopt);
+            return;
+        }
+        if (const auto imageIndex = urpdf::HitTestImage(slot.Text().images, pending->point))
+        {
+            SetSelectedPageImage(document, urpdf::PageImageSelection{ pageIndex, *imageIndex });
+        }
+        else
+        {
+            SetSelectedPageImage(document, std::nullopt);
+        }
+    }
+
+    std::shared_ptr<PdfTabInfo> MainWindow::SelectedPdfDocument()
+    {
+        if (m_isClosed) { return nullptr; }
+        const auto tab = MainTabView().SelectedItem().try_as<controls::TabViewItem>();
+        const auto found = m_openedTabs.find(tab);
+        return found != m_openedTabs.end() ? found->second : nullptr;
+    }
+
+    void MainWindow::SelectAll()
+    {
+        const auto document = SelectedPdfDocument();
+        if (!document || document->m_pagecount <= 0) { return; }
+
+        const urpdf::TextSelection all{ { 0, 0 }, { document->m_pagecount - 1, urpdf::kPageEnd } };
+        if (document->m_textSelection == all && !document->m_pendingTextAnchor && !document->m_pendingTextFocus
+            && !document->m_wordSelectionPoints && !m_pageTextDrag) { return; }
+
+        ClearPageImageSelection(document);
+        ClearPageTextSelection(document);
+        // The sentinel does not require loading the last page. The same overlay path
+        // used for dragging loads text only for realized pages until a copy is requested.
+        SetPageTextSelection(document, all);
+    }
+
+    bool MainWindow::HasSelection()
+    {
+        const auto document = SelectedPdfDocument();
+        return document && document->m_textSelection
+            && document->m_textSelection->anchor != document->m_textSelection->focus;
+    }
+
+    bool MainWindow::HasImageSelection()
+    {
+        const auto document = SelectedPdfDocument();
+        return document && document->m_selectedImage.has_value();
+    }
+
+    bool MainWindow::CopySelectionText()
+    {
+        const auto document = SelectedPdfDocument();
+        if (!document) { return false; }
+
+        auto const& selection = document->m_textSelection;
+        auto const& word = document->m_wordSelectionPoints;
+        const bool pendingDrag = document->m_pendingTextFocus && document->m_pendingTextFocus != document->m_pendingTextAnchor;
+        if (!word && (!selection || (selection->anchor == selection->focus && !pendingDrag))) { return false; }
+
+        const auto firstPage = word ? (std::min)(word->anchor.page, word->focus.page) : selection->InDocumentOrder().first.page;
+        const auto clipboardSequence = GetClipboardSequenceNumber();
+        if (!DispatcherQueue().TryEnqueue([weakThis = get_weak()]
+            {
+                if (auto self = weakThis.get()) { self->ContinueSelectionCopy(); }
+            })) { return false; }
+
+        m_pendingSelectionCopy = PendingSelectionCopy{ document, firstPage, clipboardSequence };
+        return true;
+    }
+
+    bool MainWindow::CopySelectedImage()
+    {
+        const auto document = SelectedPdfDocument();
+        if (!document || !document->m_selectedImage) { return false; }
+        return QueueImageCopy(document, *document->m_selectedImage);
+    }
+
+    bool MainWindow::QueueImageCopy(std::shared_ptr<PdfTabInfo> const& document, urpdf::PageImageSelection selection)
+    {
+        if (m_isClosed || !document || m_workCancelled->load(std::memory_order_acquire)
+            || selection.page < 0 || selection.page >= document->m_pagecount) { return false; }
+        auto registration = m_runtime->Work().TryRegister();
+        if (!registration) { return false; }
+        const auto clipboardSequence = GetClipboardSequenceNumber();
+        try
+        {
+            auto context = m_runtime->CloneContext();
+            auto cancelled = m_workCancelled;
+            auto dispatcher = DispatcherQueue();
+            QueueMuPdfWork(std::move(registration),
+                [document, context = std::move(context), cancelled, selection]() mutable
+                {
+                    std::vector<std::uint8_t> png;
+                    if (cancelled->load(std::memory_order_acquire)) { return png; }
+                    std::lock_guard lock(document->m_documentMutex);
+                    if (cancelled->load(std::memory_order_acquire) || !document->m_doc) { return png; }
+                    png = urpdf::ExtractPageImagePng(context.get(), document->m_doc, selection.page, selection.imageIndex);
+                    return png;
+                },
+                [weakThis = get_weak(), cancelled, dispatcher, clipboardSequence]
+                (std::optional<std::vector<std::uint8_t>> result, std::exception_ptr error)
+                {
+                    if (error || !result || result->empty())
+                    {
+#ifdef _DEBUG
+                        OutputDebugStringW(L"urPDF: could not extract PDF image for clipboard.\n");
+#endif
+                        return;
+                    }
+                    TryPublishResult(dispatcher, cancelled,
+                        [weakThis, cancelled, clipboardSequence, png = std::move(*result)]() mutable
+                        {
+                            auto self = weakThis.get();
+                            if (!self || self->m_isClosed || cancelled->load(std::memory_order_acquire)) { return; }
+                            self->CompleteImageCopy(std::move(png), clipboardSequence);
+                        });
+                });
+            return true;
+        }
+        catch (...)
+        {
+#ifdef _DEBUG
+            OutputDebugStringW(L"urPDF: could not queue PDF image copy.\n");
+#endif
+            return false;
+        }
+    }
+
+    winrt::fire_and_forget MainWindow::CompleteImageCopy(std::vector<std::uint8_t> pngBytes, DWORD clipboardSequence)
+    {
+        auto strongThis = get_strong();
+        try
+        {
+            if (m_isClosed || pngBytes.empty() || clipboardSequence != GetClipboardSequenceNumber()) { co_return; }
+
+            using namespace winrt::Windows::Storage::Streams;
+            using namespace winrt::Windows::ApplicationModel::DataTransfer;
+
+            InMemoryRandomAccessStream stream;
+            DataWriter writer(stream.GetOutputStreamAt(0));
+            writer.WriteBytes(pngBytes);
+            co_await writer.StoreAsync();
+            co_await writer.FlushAsync();
+            writer.DetachStream();
+            stream.Seek(0);
+
+            if (m_isClosed || clipboardSequence != GetClipboardSequenceNumber()) { co_return; }
+
+            DataPackage data;
+            data.RequestedOperation(DataPackageOperation::Copy);
+            data.SetBitmap(RandomAccessStreamReference::CreateFromStream(stream));
+            Clipboard::SetContent(data);
+            Clipboard::Flush();
+        }
+        catch (...)
+        {
+            OutputDebugStringW(L"urPDF: could not copy PDF image to the clipboard.\n");
+        }
+    }
+
+    foundation::IAsyncOperation<storage::StorageFile> MainWindow::PickImageSaveFileAsync(winrt::hstring const& suggestedFileName)
+    {
+        pickers::FileSavePicker picker;
+        picker.SuggestedStartLocation(pickers::PickerLocationId::PicturesLibrary);
+        picker.SuggestedFileName(suggestedFileName);
+        picker.FileTypeChoices().Insert(L"PNG image", winrt::single_threaded_vector<winrt::hstring>({ L".png" }));
+
+        HWND hwnd{};
+        this->try_as<::IWindowNative>()->get_WindowHandle(&hwnd);
+        picker.as<::IInitializeWithWindow>()->Initialize(hwnd);
+
+        co_return co_await picker.PickSaveFileAsync();
+    }
+
+    void MainWindow::QueueImageSave(std::shared_ptr<PdfTabInfo> const& document, urpdf::PageImageSelection selection,
+        storage::StorageFile file)
+    {
+        if (m_isClosed || !document || !file || m_workCancelled->load(std::memory_order_acquire)
+            || selection.page < 0 || selection.page >= document->m_pagecount) { return; }
+        auto registration = m_runtime->Work().TryRegister();
+        if (!registration) { return; }
+        try
+        {
+            auto context = m_runtime->CloneContext();
+            auto cancelled = m_workCancelled;
+            auto dispatcher = DispatcherQueue();
+            QueueMuPdfWork(std::move(registration),
+                [document, context = std::move(context), cancelled, selection]() mutable
+                {
+                    std::vector<std::uint8_t> png;
+                    if (cancelled->load(std::memory_order_acquire)) { return png; }
+                    std::lock_guard lock(document->m_documentMutex);
+                    if (cancelled->load(std::memory_order_acquire) || !document->m_doc) { return png; }
+                    png = urpdf::ExtractPageImagePng(context.get(), document->m_doc, selection.page, selection.imageIndex);
+                    return png;
+                },
+                [weakThis = get_weak(), cancelled, dispatcher, file = std::move(file)]
+                (std::optional<std::vector<std::uint8_t>> result, std::exception_ptr error) mutable
+                {
+                    if (error || !result || result->empty())
+                    {
+#ifdef _DEBUG
+                        OutputDebugStringW(L"urPDF: could not extract PDF image for saving.\n");
+#endif
+                        return;
+                    }
+                    TryPublishResult(dispatcher, cancelled,
+                        [weakThis, cancelled, file = std::move(file), png = std::move(*result)]() mutable
+                        {
+                            auto self = weakThis.get();
+                            if (!self || self->m_isClosed || cancelled->load(std::memory_order_acquire)) { return; }
+                            self->CompleteImageSave(std::move(file), std::move(png));
+                        });
+                });
+        }
+        catch (...)
+        {
+#ifdef _DEBUG
+            OutputDebugStringW(L"urPDF: could not queue PDF image save.\n");
+#endif
+        }
+    }
+
+    winrt::fire_and_forget MainWindow::CompleteImageSave(storage::StorageFile file, std::vector<std::uint8_t> pngBytes)
+    {
+        auto strongThis = get_strong();
+        try
+        {
+            if (m_isClosed || !file || pngBytes.empty()) { co_return; }
+            storage::CachedFileManager::DeferUpdates(file);
+            co_await storage::FileIO::WriteBytesAsync(file, pngBytes);
+            co_await storage::CachedFileManager::CompleteUpdatesAsync(file);
+        }
+        catch (...)
+        {
+            OutputDebugStringW(L"urPDF: could not save PDF image.\n");
+        }
+    }
+
+    void MainWindow::PdfScrollViewer_ContextRequested(xaml::UIElement const&, xaml::Input::ContextRequestedEventArgs const& args)
+    {
+        if (m_isClosed) { return; }
+        const auto document = SelectedPdfDocument();
+        if (!document || m_presentedTab.lock() != document) { return; }
+
+        auto source = args.OriginalSource().try_as<xaml::DependencyObject>();
+        while (source && source != PdfScrollViewer())
+        {
+            if (source.try_as<controls::Primitives::ScrollBar>()) { return; }
+            source = media::VisualTreeHelper::GetParent(source);
+        }
+
+        std::optional<urpdf::PageImageSelection> targetImage;
+        foundation::Point showPosition{};
+        bool hasPosition = false;
+        if (args.TryGetPosition(PdfScrollViewer(), showPosition))
+        {
+            hasPosition = true;
+            if (const auto target = PageTextPositionAtPointer(document, showPosition, true))
+            {
+                if (target->page >= 0 && static_cast<std::size_t>(target->page) < document->m_pageText.size())
+                {
+                    auto const& slot = document->m_pageText[target->page];
+                    if (slot.State() == urpdf::PageTextState::ready)
+                    {
+                        if (const auto imageIndex = urpdf::HitTestImage(slot.Text().images, target->point))
+                        {
+                            targetImage = urpdf::PageImageSelection{ target->page, *imageIndex };
+                            SetSelectedPageImage(document, targetImage);
+                        }
+                    }
+                    else if (NeedsPageText(slot))
+                    {
+                        EnsurePageText(document, target->page, true);
+                    }
+                }
+            }
+        }
+        else if (document->m_selectedImage)
+        {
+            targetImage = document->m_selectedImage;
+            if (const auto element = PagesRepeater().TryGetElement(targetImage->page))
+            {
+                const auto found = m_pageOverlays.find(element);
+                const auto parts = TryGetPageElementParts(element);
+                if (found != m_pageOverlays.end() && parts && found->second->state.Mapping()
+                    && targetImage->page >= 0
+                    && static_cast<std::size_t>(targetImage->page) < document->m_pageText.size()
+                    && document->m_pageText[targetImage->page].State() == urpdf::PageTextState::ready)
+                {
+                    if (const auto* image = urpdf::FindPageImage(
+                        document->m_pageText[targetImage->page].Text().images, targetImage->imageIndex))
+                    {
+                        if (const auto rect = found->second->state.Mapping()->PdfToElementRect(image->bounds))
+                        {
+                            const foundation::Point center{
+                                static_cast<float>(rect->x + rect->width / 2.0),
+                                static_cast<float>(rect->y + rect->height / 2.0) };
+                            showPosition = parts->selection.TransformToVisual(PdfScrollViewer()).TransformPoint(center);
+                            hasPosition = std::isfinite(showPosition.X) && std::isfinite(showPosition.Y);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!targetImage) { return; }
+
+        m_contextMenuImage = ContextMenuImageTarget{ document, *targetImage };
+        controls::Primitives::FlyoutShowOptions options;
+        if (hasPosition) { options.Position(showPosition); }
+        options.ShowMode(controls::Primitives::FlyoutShowMode::Standard);
+        DocumentContextMenu().ShowAt(PdfScrollViewer(), options);
+        args.Handled(true);
+    }
+
+    void MainWindow::CopyImageMenuItem_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        const auto target = std::exchange(m_contextMenuImage, std::nullopt);
+        if (target)
+        {
+            if (auto document = target->document.lock())
+            {
+                QueueImageCopy(document, target->selection);
+                return;
+            }
+        }
+        CopySelectedImage();
+    }
+
+    winrt::fire_and_forget MainWindow::SaveImageAsMenuItem_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        auto strongThis = get_strong();
+        std::shared_ptr<PdfTabInfo> document;
+        std::optional<urpdf::PageImageSelection> selection;
+        if (const auto target = std::exchange(m_contextMenuImage, std::nullopt))
+        {
+            document = target->document.lock();
+            selection = target->selection;
+        }
+        else if (auto current = SelectedPdfDocument(); current && current->m_selectedImage)
+        {
+            document = std::move(current);
+            selection = document->m_selectedImage;
+        }
+        if (!document || !selection) { co_return; }
+
+        try
+        {
+            const winrt::hstring suggestedName{
+                urpdf::SuggestedImageFileName(document->m_fileName, selection->page, selection->imageIndex) };
+            auto file = co_await PickImageSaveFileAsync(suggestedName);
+            if (!file || m_isClosed) { co_return; }
+            QueueImageSave(document, *selection, std::move(file));
+        }
+        catch (...)
+        {
+            OutputDebugStringW(L"urPDF: could not open save dialog for PDF image.\n");
+        }
+    }
+
+    void MainWindow::ClearPdfSelection_Invoked(xaml::Input::KeyboardAccelerator const&, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args)
+    {
+        if (m_isClosed
+            || SettingsOverlay().Visibility() == xaml::Visibility::Visible
+            || RootFrame().Visibility() == xaml::Visibility::Visible)
+        {
+            return;
+        }
+
+        auto document = SelectedPdfDocument();
+        if (!document) { document = m_presentedTab.lock(); }
+        if (!document) { return; }
+
+        const bool hasSelection = document->m_textSelection || document->m_wordSelectionPoints
+            || document->m_selectedImage || document->m_pendingImageClick;
+
+        if (document->m_searchBarOpen && (IsFocusInsideElement(SearchBar()) || !hasSelection))
+        {
+            CloseSearchBar();
+            args.Handled(true);
+            return;
+        }
+
+        if (hasSelection)
+        {
+            ClearPageTextSelection(document);
+            ClearPageImageSelection(document);
+            args.Handled(true);
+        }
+    }
+
+    void MainWindow::PdfScrollViewer_Tapped(foundation::IInspectable const&, xaml::Input::TappedRoutedEventArgs const& args)
+    {
+        // Page taps are handled by the selection layer. Taps on viewer chrome
+        // such as scroll bars must not clear the current selection.
+        auto source = args.OriginalSource().try_as<xaml::DependencyObject>();
+        if (source == PagesRepeater()) { return; }
+        while (source && source != PdfScrollViewer())
+        {
+            if (source.try_as<winrt::urPDF::TextSelectionLayer>() || source.try_as<controls::Primitives::ScrollBar>()) { return; }
+            source = media::VisualTreeHelper::GetParent(source);
+        }
+        m_lastPageTextClick.reset();
+        if (auto document = m_presentedTab.lock())
+        {
+            ClearPageTextSelection(document);
+            ClearPageImageSelection(document);
+        }
+    }
+
+    void MainWindow::CopyPdfText_Invoked(xaml::Input::KeyboardAccelerator const&, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args)
+    {
+        if (m_isClosed) { return; }
+        const auto root = PdfScrollViewer().XamlRoot();
+        if (!root) { return; }
+        auto focused = xaml::Input::FocusManager::GetFocusedElement(root).try_as<xaml::DependencyObject>();
+        while (focused)
+        {
+            if (focused.try_as<controls::TextBox>() || focused.try_as<controls::RichEditBox>()
+                || focused.try_as<controls::PasswordBox>() || focused.try_as<controls::NumberBox>()) { return; }
+            focused = media::VisualTreeHelper::GetParent(focused);
+        }
+
+        if (CopySelectionText() || CopySelectedImage()) { args.Handled(true); }
+    }
+
+    void MainWindow::ContinueSelectionCopy()
+    {
+        if (m_isClosed || !m_pendingSelectionCopy) { return; }
+        auto document = m_pendingSelectionCopy->document.lock();
+        if (!document || m_pendingSelectionCopy->clipboardSequence != GetClipboardSequenceNumber())
+        {
+            m_pendingSelectionCopy.reset();
+            return;
+        }
+        auto const& word = document->m_wordSelectionPoints;
+        if (word && (NeedsPageText(document->m_pageText[word->anchor.page]) || NeedsPageText(document->m_pageText[word->focus.page]))) { return; }
+        if (!document->m_textSelection)
+        {
+            m_pendingSelectionCopy.reset();
+            return;
+        }
+        try
+        {
+            const auto selection = *document->m_textSelection;
+            const auto [begin, end] = selection.InDocumentOrder();
+            if (begin.page < 0 || static_cast<std::size_t>(end.page) >= document->m_pageText.size())
+            {
+                m_pendingSelectionCopy.reset();
+                return;
+            }
+            auto& nextPage = m_pendingSelectionCopy->nextPage;
+            for (; nextPage <= end.page; ++nextPage)
+            {
+                const auto state = document->m_pageText[nextPage].State();
+                if (state == urpdf::PageTextState::ready || state == urpdf::PageTextState::failed) { continue; }
+                if (!urpdf::PageSelectionCarets(selection, nextPage)
+                    && (!document->m_pendingTextAnchor || document->m_pendingTextAnchor->page != nextPage)
+                    && (!document->m_pendingTextFocus || document->m_pendingTextFocus->page != nextPage)) { continue; }
+                if (!m_isPageTextLoadRunning) { EnsurePageText(document, nextPage, true); }
+                return;
+            }
+            const auto clipboardSequence = m_pendingSelectionCopy->clipboardSequence;
+            m_pendingSelectionCopy.reset();
+            const auto text = urpdf::SelectionText(document->m_pageText, selection);
+            // While text was loading, the user may have copied from a text box or another app.
+            if (text.empty() || clipboardSequence != GetClipboardSequenceNumber()) { return; }
+
+            using namespace winrt::Windows::ApplicationModel::DataTransfer;
+            DataPackage data;
+            data.SetText(text);
+            Clipboard::SetContent(data);
+        }
+        catch (...)
+        {
+            m_pendingSelectionCopy.reset();
+            OutputDebugStringW(L"urPDF: could not copy PDF text to the clipboard.\n");
+        }
+    }
+
+    void MainWindow::TextSelectionLayer_PointerEntered(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args)
+    {
+        if (m_isClosed) { return; }
+        auto layer = sender.as<winrt::urPDF::TextSelectionLayer>();
+        auto found = m_pageOverlays.find(GetPageElementForTextSelectionLayer(layer));
+        if (found == m_pageOverlays.end()) { return; }
+        const auto binding = found->second->state.CurrentBinding();
+        auto document = found->second->document.lock();
+        UpdatePageTextCursor(layer, found->second.get(), args);
+        if (document && binding) { EnsurePageText(document, binding->pageIndex); }
+    }
+
+    void MainWindow::TextSelectionLayer_PointerPressed(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args)
+    {
+        if (m_isClosed || m_pageTextDrag) { return; }
+        const auto previous = std::exchange(m_lastPageTextClick, std::nullopt);
+        // LinkHitArea is in the Canvas above this layer, so its presses never
+        // route through the selection layer.
+        auto layer = sender.as<winrt::urPDF::TextSelectionLayer>();
+        auto element = GetPageElementForTextSelectionLayer(layer);
+        auto found = m_pageOverlays.find(element);
+        if (found == m_pageOverlays.end()) { return; }
+        const auto binding = found->second->state.CurrentBinding();
+        const auto& mapping = found->second->state.Mapping();
+        auto document = found->second->document.lock();
+        if (!mapping || !binding || !document || binding->pageIndex < 0
+            || static_cast<std::size_t>(binding->pageIndex) >= document->m_pageText.size()) { return; }
+
+        const auto point = args.GetCurrentPoint(layer);
+        const auto position = point.Position();
+        const urpdf::ElementPoint elementPoint{ position.X, position.Y };
+        if (!point.Properties().IsLeftButtonPressed() || mapping->IsElementPointInsidePage(elementPoint) != true) { return; }
+        using winrt::Microsoft::UI::Input::PointerDeviceType;
+        using winrt::Microsoft::UI::Input::PointerUpdateKind;
+        const auto pointer = args.Pointer();
+        const auto device = pointer.PointerDeviceType();
+        if (device == PointerDeviceType::Mouse && point.Properties().PointerUpdateKind() != PointerUpdateKind::LeftButtonPressed) { return; }
+        const auto pdfPoint = mapping->ElementToPdfPoint(elementPoint);
+        if (!pdfPoint) { return; }
+
+        const auto pageIndex = binding->pageIndex;
+        auto const& slot = document->m_pageText[pageIndex];
+        const auto pressed = args.GetCurrentPoint(PdfScrollViewer()).Position();
+        const PageTextClick press{ document, pressed, point.Timestamp(), pageIndex };
+        bool byWord = false;
+        if (device == PointerDeviceType::Mouse && previous && previous->document.lock() == document
+            && previous->page == pageIndex && press.timestamp >= previous->timestamp
+            && press.timestamp - previous->timestamp <= static_cast<std::uint64_t>(GetDoubleClickTime()) * 1000)
+        {
+            const auto scale = GetRasterizationScale();
+            const auto dpi = static_cast<UINT>(std::lround(USER_DEFAULT_SCREEN_DPI * scale));
+            const auto halfWidth = GetSystemMetricsForDpi(SM_CXDOUBLECLK, dpi) / (2.0 * scale);
+            const auto halfHeight = GetSystemMetricsForDpi(SM_CYDOUBLECLK, dpi) / (2.0 * scale);
+            byWord = std::abs(pressed.X - previous->position.X) <= halfWidth && std::abs(pressed.Y - previous->position.Y) <= halfHeight;
+        }
+        document->m_pendingImageClick.reset();
+        if (byWord) { ClearPageImageSelection(document); }
+        ClearPageTextSelection(document);
+        const bool directContact = device == PointerDeviceType::Touch || device == PointerDeviceType::Pen;
+        // Keep capture as the layout recycles the page where the gesture began.
+        const auto capture = PagesRepeater();
+        if (!capture.CapturePointer(pointer)) { return; }
+        m_pageTextDrag = PageTextDrag{ capture, directContact ? xaml::UIElement(layer) : nullptr,
+            pointer, press, pressed, urpdf::PendingTextPosition{ pageIndex, *pdfPoint }, byWord };
+        args.Handled(true);
+
+        if (directContact)
+        {
+            // WinUI can register the contact after PointerPressed returns.
+            // Restore system gestures when this selection ends.
+            layer.ManipulationMode(xaml::Input::ManipulationModes::None);
+            layer.CancelDirectManipulations();
+        }
+        PdfScrollViewer().Focus(xaml::FocusState::Pointer);
+        if (!OwnsPageTextPointer(capture, args)) { return; }
+
+        if (byWord)
+        {
+            const urpdf::PendingTextPosition wordStart{ pageIndex, *pdfPoint };
+            document->m_wordSelectionPoints = urpdf::WordSelectionPoints{ wordStart, wordStart };
+            UpdateWordTextSelection(document);
+            return;
+        }
+
+        const bool ready = slot.State() == urpdf::PageTextState::ready;
+        const urpdf::TextPosition caret{ pageIndex, ready ? urpdf::HitTest(slot.Text(), *pdfPoint) : 0 };
+        if (!ready && slot.State() != urpdf::PageTextState::failed)
+        {
+            document->m_pendingTextAnchor = urpdf::PendingTextPosition{ pageIndex, *pdfPoint };
+            document->m_pendingTextFocus = document->m_pendingTextAnchor;
+        }
+        SetPageTextSelection(document, urpdf::TextSelection{ caret, caret });
+        if (document->m_pendingTextAnchor) { EnsurePageText(document, pageIndex, true); }
+    }
+
+    bool MainWindow::OwnsPageTextPointer(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) const
+    {
+        return m_pageTextDrag && m_pageTextDrag->capture == sender
+            && m_pageTextDrag->pointer.PointerId() == args.Pointer().PointerId();
+    }
+
+    void MainWindow::TextSelectionLayer_PointerMoved(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args)
+    {
+        if (m_isClosed) { return; }
+        const auto layer = sender.as<winrt::urPDF::TextSelectionLayer>();
+        const auto found = m_pageOverlays.find(GetPageElementForTextSelectionLayer(layer));
+        UpdatePageTextCursor(layer, found != m_pageOverlays.end() ? found->second.get() : nullptr, args);
+    }
+
+    void MainWindow::PageText_PointerMoved(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args)
+    {
+        if (m_isClosed || !OwnsPageTextPointer(sender, args)) { return; }
+        UpdatePageTextDrag(args.GetCurrentPoint(PdfScrollViewer()).Position());
+        args.Handled(true);
+    }
+
+    void MainWindow::PageText_PointerReleased(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args)
+    {
+        if (!OwnsPageTextPointer(sender, args)) { return; }
+        const auto point = args.GetCurrentPoint(PdfScrollViewer());
+        if (args.Pointer().PointerDeviceType() == winrt::Microsoft::UI::Input::PointerDeviceType::Mouse
+            && point.Properties().IsLeftButtonPressed()) { return; }
+        UpdatePageTextDrag(point.Position());
+        if (m_pageTextDrag) { EndPageTextDrag(true); }
+        args.Handled(true);
+    }
+
+    void MainWindow::PageText_PointerCanceled(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args)
+    {
+        if (OwnsPageTextPointer(sender, args)) { EndPageTextDrag(); }
+    }
+
+    void MainWindow::PageText_DoubleTapped(foundation::IInspectable const&, xaml::Input::DoubleTappedRoutedEventArgs const& args)
+    {
+        // Mouse double-clicks are recognized on the second press, before any drag.
+        if (m_isClosed || args.PointerDeviceType() == winrt::Microsoft::UI::Input::PointerDeviceType::Mouse
+            || (m_pageTextDrag && m_pageTextDrag->moved)) { return; }
+        auto document = m_presentedTab.lock();
+        if (!document) { return; }
+
+        auto source = args.OriginalSource().try_as<xaml::DependencyObject>();
+        const auto repeater = PagesRepeater();
+        while (source && source != repeater)
+        {
+            if (source.try_as<winrt::urPDF::LinkHitArea>()) { return; }
+            source = media::VisualTreeHelper::GetParent(source);
+        }
+        const auto target = PageTextPositionAtPointer(document, args.GetPosition(PdfScrollViewer()), true);
+        if (!target) { return; }
+
+        ClearPageImageSelection(document);
+        ClearPageTextSelection(document);
+        document->m_wordSelectionPoints = urpdf::WordSelectionPoints{ *target, *target };
+        UpdateWordTextSelection(document);
+        args.Handled(true);
+    }
+
+    std::optional<urpdf::PendingTextPosition> MainWindow::PageTextPositionAtPointer(std::shared_ptr<PdfTabInfo> const& document,
+        foundation::Point viewPosition, bool requireInsidePage)
+    {
+        const auto repeater = PagesRepeater();
+        const auto scrollViewer = PdfScrollViewer();
+        const auto width = static_cast<float>(scrollViewer.ViewportWidth());
+        const auto height = static_cast<float>(scrollViewer.ViewportHeight());
+        if (std::isfinite(width) && width > 0.0f) { viewPosition.X = std::clamp(viewPosition.X, 0.0f, width); }
+        if (std::isfinite(height) && height > 0.0f) { viewPosition.Y = std::clamp(viewPosition.Y, 0.0f, height); }
+        const auto position = scrollViewer.TransformToVisual(repeater).TransformPoint(viewPosition);
+        if (!std::isfinite(position.X) || !std::isfinite(position.Y)) { return std::nullopt; }
+        auto const& rects = winrt::get_self<winrt::urPDF::implementation::PdfPageLayout>(PagesLayout())->PageRects();
+        const auto generation = document->m_renderGeneration.load(std::memory_order_acquire);
+        xaml::UIElement nearestElement{ nullptr };
+        PageOverlayElement const* nearestEntry = nullptr;
+        std::tuple<float, float, int32_t> nearestScore;
+        for (auto const& [element, entry] : m_pageOverlays)
+        {
+            const auto binding = entry->state.CurrentBinding();
+            if (!binding || binding->generation != generation || entry->document.lock() != document
+                || !entry->state.Mapping() || binding->pageIndex < 0) { continue; }
+            const auto page = static_cast<std::size_t>(binding->pageIndex);
+            if (page >= rects.size() || page >= document->m_pageText.size()) { continue; }
+            auto const& rect = rects[page];
+            if (rect.Width <= 0 || rect.Height <= 0) { continue; }
+            // Prefer a containing page, then the nearest row, then the closest column.
+            const float dy = (std::max)({ 0.0f, rect.Y - position.Y, position.Y - (rect.Y + rect.Height) });
+            const float dx = (std::max)({ 0.0f, rect.X - position.X, position.X - (rect.X + rect.Width) });
+            const auto score = std::tuple{ dy, dx, binding->pageIndex };
+            if (nearestEntry && score >= nearestScore) { continue; }
+            nearestScore = score;
+            nearestElement = element;
+            nearestEntry = entry.get();
+        }
+        if (!nearestEntry) { return std::nullopt; }
+        const auto parts = TryGetPageElementParts(nearestElement);
+        if (!parts) { return std::nullopt; }
+        const auto local = repeater.TransformToVisual(parts->selection).TransformPoint(position);
+        const urpdf::ElementPoint elementPoint{ local.X, local.Y };
+        auto const& mapping = *nearestEntry->state.Mapping();
+        if (requireInsidePage && mapping.IsElementPointInsidePage(elementPoint) != true) { return std::nullopt; }
+        const auto pdfPoint = mapping.ElementToPdfPoint(elementPoint);
+        if (!pdfPoint) { return std::nullopt; }
+        return urpdf::PendingTextPosition{ std::get<2>(nearestScore), *pdfPoint };
+    }
+
+    void MainWindow::UpdatePageTextDrag(foundation::Point position)
+    {
+        auto document = m_pageTextDrag->press.document.lock();
+        if (!document) { return; }
+        m_pageTextDrag->position = position;
+        if (!m_pageTextDrag->moved)
+        {
+            const auto pressed = m_pageTextDrag->press.position;
+            constexpr float dragThreshold = 3.0f;
+            if (std::abs(position.X - pressed.X) < dragThreshold && std::abs(position.Y - pressed.Y) < dragThreshold) { return; }
+            m_pageTextDrag->moved = true;
+            ClearPageImageSelection(document);
+            m_pageTextScrollTimer.Start();
+        }
+
+        const auto target = PageTextPositionAtPointer(document, position);
+        if (!target) { return; }
+        if (m_pageTextDrag->byWord)
+        {
+            auto& points = document->m_wordSelectionPoints;
+            if (!points || points->focus == *target) { return; }
+            CancelSelectionCopy(document);
+            points->focus = *target;
+            UpdateWordTextSelection(document);
+            return;
+        }
+
+        if (!document->m_textSelection) { return; }
+        auto selection = *document->m_textSelection;
+        auto const& slot = document->m_pageText[target->page];
+        const bool ready = slot.State() == urpdf::PageTextState::ready;
+        const auto fallback = target->page < selection.anchor.page ? 0 : urpdf::kPageEnd;
+        selection.focus = { target->page, ready ? urpdf::HitTest(slot.Text(), target->point) : fallback };
+        const auto pending = ready || slot.State() == urpdf::PageTextState::failed ? std::nullopt : target;
+        if (selection == document->m_textSelection && pending == document->m_pendingTextFocus) { return; }
+
+        CancelSelectionCopy(document);
+        document->m_pendingTextFocus = pending;
+        SetPageTextSelection(document, selection);
+        if (document->m_pendingTextFocus) { EnsurePageText(document, target->page, true); }
+    }
+
+    void MainWindow::ScrollPageTextDragAtEdge()
+    {
+        if (m_isClosed || !m_pageTextDrag || !m_pageTextDrag->moved || m_viewStateGuard.IsPending()) { return; }
+        const auto document = m_pageTextDrag->press.document.lock();
+        if (!document || m_presentedTab.lock() != document) { return; }
+
+        const auto viewer = PdfScrollViewer();
+        const auto position = m_pageTextDrag->position;
+        const auto offsetX = viewer.HorizontalOffset();
+        const auto offsetY = viewer.VerticalOffset();
+        const auto targetX = urpdf::SelectionEdgeScrollOffset(position.X, viewer.ViewportWidth(), offsetX, viewer.ScrollableWidth());
+        const auto targetY = urpdf::SelectionEdgeScrollOffset(position.Y, viewer.ViewportHeight(), offsetY, viewer.ScrollableHeight());
+        if (!targetX && !targetY) { return; }
+
+        const foundation::IReference<double> scrollX = targetX && *targetX != offsetX ? foundation::IReference<double>{ *targetX } : nullptr;
+        const foundation::IReference<double> scrollY = targetY && *targetY != offsetY ? foundation::IReference<double>{ *targetY } : nullptr;
+        if ((scrollX || scrollY) && viewer.ChangeView(scrollX, scrollY, nullptr, true)) { return; }
+
+        // ViewChanged tracks the caret while scrolling. At a limit a newly rendered
+        // page can still move the caret after the last offset change.
+        if (m_pageTextDrag) { UpdatePageTextDrag(position); }
+    }
+
+    void MainWindow::EndPageTextDrag(bool released)
+    {
+        auto drag = std::move(*m_pageTextDrag);
+        m_pageTextDrag.reset();
+        m_pageTextScrollTimer.Stop();
+        if (drag.manipulationLayer)
+        {
+            drag.manipulationLayer.ManipulationMode(xaml::Input::ManipulationModes::System);
+        }
+        drag.capture.ReleasePointerCapture(drag.pointer);
+        const auto document = drag.press.document.lock();
+        if (!document) { return; }
+        if (drag.byWord) { UpdateWordTextSelection(document); }
+        else if (!drag.moved)
+        {
+            ClearPageTextSelection(document);
+            if (released && drag.pointer.PointerDeviceType() == winrt::Microsoft::UI::Input::PointerDeviceType::Mouse)
+            {
+                m_lastPageTextClick = drag.press;
+            }
+            if (released && drag.pdfPress
+                && drag.pdfPress->page >= 0
+                && static_cast<std::size_t>(drag.pdfPress->page) < document->m_pageText.size())
+            {
+                auto const& slot = document->m_pageText[drag.pdfPress->page];
+                if (slot.State() == urpdf::PageTextState::ready)
+                {
+                    if (!urpdf::IsOverText(slot.Text(), drag.pdfPress->point))
+                    {
+                        if (const auto imageIndex = urpdf::HitTestImage(slot.Text().images, drag.pdfPress->point))
+                        {
+                            SetSelectedPageImage(document, urpdf::PageImageSelection{ drag.pdfPress->page, *imageIndex });
+                        }
+                        else
+                        {
+                            ClearPageImageSelection(document);
+                        }
+                    }
+                    else
+                    {
+                        ClearPageImageSelection(document);
+                    }
+                }
+                else if (NeedsPageText(slot))
+                {
+                    document->m_pendingImageClick = drag.pdfPress;
+                    EnsurePageText(document, drag.pdfPress->page, true);
+                }
+                else
+                {
+                    ClearPageImageSelection(document);
+                }
+            }
+        }
     }
 
     void MainWindow::TryRecordFirstVisiblePage(std::shared_ptr<PdfTabInfo> const& PdfTab)
@@ -2648,13 +5109,10 @@ namespace winrt::urPDF::implementation
             if (rect.Y + rect.Height <= viewportTop || rect.X + rect.Width <= viewportLeft || rect.X >= viewportRight) { continue; }
 
             auto const& slot = PdfTab->m_renderedPages[i];
-            if (slot.state != PageRenderState::ready || !slot.bitmap || !*slot.bitmap || slot.generation != PdfTab->m_renderGeneration.load(std::memory_order_acquire)) { continue; }
+            if (slot.state != PageRenderState::ready || !slot.bitmap || !slot.bitmap->source || slot.generation != PdfTab->m_renderGeneration.load(std::memory_order_acquire)) { continue; }
 
-            auto element = PagesRepeater().TryGetElement(static_cast<int32_t>(i));
-            auto border = element ? element.try_as<controls::Border>() : nullptr;
-            auto image = border ? border.Child().try_as<controls::Image>() : nullptr;
-
-            if (!image || image.Source() != *slot.bitmap) { continue; }
+            const auto parts = TryGetPageElementParts(PagesRepeater().TryGetElement(static_cast<int32_t>(i)));
+            if (!parts || parts->image.Source() != slot.bitmap->source) { continue; }
 
             metrics.firstPageAttachedMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - *metrics.openStartedAt).count();
             metrics.firstVisiblePageIndex = static_cast<int32_t>(i);
@@ -2669,19 +5127,7 @@ namespace winrt::urPDF::implementation
 
     void MainWindow::PagesRepeater_ElementClearing(foundation::IInspectable const&, controls::ItemsRepeaterElementClearingEventArgs const& args)
     {
-        auto border = args.Element().try_as<controls::Border>();
-        if (!border)
-        {
-            return;
-        }
-
-        auto image = border.Child().try_as<controls::Image>();
-        if (image)
-        {
-            image.Source(nullptr);
-        }
-
-        border.Opacity(0.65);
+        ReleasePageOverlay(args.Element());
     }
 
 
@@ -2797,6 +5243,7 @@ namespace winrt::urPDF::implementation
         m_pendingRestoreHasAnchor = pdfTab->m_hasViewAnchor;
         m_viewRestorePhase = ViewRestorePhase::Layout;
 
+        ClearPageOverlays();
         m_presentedTab.reset();
         PagesRepeater().ItemsSource(nullptr);
         m_pageRepeaterItems = nullptr;
@@ -3087,6 +5534,7 @@ namespace winrt::urPDF::implementation
     {
         const bool zoomChanged = pdfTab->m_viewState.zoom != zoom;
         pdfTab->m_viewState.zoom = zoom;
+        RefreshRealizedPageOverlays();
         auto pendingTab = m_pendingZoomTab.lock();
         if (zoom == pdfTab->m_renderZoom)
         {
@@ -3139,6 +5587,7 @@ namespace winrt::urPDF::implementation
 
     winrt::fire_and_forget MainWindow::PdfScrollViewer_ViewChanged(foundation::IInspectable const& sender, controls::ScrollViewerViewChangedEventArgs const& args)
     {
+        m_lastPageTextClick.reset();
         m_isViewChanging = args.IsIntermediate();
         if (m_viewStateGuard.IsPending())
         {
@@ -3171,6 +5620,10 @@ namespace winrt::urPDF::implementation
             {
                 RenderVisiblePagesAsync();
             }
+            if (m_pageTextDrag && m_pageTextDrag->moved)
+            {
+                UpdatePageTextDrag(m_pageTextDrag->position);
+            }
         }
         co_return;
     }
@@ -3185,6 +5638,8 @@ namespace winrt::urPDF::implementation
             auto pdfInfo = m_openedTabs[currentTab];
 
             SaveViewState(pdfInfo);
+            ClearPageTextSelection(pdfInfo);
+            ClearPageImageSelection(pdfInfo);
             const auto operation = DeferViewStateSave(pdfInfo);
             pdfInfo->m_viewState.rotation += 90;
             if (pdfInfo->m_viewState.rotation >= 360)
@@ -3296,7 +5751,7 @@ namespace winrt::urPDF::implementation
         printPages->reserve(pdfInfo->m_renderedPages.size());
         for (auto const& slot : pdfInfo->m_renderedPages)
         {
-            printPages->push_back(slot.bitmap && slot.state == PageRenderState::ready ? *slot.bitmap : nullptr);
+            printPages->push_back(slot.bitmap && slot.state == PageRenderState::ready ? slot.bitmap->source : nullptr);
         }
         auto cancelled = m_workCancelled;
         HWND hwnd;
