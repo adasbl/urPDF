@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <TestProject Include="urPDF.UnitTests.vcxproj" />
+    <TestProject Include="urPDF.RuntimeTests.vcxproj" />
+  </ItemGroup>
+
+  <Target Name="Build">
+    <MSBuild Projects="@(TestProject)" BuildInParallel="true" Targets="Build" />
+  </Target>
+
+  <Target Name="Rebuild">
+    <MSBuild Projects="@(TestProject)" BuildInParallel="true" Targets="Rebuild" />
+  </Target>
+
+  <Target Name="Clean">
+    <MSBuild Projects="@(TestProject)" BuildInParallel="true" Targets="Clean" />
+  </Target>
+</Project>
