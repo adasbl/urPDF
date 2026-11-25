@@ -47,6 +47,11 @@
                             <ComboBoxItem Content="Mica Alt" Tag="MicaAlt"/>
                         </ComboBox>
                     </StackPanel>
+                    <ToggleSwitch
+                        x:Name="UseWindowsAccentColorForTextSelectionToggle"
+                        Header="Use Windows accent color for text selection"
+                        Margin="8,0,0,0"
+                        Toggled="UseWindowsAccentColorForTextSelectionToggle_Toggled"/>
                     
                 </StackPanel>
 

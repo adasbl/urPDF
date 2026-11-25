@@ -32,6 +32,7 @@ namespace winrt::urPDF::implementation
         void TransparencySelection_SelectionChanged(foundation::IInspectable const& sender, controls::SelectionChangedEventArgs const& /* e */);
         void WindowStartupModeSelection_SelectionChanged(foundation::IInspectable const& sender, controls::SelectionChangedEventArgs const&);
         void OpenFilesInExistingWindowToggle_Toggled(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& /* args */);
+        void UseWindowsAccentColorForTextSelectionToggle_Toggled(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& /* args */);
         void LoadSavedSettings();
         void BackButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
 
@@ -41,12 +42,16 @@ namespace winrt::urPDF::implementation
         winrt::event_token BackdropChanged(foundation::EventHandler<winrt::hstring> const& handler);
         void BackdropChanged(winrt::event_token const& token) noexcept;
 
+        winrt::event_token TextSelectionColorChanged(foundation::EventHandler<bool> const& handler);
+        void TextSelectionColorChanged(winrt::event_token const& token) noexcept;
+
         winrt::event_token BackRequested(foundation::EventHandler<foundation::IInspectable> const& handler);
         void BackRequested(winrt::event_token const& token) noexcept;
 
     private:
         winrt::event<foundation::EventHandler<winrt::hstring>> m_themeChangedEvent;
         winrt::event<foundation::EventHandler<winrt::hstring>> m_backdropChangedEvent;
+        winrt::event<foundation::EventHandler<bool>> m_textSelectionColorChangedEvent;
         winrt::event<foundation::EventHandler<foundation::IInspectable>> m_backRequestedEvent;
     };
 }
