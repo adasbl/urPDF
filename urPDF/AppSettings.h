@@ -53,6 +53,7 @@ namespace urpdf
         WindowState windowState;
         WindowStartupMode windowStartupMode{ WindowStartupMode::RememberLastState };
         bool openFilesInExistingWindow{ false };
+        bool askToSetAsDefaultPdfViewer{ true };
     };
 
     std::wstring_view ToString(AppTheme theme) noexcept;
@@ -78,6 +79,7 @@ namespace urpdf
         void SetWindowState(WindowState const& state);
         void SetWindowStartupMode(WindowStartupMode mode);
         void SetOpenFilesInExistingWindow(bool enabled);
+        void SetAskToSetAsDefaultPdfViewer(bool enabled);
 
         std::wstring ExportJson() const;
         bool ImportJson(std::wstring_view text);
