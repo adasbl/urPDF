@@ -40,6 +40,7 @@ extern "C" {
 
 // Windows SDK / WinRT
 #include <shobjidl_core.h>
+#include <commctrl.h>
 #include <dwmapi.h>
 #include <MemoryBuffer.h>
 #include <printmanagerinterop.h>
@@ -63,6 +64,7 @@ extern "C" {
 #include <winrt/Windows.UI.Core.h>
 #include <winrt/Windows.UI.Xaml.Interop.h>
 
+#pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dwmapi.lib")
 
 
@@ -683,6 +685,54 @@ namespace
         if (!bitmap) { return std::nullopt; }
         return winrt::urPDF::implementation::SoftwarePageBitmap{ bitmap, geometry };
     }
+
+    // Blocks SetPresenter(Overlapped)'s intermediate restored-size SetWindowPos when returning directly to Maximized.
+    class ScopedSuppressWindowBoundsChange
+    {
+    public:
+        explicit ScopedSuppressWindowBoundsChange(HWND hwnd) noexcept
+            : m_hwnd(hwnd)
+        {
+            if (m_hwnd && SetWindowSubclass(m_hwnd, &SubclassProc, SubclassId, 0))
+            {
+                m_installed = true;
+            }
+        }
+
+        ~ScopedSuppressWindowBoundsChange() noexcept
+        {
+            Release();
+        }
+
+        void Release() noexcept
+        {
+            if (m_installed)
+            {
+                RemoveWindowSubclass(m_hwnd, &SubclassProc, SubclassId);
+                m_installed = false;
+            }
+        }
+
+        ScopedSuppressWindowBoundsChange(ScopedSuppressWindowBoundsChange const&) = delete;
+        ScopedSuppressWindowBoundsChange& operator=(ScopedSuppressWindowBoundsChange const&) = delete;
+
+    private:
+        static constexpr UINT_PTR SubclassId = 0x75525046;
+
+        static LRESULT CALLBACK SubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
+            UINT_PTR, DWORD_PTR) noexcept
+        {
+            if (msg == WM_WINDOWPOSCHANGING && lParam != 0)
+            {
+                auto* windowPos = reinterpret_cast<WINDOWPOS*>(lParam);
+                windowPos->flags |= SWP_NOMOVE | SWP_NOSIZE;
+            }
+            return DefSubclassProc(hwnd, msg, wParam, lParam);
+        }
+
+        HWND m_hwnd{};
+        bool m_installed{ false };
+    };
 }
 
 
@@ -1080,6 +1130,18 @@ namespace winrt::urPDF::implementation
         if (!CanEnterFullscreen() || IsFullscreen()) { return; }
 
         CaptureWindowState();
+        m_preFullscreenPlacement.reset();
+        if (auto nativeWindow = try_as<::IWindowNative>())
+        {
+            HWND hwnd{};
+            WINDOWPLACEMENT placement{};
+            placement.length = sizeof(placement);
+            if (SUCCEEDED(nativeWindow->get_WindowHandle(&hwnd)) && hwnd && GetWindowPlacement(hwnd, &placement))
+            {
+                m_preFullscreenPlacement = placement;
+            }
+        }
+
         bool wasMaximized = m_windowState.maximized;
         if (auto overlapped = AppWindow().Presenter().try_as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>())
         {
@@ -1095,11 +1157,13 @@ namespace winrt::urPDF::implementation
         catch (...)
         {
             m_fullscreenTracker.CompleteEnter(IsAppWindowFullscreen());
+            if (!m_fullscreenTracker.active) { m_preFullscreenPlacement.reset(); }
             ApplyFullscreenChrome(m_fullscreenTracker.active);
             return;
         }
 
         m_fullscreenTracker.CompleteEnter(IsAppWindowFullscreen());
+        if (!m_fullscreenTracker.active) { m_preFullscreenPlacement.reset(); }
         ApplyFullscreenChrome(m_fullscreenTracker.active);
         if (m_fullscreenTracker.active && !IsFocusInsideElement(SearchBar()))
         {
@@ -1113,14 +1177,36 @@ namespace winrt::urPDF::implementation
 
         const bool restoreMaximized = m_fullscreenTracker.BeginExit();
         SuppressDwmTransitionsForFullscreenTransition();
+        HWND hwnd{};
+        if (auto nativeWindow = try_as<::IWindowNative>())
+        {
+            if (FAILED(nativeWindow->get_WindowHandle(&hwnd))) { hwnd = nullptr; }
+        }
+
         try
         {
             if (IsAppWindowFullscreen())
             {
+                std::optional<ScopedSuppressWindowBoundsChange> suppressBounds;
+                if (restoreMaximized && hwnd)
+                {
+                    suppressBounds.emplace(hwnd);
+                }
                 AppWindow().SetPresenter(winrt::Microsoft::UI::Windowing::AppWindowPresenterKind::Overlapped);
+                if (suppressBounds)
+                {
+                    suppressBounds->Release();
+                }
             }
             if (restoreMaximized)
             {
+                if (hwnd && m_preFullscreenPlacement)
+                {
+                    WINDOWPLACEMENT placement = *m_preFullscreenPlacement;
+                    placement.length = sizeof(placement);
+                    placement.showCmd = SW_SHOWMAXIMIZED;
+                    SetWindowPlacement(hwnd, &placement);
+                }
                 if (auto overlapped = AppWindow().Presenter().try_as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>())
                 {
                     if (overlapped.State() != winrt::Microsoft::UI::Windowing::OverlappedPresenterState::Maximized)
@@ -1133,11 +1219,13 @@ namespace winrt::urPDF::implementation
         catch (...)
         {
             m_fullscreenTracker.CompleteExit(IsAppWindowFullscreen());
+            if (!m_fullscreenTracker.active) { m_preFullscreenPlacement.reset(); }
             ApplyFullscreenChrome(m_fullscreenTracker.active);
             return;
         }
 
         m_fullscreenTracker.CompleteExit(IsAppWindowFullscreen());
+        if (!m_fullscreenTracker.active) { m_preFullscreenPlacement.reset(); }
         ApplyFullscreenChrome(m_fullscreenTracker.active);
         CaptureWindowState();
     }
@@ -1215,6 +1303,7 @@ namespace winrt::urPDF::implementation
 
         if (chromeChanged)
         {
+            if (!m_fullscreenTracker.active) { m_preFullscreenPlacement.reset(); }
             ApplyFullscreenChrome(m_fullscreenTracker.active);
         }
         else if (!m_fullscreenTracker.active && !appWindowFullscreen)

@@ -500,6 +500,7 @@ namespace winrt::urPDF::implementation
         bool m_isClosed{ false };
         urpdf::WindowState m_windowState;
         urpdf::FullscreenWindowTracker m_fullscreenTracker;
+        std::optional<WINDOWPLACEMENT> m_preFullscreenPlacement;
         dispatching::DispatcherQueueTimer m_fullscreenExitHideTimer{ nullptr };
         xaml::Input::PointerEventHandler m_documentViewPointerMovedHandler{ nullptr };
         xaml::Media::CompositionTarget::Rendered_revoker m_fullscreenTransitionRenderedRevoker;
