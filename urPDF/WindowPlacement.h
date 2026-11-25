@@ -168,4 +168,72 @@ namespace urpdf
         state.normalSize = WindowSize{ static_cast<std::int32_t>(width), static_cast<std::int32_t>(height) };
         state.maximized = maximized;
     }
+
+    struct FullscreenWindowTracker
+    {
+        bool active{ false };
+        bool transitioning{ false };
+        bool restoreMaximizedOnExit{ false };
+
+        bool ShouldCaptureWindowState(bool presenterIsFullscreen) const noexcept
+        {
+            return !active && !transitioning && !presenterIsFullscreen;
+        }
+
+        void BeginEnter(bool overlappedWasMaximized) noexcept
+        {
+            if (!active)
+            {
+                restoreMaximizedOnExit = overlappedWasMaximized;
+            }
+            transitioning = true;
+        }
+
+        void CompleteEnter(bool presenterIsFullscreen) noexcept
+        {
+            transitioning = false;
+            active = presenterIsFullscreen;
+            if (!active)
+            {
+                restoreMaximizedOnExit = false;
+            }
+        }
+
+        bool BeginExit() noexcept
+        {
+            transitioning = true;
+            return restoreMaximizedOnExit;
+        }
+
+        void CompleteExit(bool presenterIsFullscreen) noexcept
+        {
+            transitioning = false;
+            active = presenterIsFullscreen;
+            if (!active)
+            {
+                restoreMaximizedOnExit = false;
+            }
+        }
+
+        // Synchronizes external presenter changes when no initiated transition is active.
+        // Returns true if fullscreen exited externally and the overlapped window should be maximized.
+        bool SyncExternalPresenter(bool presenterIsFullscreen, bool& chromeChanged) noexcept
+        {
+            chromeChanged = false;
+            if (transitioning || active == presenterIsFullscreen)
+            {
+                return false;
+            }
+
+            active = presenterIsFullscreen;
+            chromeChanged = true;
+            if (!active)
+            {
+                const bool shouldMaximize = restoreMaximizedOnExit;
+                restoreMaximizedOnExit = false;
+                return shouldMaximize;
+            }
+            return false;
+        }
+    };
 }
