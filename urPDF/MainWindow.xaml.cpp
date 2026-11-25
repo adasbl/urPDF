@@ -483,8 +483,31 @@ namespace
         while (children.Size() > count) { children.RemoveAtEnd(); }
     }
 
+    xaml::Style PageSelectionStyle(controls::Canvas const& canvas, bool useWindowsAccentColor)
+    {
+        const wchar_t* styleKey = useWindowsAccentColor
+            ? L"PageSelectionAccentRectangleStyle"
+            : L"PageSelectionBlueRectangleStyle";
+        return canvas.Resources().Lookup(winrt::box_value(styleKey)).as<xaml::Style>();
+    }
+
+    void ApplyPageSelectionStyle(controls::Canvas const& canvas, bool useWindowsAccentColor)
+    {
+        auto children = canvas.Children();
+        if (children.Size() == 0) { return; }
+
+        const auto style = PageSelectionStyle(canvas, useWindowsAccentColor);
+        for (auto const& child : children)
+        {
+            if (auto highlight = child.try_as<xaml::Shapes::Rectangle>(); highlight && highlight.Style() != style)
+            {
+                highlight.Style(style);
+            }
+        }
+    }
+
     void DrawPageSelection(controls::Canvas const& canvas, urpdf::PageCoordinateMapping const& mapping,
-        winrt::urPDF::implementation::PdfTabInfo const& document, int32_t pageIndex)
+        winrt::urPDF::implementation::PdfTabInfo const& document, int32_t pageIndex, bool useWindowsAccentColor)
     {
         auto children = canvas.Children();
         auto const& selection = document.m_textSelection;
@@ -497,7 +520,7 @@ namespace
             return;
         }
 
-        const auto style = canvas.Resources().Lookup(winrt::box_value(L"PageSelectionRectangleStyle")).as<xaml::Style>();
+        const auto style = PageSelectionStyle(canvas, useWindowsAccentColor);
         auto const& text = document.m_pageText[pageIndex].Text();
         std::uint32_t count = 0;
         for (auto const& bounds : urpdf::SelectionRects(text, carets->first, carets->second))
@@ -512,6 +535,10 @@ namespace
                 highlight = xaml::Shapes::Rectangle();
                 highlight.Style(style);
                 children.Append(highlight);
+            }
+            else if (highlight.Style() != style)
+            {
+                highlight.Style(style);
             }
             highlight.Width(rect->width);
             highlight.Height(rect->height);
@@ -1197,6 +1224,7 @@ namespace winrt::urPDF::implementation
         };
         settingsPage.ThemeChanged(applySettings);
         settingsPage.BackdropChanged(applySettings);
+        settingsPage.TextSelectionColorChanged(applySettings);
 
         SettingsFrame().Content(settingsPage);
         SettingsOverlay().Visibility(xaml::Visibility::Visible);
@@ -1219,6 +1247,7 @@ namespace winrt::urPDF::implementation
 
         ApplyTheme(winrt::hstring{ urpdf::ToString(settings.theme) });
         ApplyBackdrop(winrt::hstring{ urpdf::ToString(settings.backdrop) });
+        ApplyTextSelectionColor(settings.useWindowsAccentColorForTextSelection);
         if (!settings.askToSetAsDefaultPdfViewer)
         {
             DefaultPdfViewerPrompt().Visibility(xaml::Visibility::Collapsed);
@@ -1226,6 +1255,18 @@ namespace winrt::urPDF::implementation
         if (auto page = SettingsFrame().Content().try_as<winrt::urPDF::SettingsPage>())
         {
             winrt::get_self<SettingsPage>(page)->LoadSavedSettings();
+        }
+    }
+
+    void MainWindow::ApplyTextSelectionColor(bool useWindowsAccentColor)
+    {
+        m_useWindowsAccentColorForTextSelection = useWindowsAccentColor;
+        for (auto const& [element, entry] : m_pageOverlays)
+        {
+            if (const auto parts = TryGetPageElementParts(element))
+            {
+                ApplyPageSelectionStyle(parts->highlights, useWindowsAccentColor);
+            }
         }
     }
 
@@ -3121,7 +3162,7 @@ namespace winrt::urPDF::implementation
         }
         if (!entry.selectionBuilt)
         {
-            DrawPageSelection(parts->highlights, *mapping, *document, binding.pageIndex);
+            DrawPageSelection(parts->highlights, *mapping, *document, binding.pageIndex, m_useWindowsAccentColorForTextSelection);
             entry.selectionBuilt = true;
         }
         if (!entry.linkAreasBuilt
