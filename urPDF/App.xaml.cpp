@@ -510,11 +510,6 @@ namespace winrt::urPDF::implementation
         m_defaultPdfViewerPromptClaimed = true;
         return true;
     }
-
-    void App::ReleaseDefaultPdfViewerPrompt() noexcept
-    {
-        m_defaultPdfViewerPromptClaimed = false;
-    }
 }
 
 int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)

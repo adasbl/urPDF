@@ -731,15 +731,6 @@ namespace winrt::urPDF::implementation
         m_ctx.reset();
         m_runtime.reset();
         try { if (m_openErrorDialog) { m_openErrorDialog.Hide(); } } catch (...) {}
-        try
-        {
-            if (m_defaultPdfViewerDialog)
-            {
-                m_defaultPdfViewerDialogInterrupted = true;
-                m_defaultPdfViewerDialog.Hide();
-            }
-        }
-        catch (...) {}
         CancelPendingViewStateSave();
         try { DetachDpiObserver(); } catch (...) {}
         try { CancelPendingZoomRender(); } catch (...) {}
@@ -850,7 +841,7 @@ namespace winrt::urPDF::implementation
                 return;
             }
             xaml::Application::Current().as<App>()->WindowActivated(*self);
-            self->RefreshSettingsPageDefaultPdfViewerStatus();
+            self->RefreshDefaultPdfViewerUi();
         });
 
         AppWindow().SetIcon((ExecutableDirectory() / L"Assets" / L"logo.ico").wstring());
@@ -1228,6 +1219,10 @@ namespace winrt::urPDF::implementation
 
         ApplyTheme(winrt::hstring{ urpdf::ToString(settings.theme) });
         ApplyBackdrop(winrt::hstring{ urpdf::ToString(settings.backdrop) });
+        if (!settings.askToSetAsDefaultPdfViewer)
+        {
+            DefaultPdfViewerPrompt().Visibility(xaml::Visibility::Collapsed);
+        }
         if (auto page = SettingsFrame().Content().try_as<winrt::urPDF::SettingsPage>())
         {
             winrt::get_self<SettingsPage>(page)->LoadSavedSettings();
@@ -2065,14 +2060,6 @@ namespace winrt::urPDF::implementation
 
         while (!m_isClosed && !m_openErrorMessages.empty())
         {
-            if (m_defaultPdfViewerDialog)
-            {
-                m_defaultPdfViewerDialogInterrupted = true;
-                m_defaultPdfViewerPromptPending = true;
-                xaml::Application::Current().as<App>()->ReleaseDefaultPdfViewerPrompt();
-                try { m_defaultPdfViewerDialog.Hide(); } catch (...) {}
-            }
-
             m_openErrorDialog = controls::ContentDialog();
             m_openErrorDialog.XamlRoot(MainWindowUI().XamlRoot());
             m_openErrorDialog.Title(winrt::box_value(L"Couldn't open document"));
@@ -2090,20 +2077,24 @@ namespace winrt::urPDF::implementation
             m_openErrorMessages.pop_front();
         }
         m_openErrorMessages.clear();
-
-        if (!m_isClosed && m_defaultPdfViewerPromptPending)
-        {
-            m_defaultPdfViewerPromptPending = false;
-            ScheduleDefaultPdfViewerPrompt();
-        }
     }
 
-    void MainWindow::RefreshSettingsPageDefaultPdfViewerStatus()
+    void MainWindow::RefreshDefaultPdfViewerUi()
     {
-        if (m_isClosed || SettingsOverlay().Visibility() != xaml::Visibility::Visible) { return; }
-        if (auto page = SettingsFrame().Content().try_as<winrt::urPDF::SettingsPage>())
+        if (m_isClosed) { return; }
+
+        if (SettingsOverlay().Visibility() == xaml::Visibility::Visible)
         {
-            winrt::get_self<SettingsPage>(page)->RefreshDefaultPdfViewerStatus();
+            if (auto page = SettingsFrame().Content().try_as<winrt::urPDF::SettingsPage>())
+            {
+                winrt::get_self<SettingsPage>(page)->RefreshDefaultPdfViewerStatus();
+            }
+        }
+
+        if (DefaultPdfViewerPrompt().Visibility() == xaml::Visibility::Visible
+            && urpdf::QueryDefaultPdfViewerStatus() == urpdf::DefaultPdfViewerStatus::Default)
+        {
+            DefaultPdfViewerPrompt().Visibility(xaml::Visibility::Collapsed);
         }
     }
 
@@ -2118,24 +2109,19 @@ namespace winrt::urPDF::implementation
         {
             if (auto self = weakThis.get())
             {
-                self->MaybePromptForDefaultPdfViewerAsync();
+                self->MaybeShowDefaultPdfViewerPrompt();
             }
         });
     }
 
-    winrt::fire_and_forget MainWindow::MaybePromptForDefaultPdfViewerAsync()
+    void MainWindow::MaybeShowDefaultPdfViewerPrompt()
     {
-        auto strongThis = get_strong();
-        if (m_isClosed || m_presentationPending || m_defaultPdfViewerDialog) { co_return; }
-
-        if (m_openErrorDialog || !m_openErrorMessages.empty())
+        if (m_isClosed || m_presentationPending
+            || DefaultPdfViewerPrompt().Visibility() == xaml::Visibility::Visible
+            || SettingsOverlay().Visibility() == xaml::Visibility::Visible)
         {
-            m_defaultPdfViewerPromptPending = true;
-            co_return;
+            return;
         }
-
-        auto xamlRoot = MainWindowUI().XamlRoot();
-        if (!xamlRoot || SettingsOverlay().Visibility() == xaml::Visibility::Visible) { co_return; }
 
         const auto settings = urpdf::AppSettings::Instance().Get();
         const auto app = xaml::Application::Current().as<App>();
@@ -2143,65 +2129,39 @@ namespace winrt::urPDF::implementation
         urpdf::DefaultPdfViewerPromptContext promptContext;
         promptContext.promptEnabled = settings.askToSetAsDefaultPdfViewer;
         promptContext.isDeferredPresentation = m_presentationPending;
-        if (!promptContext.promptEnabled || promptContext.isDeferredPresentation) { co_return; }
+        if (!promptContext.promptEnabled || promptContext.isDeferredPresentation) { return; }
 
         promptContext.status = urpdf::QueryDefaultPdfViewerStatus();
-        if (!urpdf::ShouldShowDefaultPdfViewerPrompt(promptContext)) { co_return; }
+        if (!urpdf::ShouldShowDefaultPdfViewerPrompt(promptContext)) { return; }
 
         promptContext.alreadyPromptedThisSession = !app->TryClaimDefaultPdfViewerPrompt();
-        if (!urpdf::ShouldShowDefaultPdfViewerPrompt(promptContext)) { co_return; }
+        if (!urpdf::ShouldShowDefaultPdfViewerPrompt(promptContext)) { return; }
 
-        controls::TextBlock message;
-        message.Text(L"urPDF isn't currently set as your default app for .pdf files. Open Windows Settings to choose urPDF as your default PDF viewer.");
-        message.TextWrapping(xaml::TextWrapping::Wrap);
+        DefaultPdfViewerDontAskAgainCheckBox().IsChecked(false);
+        DefaultPdfViewerPrompt().Visibility(xaml::Visibility::Visible);
+    }
 
-        controls::CheckBox dontAskAgainCheckBox;
-        dontAskAgainCheckBox.Content(winrt::box_value(L"Don't ask again"));
-        dontAskAgainCheckBox.IsChecked(false);
-
-        controls::StackPanel contentPanel;
-        contentPanel.Spacing(12);
-        contentPanel.Children().Append(message);
-        contentPanel.Children().Append(dontAskAgainCheckBox);
-
-        controls::ContentDialog dialog;
-        dialog.XamlRoot(xamlRoot);
-        dialog.RequestedTheme(MainWindowUI().ActualTheme());
-        dialog.Title(winrt::box_value(L"Set urPDF as your default PDF viewer?"));
-        dialog.Content(contentPanel);
-        dialog.PrimaryButtonText(L"Open Settings");
-        dialog.CloseButtonText(L"Not now");
-        dialog.DefaultButton(controls::ContentDialogButton::Primary);
-
-        m_defaultPdfViewerDialogInterrupted = false;
-        m_defaultPdfViewerDialog = dialog;
-
-        controls::ContentDialogResult result = controls::ContentDialogResult::None;
-        try
-        {
-            result = co_await dialog.ShowAsync();
-        }
-        catch (winrt::hresult_error const& error)
-        {
-            if (!m_isClosed) { OutputDebugStringW(error.message().c_str()); }
-        }
-
-        const bool interrupted = m_defaultPdfViewerDialogInterrupted;
-        m_defaultPdfViewerDialogInterrupted = false;
-        m_defaultPdfViewerDialog = nullptr;
-
-        if (m_isClosed || interrupted) { co_return; }
-
-        if (auto isChecked = dontAskAgainCheckBox.IsChecked(); isChecked && isChecked.Value())
+    void MainWindow::DismissDefaultPdfViewerPrompt()
+    {
+        if (auto isChecked = DefaultPdfViewerDontAskAgainCheckBox().IsChecked(); isChecked && isChecked.Value())
         {
             urpdf::AppSettings::Instance().SetAskToSetAsDefaultPdfViewer(false);
-            app->ApplySettingsToWindows();
+            xaml::Application::Current().as<App>()->ApplySettingsToWindows();
         }
 
-        if (result == controls::ContentDialogResult::Primary)
-        {
-            co_await urpdf::OpenDefaultAppsSettingsAsync();
-        }
+        DefaultPdfViewerPrompt().Visibility(xaml::Visibility::Collapsed);
+    }
+
+    void MainWindow::DefaultPdfViewerPromptDismiss_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        DismissDefaultPdfViewerPrompt();
+    }
+
+    winrt::fire_and_forget MainWindow::DefaultPdfViewerPromptOpenSettings_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        auto strongThis = get_strong();
+        DismissDefaultPdfViewerPrompt();
+        co_await urpdf::OpenDefaultAppsSettingsAsync();
     }
 
     winrt::fire_and_forget MainWindow::OpenPdfPathAsync(PendingDocumentOpen request)

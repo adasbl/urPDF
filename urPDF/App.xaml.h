@@ -48,7 +48,6 @@ namespace winrt::urPDF::implementation
         void WindowMoveSizeExited(Microsoft::UI::WindowId const& id);
         void ApplySettingsToWindows();
         bool TryClaimDefaultPdfViewerPrompt() noexcept;
-        void ReleaseDefaultPdfViewerPrompt() noexcept;
         std::shared_ptr<::urpdf::MuPdfRuntime> MuPdfRuntime() const noexcept;
         std::uint64_t AllocateDocumentId() noexcept;
 
