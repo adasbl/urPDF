@@ -3947,6 +3947,7 @@ namespace winrt::urPDF::implementation
         if (!document || !document->m_layoutLoaded)
         {
             SearchButton().IsEnabled(false);
+            FitPageSplitButton().IsEnabled(false);
             SearchBar().Visibility(xaml::Visibility::Collapsed);
             m_isSyncingSearchText = true;
             SearchTextBox().Text(L"");
@@ -3960,6 +3961,7 @@ namespace winrt::urPDF::implementation
         }
 
         SearchButton().IsEnabled(true);
+        FitPageSplitButton().IsEnabled(true);
         SearchBar().Visibility(document->m_searchBarOpen ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
 
         std::wstring const& queryText = !document->m_searchDraftQuery.empty()
@@ -5288,6 +5290,7 @@ namespace winrt::urPDF::implementation
         m_pendingViewSnapshot.reset();
         m_pendingRestoreState.reset();
         m_pendingRestoreHasAnchor = false;
+        m_pendingPageFit.reset();
         m_viewRestorePhase = ViewRestorePhase::None;
         m_viewOperationReady = false;
         m_layoutViewSaveQueued = false;
@@ -5370,7 +5373,15 @@ namespace winrt::urPDF::implementation
         }
 
         urpdf::ScrollOffsets restoredOffsets;
-        if (m_pendingRestoreState && m_pendingRestoreHasAnchor && pdfTab->m_pagecount > 0)
+        if (m_pendingPageFit && pdfTab && pdfTab->m_pagecount > 0)
+        {
+            std::vector<urpdf::PageRect> pages;
+            urpdf::ViewportGeometry viewport;
+            ReadViewGeometry(pdfTab, pages, viewport);
+            restoredOffsets = urpdf::CalculatePageFitScrollOffsets(
+                pages, viewport, m_pendingPageFit->pageNumber, m_pendingPageFit->bookView).value_or(urpdf::ScrollOffsets{});
+        }
+        else if (m_pendingRestoreState && m_pendingRestoreHasAnchor && pdfTab->m_pagecount > 0)
         {
             std::vector<urpdf::PageRect> pages;
             urpdf::ViewportGeometry viewport;
@@ -5424,6 +5435,7 @@ namespace winrt::urPDF::implementation
         m_pendingViewSnapshot.reset();
         m_pendingRestoreState.reset();
         m_pendingRestoreHasAnchor = false;
+        m_pendingPageFit.reset();
         m_viewRestorePhase = ViewRestorePhase::None;
         m_viewOperationReady = false;
         if (pdfTab)
@@ -5702,6 +5714,69 @@ namespace winrt::urPDF::implementation
         }
 
         ZoomAroundViewportCenter(PdfScrollViewer(), targetZoom);
+    }
+
+    void MainWindow::UpdateFitPageSplitButtonPresentation()
+    {
+        const bool fitHorizontally = m_lastPageFitMode == urpdf::PageFitMode::Horizontal;
+        FitVerticallyIcon().Visibility(fitHorizontally ? xaml::Visibility::Collapsed : xaml::Visibility::Visible);
+        FitHorizontallyIcon().Visibility(fitHorizontally ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+        const wchar_t* label = fitHorizontally ? L"Fit horizontally" : L"Fit vertically";
+        controls::ToolTipService::SetToolTip(FitPageSplitButton(), winrt::box_value(label));
+        xaml::Automation::AutomationProperties::SetName(FitPageSplitButton(), label);
+    }
+
+    void MainWindow::ApplyPageFit(urpdf::PageFitMode mode)
+    {
+        if (m_isClosed || m_isRendering) { return; }
+        auto pdfTab = SelectedPdfDocument();
+        if (!pdfTab || !pdfTab->m_layoutLoaded || pdfTab->m_pagecount <= 0) { return; }
+        if (m_viewStateGuard.IsPending() && !m_pendingPageFit) { return; }
+        if (!HasViewGeometry(pdfTab)) { return; }
+
+        std::vector<urpdf::PageRect> pages;
+        urpdf::ViewportGeometry viewport;
+        ReadViewGeometry(pdfTab, pages, viewport);
+
+        const int currentPage = std::clamp(
+            urpdf::CurrentPageNumber(pages, viewport).value_or(pdfTab->m_currentPageIndex),
+            1, pdfTab->m_pagecount);
+
+        auto scrollViewer = PdfScrollViewer();
+        const auto fit = urpdf::CalculatePageFitView(
+            pages, currentPage, pdfTab->m_viewState.bookView, mode,
+            viewport.width, viewport.height,
+            static_cast<double>(scrollViewer.MinZoomFactor()),
+            static_cast<double>(scrollViewer.MaxZoomFactor()));
+        if (!fit) { return; }
+
+        CancelPendingZoomRender();
+        const auto operation = DeferViewStateSave(pdfTab);
+        m_pendingPageFit = PendingPageFit{ currentPage, pdfTab->m_viewState.bookView };
+        m_pendingLayoutViewZoom = static_cast<float>(fit->zoom);
+        m_viewRestorePhase = ViewRestorePhase::Zoom;
+        m_pendingViewSnapshot.reset();
+        scrollViewer.ChangeView(nullptr, nullptr, static_cast<float>(*m_pendingLayoutViewZoom), true);
+        FinishViewStateChange(pdfTab, operation);
+    }
+
+    void MainWindow::FitPageSplitButton_Click(controls::SplitButton const&, controls::SplitButtonClickEventArgs const&)
+    {
+        ApplyPageFit(m_lastPageFitMode);
+    }
+
+    void MainWindow::FitVerticallyMenuItem_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        m_lastPageFitMode = urpdf::PageFitMode::Vertical;
+        UpdateFitPageSplitButtonPresentation();
+        ApplyPageFit(m_lastPageFitMode);
+    }
+
+    void MainWindow::FitHorizontallyMenuItem_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        m_lastPageFitMode = urpdf::PageFitMode::Horizontal;
+        UpdateFitPageSplitButtonPresentation();
+        ApplyPageFit(m_lastPageFitMode);
     }
 
     void MainWindow::BookViewButton_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)

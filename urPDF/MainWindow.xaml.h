@@ -344,6 +344,12 @@ namespace winrt::urPDF::implementation
         std::optional<winrt::weak_ref<controls::TabViewItem>> targetTab;
     };
 
+    struct PendingPageFit
+    {
+        int pageNumber{ 1 };
+        bool bookView{ false };
+    };
+
 
     struct MainWindow : MainWindowT<MainWindow>
     {
@@ -429,6 +435,9 @@ namespace winrt::urPDF::implementation
         void CloseSettings_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&);
         winrt::fire_and_forget ZoomInButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
         winrt::fire_and_forget ZoomOutButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
+        void FitPageSplitButton_Click(controls::SplitButton const& sender, controls::SplitButtonClickEventArgs const& args);
+        void FitVerticallyMenuItem_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
+        void FitHorizontallyMenuItem_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
 
         winrt::event_token PropertyChanged(xaml::Data::PropertyChangedEventHandler const& handler);
         void PropertyChanged(winrt::event_token const& token) noexcept;
@@ -472,6 +481,8 @@ namespace winrt::urPDF::implementation
         ViewRestorePhase m_viewRestorePhase{ ViewRestorePhase::None };
         std::optional<urpdf::DocumentViewState> m_pendingRestoreState;
         bool m_pendingRestoreHasAnchor{ false };
+        std::optional<PendingPageFit> m_pendingPageFit;
+        urpdf::PageFitMode m_lastPageFitMode{ urpdf::PageFitMode::Vertical };
         bool m_viewOperationReady{ false };
         bool m_layoutViewSaveQueued{ false };
         xaml::Media::CompositionTarget::Rendering_revoker m_viewStateRenderingRevoker;
@@ -540,6 +551,8 @@ namespace winrt::urPDF::implementation
         void QueuePendingViewStateSave();
         void AdvanceViewStateChange(std::shared_ptr<PdfTabInfo> const& pdfTab, urpdf::ViewStateGuard::Operation operation);
         void ScrollToPage(int32_t page);
+        void UpdateFitPageSplitButtonPresentation();
+        void ApplyPageFit(urpdf::PageFitMode mode);
         bool TryAcquireRenderingLock();
         void RestoreWindowState();
         void TrackWindowState();
