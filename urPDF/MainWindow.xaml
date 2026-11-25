@@ -543,56 +543,61 @@
                                     Visibility="Collapsed"
                                     HorizontalAlignment="Right"
                                     Width="300"
-                                    Padding="14,12"
                                     CornerRadius="8"
-                                    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+                                    Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
                                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                     BorderThickness="1">
-                                <StackPanel Spacing="8">
-                                    <Grid ColumnSpacing="8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0"
-                                                   Text="Set urPDF as your default PDF viewer?"
-                                                   FontWeight="SemiBold"
-                                                   TextWrapping="Wrap"
-                                                   VerticalAlignment="Center"/>
-                                        <Button x:Name="DefaultPdfViewerPromptCloseButton"
-                                                Grid.Column="1"
-                                                Click="DefaultPdfViewerPromptDismiss_Click"
-                                                Padding="6"
-                                                Background="Transparent"
-                                                BorderBrush="Transparent"
-                                                VerticalAlignment="Top"
-                                                AutomationProperties.Name="Dismiss"
-                                                ToolTipService.ToolTip="Dismiss">
-                                            <FontIcon Glyph="&#xE711;" FontSize="11"/>
-                                        </Button>
-                                    </Grid>
-                                    <CheckBox x:Name="DefaultPdfViewerDontAskAgainCheckBox"
-                                              Content="Don't ask again"
-                                              MinWidth="0"
-                                              MinHeight="0"/>
-                                    <Grid ColumnSpacing="8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <Button x:Name="DefaultPdfViewerNotNowButton"
-                                                Grid.Column="0"
-                                                Content="Not now"
-                                                HorizontalAlignment="Stretch"
-                                                Click="DefaultPdfViewerPromptDismiss_Click"/>
-                                        <Button x:Name="DefaultPdfViewerOpenSettingsButton"
-                                                Grid.Column="1"
-                                                Content="Open Settings"
-                                                HorizontalAlignment="Stretch"
-                                                Style="{StaticResource AccentButtonStyle}"
-                                                Click="DefaultPdfViewerPromptOpenSettings_Click"/>
-                                    </Grid>
-                                </StackPanel>
+                                <Grid>
+                                    <Border x:Name="DefaultPdfViewerPromptSolidBackground"
+                                            CornerRadius="7"
+                                            Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+                                            Visibility="Collapsed"/>
+                                    <StackPanel Spacing="8" Padding="14,12">
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0"
+                                                       Text="Set urPDF as your default PDF viewer?"
+                                                       FontWeight="SemiBold"
+                                                       TextWrapping="Wrap"
+                                                       VerticalAlignment="Center"/>
+                                            <Button x:Name="DefaultPdfViewerPromptCloseButton"
+                                                    Grid.Column="1"
+                                                    Click="DefaultPdfViewerPromptDismiss_Click"
+                                                    Padding="6"
+                                                    Background="Transparent"
+                                                    BorderBrush="Transparent"
+                                                    VerticalAlignment="Top"
+                                                    AutomationProperties.Name="Dismiss"
+                                                    ToolTipService.ToolTip="Dismiss">
+                                                <FontIcon Glyph="&#xE711;" FontSize="11"/>
+                                            </Button>
+                                        </Grid>
+                                        <CheckBox x:Name="DefaultPdfViewerDontAskAgainCheckBox"
+                                                  Content="Don't ask again"
+                                                  MinWidth="0"
+                                                  MinHeight="0"/>
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Button x:Name="DefaultPdfViewerNotNowButton"
+                                                    Grid.Column="0"
+                                                    Content="Not now"
+                                                    HorizontalAlignment="Stretch"
+                                                    Click="DefaultPdfViewerPromptDismiss_Click"/>
+                                            <Button x:Name="DefaultPdfViewerOpenSettingsButton"
+                                                    Grid.Column="1"
+                                                    Content="Open Settings"
+                                                    HorizontalAlignment="Stretch"
+                                                    Style="{StaticResource AccentButtonStyle}"
+                                                    Click="DefaultPdfViewerPromptOpenSettings_Click"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Grid>
                             </Border>
                         </StackPanel>
 

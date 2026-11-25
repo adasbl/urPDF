@@ -1237,6 +1237,7 @@ namespace winrt::urPDF::implementation
             mica.Kind(backdrops::MicaKind::Base);
             this->SystemBackdrop(mica);
             SolidBackgroundLayer().Visibility(xaml::Visibility::Collapsed);
+            DefaultPdfViewerPromptSolidBackground().Visibility(xaml::Visibility::Collapsed);
         }
         else if (transparencyValue == L"MicaAlt")
         {
@@ -1244,16 +1245,19 @@ namespace winrt::urPDF::implementation
             backdrop.Kind(backdrops::MicaKind::BaseAlt);
             SystemBackdrop(backdrop);
             SolidBackgroundLayer().Visibility(xaml::Visibility::Collapsed);
+            DefaultPdfViewerPromptSolidBackground().Visibility(xaml::Visibility::Collapsed);
         }
         else if (transparencyValue == L"None")
         {
             this->SystemBackdrop(nullptr);
             SolidBackgroundLayer().Visibility(xaml::Visibility::Visible);
+            DefaultPdfViewerPromptSolidBackground().Visibility(xaml::Visibility::Visible);
         }
         else
         {
             this->SystemBackdrop(nullptr);
             SolidBackgroundLayer().Visibility(xaml::Visibility::Visible);
+            DefaultPdfViewerPromptSolidBackground().Visibility(xaml::Visibility::Visible);
         }
     }
 
