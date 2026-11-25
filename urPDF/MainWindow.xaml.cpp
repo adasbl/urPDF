@@ -840,6 +840,28 @@ namespace winrt::urPDF::implementation
             }
         });
 
+        FitPageSplitButton().Loaded([weakThis = get_weak()](auto const&, auto const&)
+        {
+            if (auto self = weakThis.get(); self && !self->m_isClosed)
+            {
+                self->SyncFitPageSplitButtonVisuals();
+            }
+        });
+        FitPageSplitButton().IsEnabledChanged([weakThis = get_weak()](auto const&, auto const&)
+        {
+            if (auto self = weakThis.get(); self && !self->m_isClosed)
+            {
+                self->SyncFitPageSplitButtonVisuals();
+                self->DispatcherQueue().TryEnqueue([weakThis]()
+                {
+                    if (auto delayedSelf = weakThis.get(); delayedSelf && !delayedSelf->m_isClosed)
+                    {
+                        delayedSelf->SyncFitPageSplitButtonVisuals();
+                    }
+                });
+            }
+        });
+
         PdfScrollViewer().Loaded([weakThis = get_weak()](auto const&, auto const&)
         {
             if (auto self = weakThis.get())
@@ -6071,6 +6093,44 @@ namespace winrt::urPDF::implementation
         const wchar_t* label = fitHorizontally ? L"Fit horizontally" : L"Fit vertically";
         controls::ToolTipService::SetToolTip(FitPageSplitButton(), winrt::box_value(label));
         xaml::Automation::AutomationProperties::SetName(FitPageSplitButton(), label);
+    }
+
+    void MainWindow::SyncFitPageSplitButtonVisuals()
+    {
+        if (m_isClosed) { return; }
+        auto splitButton = FitPageSplitButton();
+        if (!splitButton) { return; }
+
+        // Work around WinUI SplitButton staying in the Disabled visual state after IsEnabled flips true.
+        xaml::VisualStateManager::GoToState(splitButton, splitButton.IsEnabled() ? L"Normal" : L"Disabled", false);
+
+        // Inset SplitButton background grids inside its 1px outer border to match Button's InnerBorderEdge sizing.
+        std::vector<xaml::DependencyObject> pending;
+        pending.push_back(splitButton);
+        while (!pending.empty())
+        {
+            auto current = pending.back();
+            pending.pop_back();
+            if (auto grid = current.try_as<controls::Grid>())
+            {
+                const auto name = grid.Name();
+                if (name == L"PrimaryBackgroundGrid")
+                {
+                    grid.Margin(xaml::Thickness{ 1.0, 1.0, 1.0, 1.0 });
+                    grid.CornerRadius(xaml::CornerRadius{ 3.0, 0.0, 0.0, 3.0 });
+                }
+                else if (name == L"SecondaryBackgroundGrid")
+                {
+                    grid.Margin(xaml::Thickness{ 0.0, 1.0, 1.0, 1.0 });
+                    grid.CornerRadius(xaml::CornerRadius{ 0.0, 3.0, 3.0, 0.0 });
+                }
+            }
+            const int childCount = media::VisualTreeHelper::GetChildrenCount(current);
+            for (int i = 0; i < childCount; ++i)
+            {
+                pending.push_back(media::VisualTreeHelper::GetChild(current, i));
+            }
+        }
     }
 
     void MainWindow::ApplyPageFit(urpdf::PageFitMode mode)

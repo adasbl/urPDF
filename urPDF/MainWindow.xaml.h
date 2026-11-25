@@ -562,6 +562,7 @@ namespace winrt::urPDF::implementation
         void AdvanceViewStateChange(std::shared_ptr<PdfTabInfo> const& pdfTab, urpdf::ViewStateGuard::Operation operation);
         void ScrollToPage(int32_t page);
         void UpdateFitPageSplitButtonPresentation();
+        void SyncFitPageSplitButtonVisuals();
         void ApplyPageFit(urpdf::PageFitMode mode);
         bool TryAcquireRenderingLock();
         void RestoreWindowState();
