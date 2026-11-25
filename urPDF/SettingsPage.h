@@ -32,6 +32,9 @@ namespace winrt::urPDF::implementation
         void TransparencySelection_SelectionChanged(foundation::IInspectable const& sender, controls::SelectionChangedEventArgs const& /* e */);
         void WindowStartupModeSelection_SelectionChanged(foundation::IInspectable const& sender, controls::SelectionChangedEventArgs const&);
         void OpenFilesInExistingWindowToggle_Toggled(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& /* args */);
+        void AskToSetDefaultPdfViewerToggle_Toggled(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& /* args */);
+        winrt::fire_and_forget OpenDefaultAppsButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& /* args */);
+        void RefreshDefaultPdfViewerStatus();
         void LoadSavedSettings();
         void BackButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
 
