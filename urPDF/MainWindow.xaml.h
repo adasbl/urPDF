@@ -438,7 +438,13 @@ namespace winrt::urPDF::implementation
         void OpenPdfFileAsync(PendingDocumentOpen request);
         winrt::fire_and_forget OpenPdfPathAsync(PendingDocumentOpen request);
         winrt::fire_and_forget ShowOpenErrorAsync(winrt::hstring message);
+        void ScheduleDefaultPdfViewerPrompt();
+        winrt::fire_and_forget MaybePromptForDefaultPdfViewerAsync();
+        void RefreshSettingsPageDefaultPdfViewerStatus();
         controls::ContentDialog m_openErrorDialog{ nullptr };
+        controls::ContentDialog m_defaultPdfViewerDialog{ nullptr };
+        bool m_defaultPdfViewerPromptPending{ false };
+        bool m_defaultPdfViewerDialogInterrupted{ false };
         std::list<winrt::hstring> m_openErrorMessages;
 
         std::shared_ptr<urpdf::MuPdfRuntime> m_runtime;
