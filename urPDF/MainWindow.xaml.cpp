@@ -686,14 +686,16 @@ namespace
         return winrt::urPDF::implementation::SoftwarePageBitmap{ bitmap, geometry };
     }
 
-    // Blocks SetPresenter(Overlapped)'s intermediate restored-size SetWindowPos when returning directly to Maximized.
+    // Blocks SetPresenter's intermediate restored-size SetWindowPos when transitioning between Maximized and FullScreen.
     class ScopedSuppressWindowBoundsChange
     {
     public:
-        explicit ScopedSuppressWindowBoundsChange(HWND hwnd) noexcept
-            : m_hwnd(hwnd)
+        explicit ScopedSuppressWindowBoundsChange(HWND hwnd, std::optional<RECT> allowedBounds = std::nullopt) noexcept
+            : m_hwnd(hwnd),
+              m_allowedBounds(allowedBounds)
         {
-            if (m_hwnd && SetWindowSubclass(m_hwnd, &SubclassProc, SubclassId, 0))
+            if (m_hwnd && SetWindowSubclass(m_hwnd, &SubclassProc, SubclassId,
+                reinterpret_cast<DWORD_PTR>(m_allowedBounds ? &*m_allowedBounds : nullptr)))
             {
                 m_installed = true;
             }
@@ -720,17 +722,28 @@ namespace
         static constexpr UINT_PTR SubclassId = 0x75525046;
 
         static LRESULT CALLBACK SubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
-            UINT_PTR, DWORD_PTR) noexcept
+            UINT_PTR, DWORD_PTR refData) noexcept
         {
             if (msg == WM_WINDOWPOSCHANGING && lParam != 0)
             {
                 auto* windowPos = reinterpret_cast<WINDOWPOS*>(lParam);
-                windowPos->flags |= SWP_NOMOVE | SWP_NOSIZE;
+                const auto* allowed = reinterpret_cast<RECT const*>(refData);
+                const bool matchesAllowed = allowed != nullptr
+                    && ((windowPos->flags & SWP_NOMOVE) != 0
+                        || (windowPos->x == allowed->left && windowPos->y == allowed->top))
+                    && ((windowPos->flags & SWP_NOSIZE) != 0
+                        || (windowPos->cx >= (allowed->right - allowed->left)
+                            && windowPos->cy >= (allowed->bottom - allowed->top)));
+                if (!matchesAllowed)
+                {
+                    windowPos->flags |= SWP_NOMOVE | SWP_NOSIZE;
+                }
             }
             return DefSubclassProc(hwnd, msg, wParam, lParam);
         }
 
         HWND m_hwnd{};
+        std::optional<RECT> m_allowedBounds;
         bool m_installed{ false };
     };
 }
@@ -1131,14 +1144,28 @@ namespace winrt::urPDF::implementation
 
         CaptureWindowState();
         m_preFullscreenPlacement.reset();
+        HWND hwnd{};
+        std::optional<RECT> monitorRect;
         if (auto nativeWindow = try_as<::IWindowNative>())
         {
-            HWND hwnd{};
             WINDOWPLACEMENT placement{};
             placement.length = sizeof(placement);
-            if (SUCCEEDED(nativeWindow->get_WindowHandle(&hwnd)) && hwnd && GetWindowPlacement(hwnd, &placement))
+            if (SUCCEEDED(nativeWindow->get_WindowHandle(&hwnd)) && hwnd)
             {
-                m_preFullscreenPlacement = placement;
+                if (GetWindowPlacement(hwnd, &placement))
+                {
+                    m_preFullscreenPlacement = placement;
+                }
+                MONITORINFO monitorInfo{};
+                monitorInfo.cbSize = sizeof(monitorInfo);
+                if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitorInfo))
+                {
+                    monitorRect = monitorInfo.rcMonitor;
+                }
+            }
+            else
+            {
+                hwnd = nullptr;
             }
         }
 
@@ -1152,7 +1179,26 @@ namespace winrt::urPDF::implementation
         SuppressDwmTransitionsForFullscreenTransition();
         try
         {
+            std::optional<ScopedSuppressWindowBoundsChange> suppressBounds;
+            if (wasMaximized && hwnd && monitorRect)
+            {
+                suppressBounds.emplace(hwnd, *monitorRect);
+            }
             AppWindow().SetPresenter(winrt::Microsoft::UI::Windowing::AppWindowPresenterKind::FullScreen);
+            if (suppressBounds)
+            {
+                suppressBounds->Release();
+            }
+            if (wasMaximized && hwnd && monitorRect && IsAppWindowFullscreen())
+            {
+                RECT currentRect{};
+                if (!GetWindowRect(hwnd, &currentRect) || EqualRect(&currentRect, &*monitorRect) == FALSE)
+                {
+                    SetWindowPos(hwnd, nullptr, monitorRect->left, monitorRect->top,
+                        monitorRect->right - monitorRect->left, monitorRect->bottom - monitorRect->top,
+                        SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+                }
+            }
         }
         catch (...)
         {
