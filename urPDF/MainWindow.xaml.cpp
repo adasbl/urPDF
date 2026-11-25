@@ -700,6 +700,12 @@ namespace winrt::urPDF::implementation
         m_isClosed = true;
         try { ClearPageOverlays(); } catch (...) { m_pageOverlays.clear(); }
         try { StopTrackingWindowState(); } catch (...) {}
+        if (m_fullscreenExitHideTimer) { m_fullscreenExitHideTimer.Stop(); }
+        if (m_documentViewPointerMovedHandler)
+        {
+            try { DocumentViewHost().RemoveHandler(xaml::UIElement::PointerMovedEvent(), winrt::box_value(m_documentViewPointerMovedHandler)); } catch (...) {}
+            m_documentViewPointerMovedHandler = nullptr;
+        }
         m_firstFrameRenderedRevoker.revoke();
         CloseTransferredSourceWindow();
         if (m_moveSizeInput)
@@ -795,6 +801,45 @@ namespace winrt::urPDF::implementation
             if (auto self = weakThis.get()) { self->ExecutePendingDebouncedSearch(); }
         });
 
+        m_fullscreenExitHideTimer = DispatcherQueue().CreateTimer();
+        m_fullscreenExitHideTimer.IsRepeating(false);
+        m_fullscreenExitHideTimer.Interval(std::chrono::milliseconds(600));
+        m_fullscreenExitHideTimer.Tick([weakThis = get_weak()](auto const&, auto const&)
+        {
+            if (auto self = weakThis.get(); self && !self->m_isClosed)
+            {
+                if (!self->m_isPointerOverFullscreenExitButton && !self->IsFocusInsideElement(self->FullscreenExitButton()))
+                {
+                    self->FullscreenExitButton().Visibility(xaml::Visibility::Collapsed);
+                }
+            }
+        });
+
+        m_documentViewPointerMovedHandler = xaml::Input::PointerEventHandler(
+            [weakThis = get_weak()](auto const&, xaml::Input::PointerRoutedEventArgs const& args)
+            {
+                if (auto self = weakThis.get(); self && !self->m_isClosed && self->IsFullscreen())
+                {
+                    self->HandleDocumentViewPointerMoved(args.GetCurrentPoint(self->DocumentViewHost()).Position());
+                }
+            });
+        DocumentViewHost().AddHandler(xaml::UIElement::PointerMovedEvent(),
+            winrt::box_value(m_documentViewPointerMovedHandler), true);
+        DocumentViewHost().PointerExited([weakThis = get_weak()](auto const&, auto const&)
+        {
+            if (auto self = weakThis.get(); self && !self->m_isClosed && self->IsFullscreen())
+            {
+                self->ScheduleFullscreenExitButtonHide();
+            }
+        });
+        FullscreenExitButton().LostFocus([weakThis = get_weak()](auto const&, auto const&)
+        {
+            if (auto self = weakThis.get(); self && !self->m_isClosed && self->IsFullscreen())
+            {
+                self->ScheduleFullscreenExitButtonHide();
+            }
+        });
+
         PdfScrollViewer().Loaded([weakThis = get_weak()](auto const&, auto const&)
         {
             if (auto self = weakThis.get())
@@ -837,6 +882,7 @@ namespace winrt::urPDF::implementation
             {
                 self->m_lastPageTextClick.reset();
                 if (self->m_pageTextDrag) { self->EndPageTextDrag(); }
+                if (self->IsFullscreen()) { self->ScheduleFullscreenExitButtonHide(); }
                 return;
             }
             xaml::Application::Current().as<App>()->WindowActivated(*self);
@@ -908,10 +954,14 @@ namespace winrt::urPDF::implementation
 
         m_observedAppWindow = AppWindow();
         m_windowChangedToken = m_observedAppWindow.Changed(
-            [weakThis = get_weak()](auto const&, auto const&)
+            [weakThis = get_weak()](auto const&, winrt::Microsoft::UI::Windowing::AppWindowChangedEventArgs const& args)
             {
                 if (auto self = weakThis.get(); self && !self->m_isClosed)
                 {
+                    if (args.DidPresenterChange())
+                    {
+                        self->HandleAppWindowPresenterChanged();
+                    }
                     self->CaptureWindowState();
                 }
             });
@@ -945,6 +995,8 @@ namespace winrt::urPDF::implementation
 
     void MainWindow::CaptureWindowState()
     {
+        if (m_isClosed || !m_fullscreenTracker.ShouldCaptureWindowState(IsAppWindowFullscreen())) { return; }
+
         auto nativeWindow = try_as<::IWindowNative>();
         HWND hwnd{};
         if (!nativeWindow || FAILED(nativeWindow->get_WindowHandle(&hwnd))) { return; }
@@ -970,6 +1022,274 @@ namespace winrt::urPDF::implementation
         if (settings.Get().windowState != m_windowState)
         {
             settings.SetWindowState(m_windowState);
+        }
+    }
+
+    bool MainWindow::IsAppWindowFullscreen()
+    {
+        if (m_isClosed) { return false; }
+        auto appWindow = AppWindow();
+        return appWindow && appWindow.Presenter()
+            && appWindow.Presenter().Kind() == winrt::Microsoft::UI::Windowing::AppWindowPresenterKind::FullScreen;
+    }
+
+    bool MainWindow::IsFullscreen()
+    {
+        return m_fullscreenTracker.active || IsAppWindowFullscreen();
+    }
+
+    bool MainWindow::CanEnterFullscreen()
+    {
+        if (m_isClosed
+            || MainWindowUI().Visibility() != xaml::Visibility::Visible
+            || SettingsOverlay().Visibility() == xaml::Visibility::Visible
+            || RootFrame().Visibility() == xaml::Visibility::Visible)
+        {
+            return false;
+        }
+        auto document = SelectedPdfDocument();
+        return document && document->m_layoutLoaded;
+    }
+
+    void MainWindow::EnterFullscreen()
+    {
+        if (!CanEnterFullscreen() || IsFullscreen()) { return; }
+
+        CaptureWindowState();
+        bool wasMaximized = m_windowState.maximized;
+        if (auto overlapped = AppWindow().Presenter().try_as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>())
+        {
+            wasMaximized = overlapped.State() == winrt::Microsoft::UI::Windowing::OverlappedPresenterState::Maximized;
+        }
+
+        m_fullscreenTracker.BeginEnter(wasMaximized);
+        try
+        {
+            AppWindow().SetPresenter(winrt::Microsoft::UI::Windowing::AppWindowPresenterKind::FullScreen);
+        }
+        catch (...)
+        {
+            m_fullscreenTracker.CompleteEnter(IsAppWindowFullscreen());
+            ApplyFullscreenChrome(m_fullscreenTracker.active);
+            return;
+        }
+
+        m_fullscreenTracker.CompleteEnter(IsAppWindowFullscreen());
+        ApplyFullscreenChrome(m_fullscreenTracker.active);
+        if (m_fullscreenTracker.active && !IsFocusInsideElement(SearchBar()))
+        {
+            PdfScrollViewer().Focus(xaml::FocusState::Programmatic);
+        }
+    }
+
+    void MainWindow::ExitFullscreen()
+    {
+        if (m_isClosed || !IsFullscreen()) { return; }
+
+        const bool restoreMaximized = m_fullscreenTracker.BeginExit();
+        try
+        {
+            if (IsAppWindowFullscreen())
+            {
+                AppWindow().SetPresenter(winrt::Microsoft::UI::Windowing::AppWindowPresenterKind::Overlapped);
+            }
+            if (restoreMaximized)
+            {
+                if (auto overlapped = AppWindow().Presenter().try_as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>())
+                {
+                    if (overlapped.State() != winrt::Microsoft::UI::Windowing::OverlappedPresenterState::Maximized)
+                    {
+                        overlapped.Maximize();
+                    }
+                }
+            }
+        }
+        catch (...)
+        {
+            m_fullscreenTracker.CompleteExit(IsAppWindowFullscreen());
+            ApplyFullscreenChrome(m_fullscreenTracker.active);
+            return;
+        }
+
+        m_fullscreenTracker.CompleteExit(IsAppWindowFullscreen());
+        ApplyFullscreenChrome(m_fullscreenTracker.active);
+        CaptureWindowState();
+    }
+
+    void MainWindow::ToggleFullscreen()
+    {
+        if (IsFullscreen())
+        {
+            ExitFullscreen();
+        }
+        else if (CanEnterFullscreen())
+        {
+            EnterFullscreen();
+        }
+    }
+
+    void MainWindow::HandleAppWindowPresenterChanged()
+    {
+        if (m_isClosed) { return; }
+        const bool appWindowFullscreen = IsAppWindowFullscreen();
+        bool chromeChanged = false;
+        const bool restoreMaximized = m_fullscreenTracker.SyncExternalPresenter(appWindowFullscreen, chromeChanged);
+        if (restoreMaximized)
+        {
+            m_fullscreenTracker.transitioning = true;
+            try
+            {
+                if (auto overlapped = AppWindow().Presenter().try_as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>())
+                {
+                    if (overlapped.State() != winrt::Microsoft::UI::Windowing::OverlappedPresenterState::Maximized)
+                    {
+                        overlapped.Maximize();
+                    }
+                }
+            }
+            catch (...) {}
+            m_fullscreenTracker.transitioning = false;
+        }
+
+        if (chromeChanged)
+        {
+            ApplyFullscreenChrome(m_fullscreenTracker.active);
+        }
+        else if (!m_fullscreenTracker.active && !appWindowFullscreen)
+        {
+            UpdateTitleBarPassthroughRegions();
+        }
+    }
+
+    void MainWindow::ApplyFullscreenChrome(bool fullscreen)
+    {
+        if (m_isClosed) { return; }
+
+        HideFullscreenExitButton();
+        if (fullscreen)
+        {
+            TitleBarRow().Height(xaml::GridLength{ 0.0, xaml::GridUnitType::Pixel });
+            AppTitleBar().Visibility(xaml::Visibility::Collapsed);
+            MainToolbar().Visibility(xaml::Visibility::Collapsed);
+            MainContentBorder().CornerRadius(xaml::CornerRadius{ 0.0, 0.0, 0.0, 0.0 });
+            MainContentBorder().BorderThickness(xaml::Thickness{ 0.0, 0.0, 0.0, 0.0 });
+        }
+        else
+        {
+            TitleBarRow().Height(xaml::GridLength{ 40.0, xaml::GridUnitType::Pixel });
+            AppTitleBar().Visibility(xaml::Visibility::Visible);
+            MainToolbar().Visibility(xaml::Visibility::Visible);
+            MainContentBorder().CornerRadius(xaml::CornerRadius{ 8.0, 8.0, 0.0, 0.0 });
+            MainContentBorder().BorderThickness(xaml::Thickness{ 1.0, 0.0, 1.0, 0.0 });
+            SetTitleBar(AppTitleBar());
+        }
+
+        UpdateTitleBarPassthroughRegions();
+        if (!fullscreen)
+        {
+            DispatcherQueue().TryEnqueue([weakThis = get_weak()]()
+            {
+                if (auto self = weakThis.get(); self && !self->m_isClosed)
+                {
+                    self->UpdateTitleBarPassthroughRegions();
+                }
+            });
+        }
+    }
+
+    void MainWindow::ShowFullscreenExitButton()
+    {
+        if (m_isClosed || !IsFullscreen()) { return; }
+        if (m_fullscreenExitHideTimer) { m_fullscreenExitHideTimer.Stop(); }
+        FullscreenExitButton().Visibility(xaml::Visibility::Visible);
+    }
+
+    void MainWindow::ScheduleFullscreenExitButtonHide()
+    {
+        if (m_isClosed || m_isPointerOverFullscreenExitButton || IsFocusInsideElement(FullscreenExitButton())) { return; }
+        if (FullscreenExitButton().Visibility() != xaml::Visibility::Visible) { return; }
+        if (m_fullscreenExitHideTimer && !m_fullscreenExitHideTimer.IsRunning())
+        {
+            m_fullscreenExitHideTimer.Start();
+        }
+    }
+
+    void MainWindow::HideFullscreenExitButton()
+    {
+        m_isPointerOverFullscreenExitButton = false;
+        if (m_fullscreenExitHideTimer) { m_fullscreenExitHideTimer.Stop(); }
+        if (!m_isClosed)
+        {
+            FullscreenExitButton().Visibility(xaml::Visibility::Collapsed);
+        }
+    }
+
+    void MainWindow::HandleDocumentViewPointerMoved(foundation::Point position)
+    {
+        constexpr double topTriggerHeight = 32.0;
+        constexpr double topKeepHeight = 72.0;
+
+        if (m_pageTextDrag) { return; }
+        if (position.Y <= topTriggerHeight)
+        {
+            ShowFullscreenExitButton();
+            return;
+        }
+        if (m_isPointerOverFullscreenExitButton || position.Y <= topKeepHeight)
+        {
+            if (FullscreenExitButton().Visibility() == xaml::Visibility::Visible && m_fullscreenExitHideTimer)
+            {
+                m_fullscreenExitHideTimer.Stop();
+            }
+            return;
+        }
+        ScheduleFullscreenExitButtonHide();
+    }
+
+    void MainWindow::ToggleFullscreen_Invoked(xaml::Input::KeyboardAccelerator const&,
+        xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args)
+    {
+        if (m_isClosed
+            || SettingsOverlay().Visibility() == xaml::Visibility::Visible
+            || RootFrame().Visibility() == xaml::Visibility::Visible)
+        {
+            return;
+        }
+
+        if (IsFullscreen())
+        {
+            ExitFullscreen();
+            args.Handled(true);
+        }
+        else if (CanEnterFullscreen())
+        {
+            EnterFullscreen();
+            args.Handled(true);
+        }
+    }
+
+    void MainWindow::FullscreenButton_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        ToggleFullscreen();
+    }
+
+    void MainWindow::FullscreenExitButton_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        ExitFullscreen();
+    }
+
+    void MainWindow::FullscreenExitButton_PointerEntered(foundation::IInspectable const&, xaml::Input::PointerRoutedEventArgs const&)
+    {
+        m_isPointerOverFullscreenExitButton = true;
+        if (m_fullscreenExitHideTimer) { m_fullscreenExitHideTimer.Stop(); }
+    }
+
+    void MainWindow::FullscreenExitButton_PointerExited(foundation::IInspectable const&, xaml::Input::PointerRoutedEventArgs const&)
+    {
+        m_isPointerOverFullscreenExitButton = false;
+        if (IsFullscreen())
+        {
+            ScheduleFullscreenExitButtonHide();
         }
     }
 
@@ -1305,18 +1625,23 @@ namespace winrt::urPDF::implementation
         auto root = button.XamlRoot();
         if (!root) { return; }
 
-        const double rightInset = AppWindow().TitleBar().RightInset() / root.RasterizationScale();
-        auto titleBarMargin = AppTitleBar().Margin();
-        if (titleBarMargin.Right != rightInset)
+        const bool titleBarVisible = !IsFullscreen() && AppTitleBar().Visibility() == xaml::Visibility::Visible;
+        if (titleBarVisible)
         {
-            titleBarMargin.Right = rightInset;
-            AppTitleBar().Margin(titleBarMargin);
+            const double rightInset = AppWindow().TitleBar().RightInset() / root.RasterizationScale();
+            auto titleBarMargin = AppTitleBar().Margin();
+            if (titleBarMargin.Right != rightInset)
+            {
+                titleBarMargin.Right = rightInset;
+                AppTitleBar().Margin(titleBarMargin);
+            }
         }
 
         using winrt::Windows::Graphics::RectInt32;
         std::vector<RectInt32> rects;
 
-        if (MainWindowUI().Visibility() == xaml::Visibility::Visible &&
+        if (titleBarVisible &&
+            MainWindowUI().Visibility() == xaml::Visibility::Visible &&
             SettingsOverlay().Visibility() != xaml::Visibility::Visible)
         {
             const double scale = root.RasterizationScale();
@@ -1485,6 +1810,10 @@ namespace winrt::urPDF::implementation
 
         EmptyTabDropZone().Visibility(currentTab ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
         SyncSearchBarToDocument(nullptr);
+        if (!m_isClosed && tabView.TabItems().Size() > 0 && IsFullscreen())
+        {
+            ExitFullscreen();
+        }
         DisplayPageNumber(0);
         DisplayPageCount(0);
         PagesLayout().PageSizes(nullptr);
@@ -1575,6 +1904,10 @@ namespace winrt::urPDF::implementation
 
         m_openedTabs.erase(openedTab);
         tabView.TabItems().RemoveAt(index);
+        if (!m_isClosed && tabView.TabItems().Size() > 0 && m_openedTabs.empty() && IsFullscreen())
+        {
+            ExitFullscreen();
+        }
         return pdfTab;
     }
 
@@ -1946,6 +2279,10 @@ namespace winrt::urPDF::implementation
         if (tabView.TabItems().Size() == 0 && !m_isClosed)
         {
             Close();
+        }
+        else if (!m_isClosed && m_openedTabs.empty() && IsFullscreen())
+        {
+            ExitFullscreen();
         }
     }
 
@@ -3948,6 +4285,7 @@ namespace winrt::urPDF::implementation
         {
             SearchButton().IsEnabled(false);
             FitPageSplitButton().IsEnabled(false);
+            FullscreenButton().IsEnabled(false);
             SearchBar().Visibility(xaml::Visibility::Collapsed);
             m_isSyncingSearchText = true;
             SearchTextBox().Text(L"");
@@ -3962,6 +4300,7 @@ namespace winrt::urPDF::implementation
 
         SearchButton().IsEnabled(true);
         FitPageSplitButton().IsEnabled(true);
+        FullscreenButton().IsEnabled(true);
         SearchBar().Visibility(document->m_searchBarOpen ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
 
         std::wstring const& queryText = !document->m_searchDraftQuery.empty()
@@ -4648,22 +4987,30 @@ namespace winrt::urPDF::implementation
 
         auto document = SelectedPdfDocument();
         if (!document) { document = m_presentedTab.lock(); }
-        if (!document) { return; }
-
-        const bool hasSelection = document->m_textSelection || document->m_wordSelectionPoints
-            || document->m_selectedImage || document->m_pendingImageClick;
-
-        if (document->m_searchBarOpen && (IsFocusInsideElement(SearchBar()) || !hasSelection))
+        if (document)
         {
-            CloseSearchBar();
-            args.Handled(true);
-            return;
+            const bool hasSelection = document->m_textSelection || document->m_wordSelectionPoints
+                || document->m_selectedImage || document->m_pendingImageClick;
+
+            if (document->m_searchBarOpen && (IsFocusInsideElement(SearchBar()) || !hasSelection))
+            {
+                CloseSearchBar();
+                args.Handled(true);
+                return;
+            }
+
+            if (hasSelection)
+            {
+                ClearPageTextSelection(document);
+                ClearPageImageSelection(document);
+                args.Handled(true);
+                return;
+            }
         }
 
-        if (hasSelection)
+        if (IsFullscreen())
         {
-            ClearPageTextSelection(document);
-            ClearPageImageSelection(document);
+            ExitFullscreen();
             args.Handled(true);
         }
     }

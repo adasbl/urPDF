@@ -27,9 +27,10 @@
                 <KeyboardAccelerator Key="F3" Invoked="FindNext_Invoked"/>
                 <KeyboardAccelerator Key="F3" Modifiers="Shift" Invoked="FindPrevious_Invoked"/>
                 <KeyboardAccelerator Key="Escape" Invoked="ClearPdfSelection_Invoked"/>
+                <KeyboardAccelerator Key="F11" Invoked="ToggleFullscreen_Invoked"/>
             </Grid.KeyboardAccelerators>
             <Grid.RowDefinitions>
-                <RowDefinition Height="40"/>
+                <RowDefinition x:Name="TitleBarRow" Height="40"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
@@ -154,7 +155,7 @@
                 </Grid>
             </Border>
 
-            <Border Grid.Row="1"
+            <Border x:Name="MainContentBorder" Grid.Row="1"
                     Background="{ThemeResource LayerFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1,0,1,0"
@@ -168,7 +169,7 @@
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <Grid Grid.Row="0" Margin="10,8,10,8">
+                    <Grid x:Name="MainToolbar" Grid.Row="0" Margin="10,8,10,8">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Spacing="4">
 
                             <Button Click="OpenPdfFileAsync"
@@ -340,11 +341,14 @@
                                 </SplitButton.Flyout>
                             </SplitButton>
 
-                            <Button x:Name="FillWindowButton" 
-                                    ToolTipService.ToolTip="Fill window">
+                            <Button x:Name="FullscreenButton"
+                                    Click="FullscreenButton_Click"
+                                    IsEnabled="False"
+                                    AutomationProperties.Name="Fullscreen"
+                                    ToolTipService.ToolTip="Fullscreen (F11)">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <FontIcon Glyph="&#xE9A6;"/>
+                                        <FontIcon Glyph="&#xE740;"/>
                                     </StackPanel>
                                 </Button.Content>
                             </Button>
@@ -361,7 +365,7 @@
                         </StackPanel>
                     </Grid>
 
-                    <Grid Grid.Row="1">
+                    <Grid x:Name="DocumentViewHost" Grid.Row="1">
                         <ScrollViewer
                             x:Name="PdfScrollViewer"
                             KeyboardAcceleratorPlacementMode="Hidden"
@@ -570,6 +574,27 @@
                                 </Button>
                             </Grid>
                         </Border>
+
+                        <Button x:Name="FullscreenExitButton"
+                                Visibility="Collapsed"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Top"
+                                Margin="0,16,0,0"
+                                Width="40"
+                                Height="40"
+                                Padding="0"
+                                CornerRadius="20"
+                                Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                Canvas.ZIndex="20"
+                                AutomationProperties.Name="Exit fullscreen"
+                                ToolTipService.ToolTip="Exit fullscreen (Esc)"
+                                Click="FullscreenExitButton_Click"
+                                PointerEntered="FullscreenExitButton_PointerEntered"
+                                PointerExited="FullscreenExitButton_PointerExited">
+                            <FontIcon Glyph="&#xE711;" FontSize="14"/>
+                        </Button>
 
                         <Border x:Name="EmptyTabDropZone"
                             AllowDrop="True"
