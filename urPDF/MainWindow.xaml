@@ -585,7 +585,7 @@
                                 Height="40"
                                 Padding="0"
                                 CornerRadius="20"
-                                Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+                                Background="{ThemeResource FullscreenExitButtonBackground}"
                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                 BorderThickness="1"
                                 Canvas.ZIndex="20"
@@ -594,6 +594,33 @@
                                 Click="FullscreenExitButton_Click"
                                 PointerEntered="FullscreenExitButton_PointerEntered"
                                 PointerExited="FullscreenExitButton_PointerExited">
+                            <Button.Resources>
+                                <ResourceDictionary>
+                                    <ResourceDictionary.ThemeDictionaries>
+                                        <ResourceDictionary x:Key="Default">
+                                            <StaticResource x:Key="FullscreenExitButtonBackground" ResourceKey="SolidBackgroundFillColorTertiaryBrush"/>
+                                            <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="SolidBackgroundFillColorQuinaryBrush"/>
+                                            <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="SolidBackgroundFillColorSecondaryBrush"/>
+                                            <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="CardStrokeColorDefaultBrush"/>
+                                            <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="CardStrokeColorDefaultBrush"/>
+                                        </ResourceDictionary>
+                                        <ResourceDictionary x:Key="Light">
+                                            <StaticResource x:Key="FullscreenExitButtonBackground" ResourceKey="SolidBackgroundFillColorBaseBrush"/>
+                                            <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="SolidBackgroundFillColorSecondaryBrush"/>
+                                            <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="SolidBackgroundFillColorTertiaryBrush"/>
+                                            <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="CardStrokeColorDefaultBrush"/>
+                                            <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="CardStrokeColorDefaultBrush"/>
+                                        </ResourceDictionary>
+                                        <ResourceDictionary x:Key="HighContrast">
+                                            <StaticResource x:Key="FullscreenExitButtonBackground" ResourceKey="SystemColorWindowColorBrush"/>
+                                            <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="SystemColorHighlightColorBrush"/>
+                                            <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="SystemColorHighlightColorBrush"/>
+                                            <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="SystemColorWindowTextColorBrush"/>
+                                            <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="SystemColorWindowTextColorBrush"/>
+                                        </ResourceDictionary>
+                                    </ResourceDictionary.ThemeDictionaries>
+                                </ResourceDictionary>
+                            </Button.Resources>
                             <FontIcon Glyph="&#xE711;" FontSize="14"/>
                         </Button>
 
