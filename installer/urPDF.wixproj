@@ -10,7 +10,10 @@
     <!-- Output of scripts/stage-msi-payload.ps1. -->
     <PayloadDir Condition="'$(PayloadDir)' == ''">$(MSBuildThisFileDirectory)..\out\msi\x64\Release\payload</PayloadDir>
 
-    <DefineConstants>$(DefineConstants);ProductVersion=$(ProductVersion);PayloadDir=$(PayloadDir);IconPath=$(MSBuildThisFileDirectory)..\urPDF\Assets\logo.ico</DefineConstants>
+    <!-- High CAB compression by default (local, release, and manual builds); CI passes none on non-release runs. -->
+    <CompressionLevel Condition="'$(CompressionLevel)' == ''">high</CompressionLevel>
+
+    <DefineConstants>$(DefineConstants);ProductVersion=$(ProductVersion);PayloadDir=$(PayloadDir);IconPath=$(MSBuildThisFileDirectory)..\urPDF\Assets\logo.ico;CompressionLevel=$(CompressionLevel)</DefineConstants>
 
     <!--
       Validation rules that do not fit this package:

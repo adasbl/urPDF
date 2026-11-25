@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -18,6 +18,7 @@ concurrency:
 jobs:
   build:
     name: Release x64
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: windows-2025-vs2026
     timeout-minutes: 60
     outputs:
@@ -53,7 +54,9 @@ jobs:
                   $release = 'true'
               }
           }
+          $fullRelease = if ($release -eq 'true' -or $env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { 'true' } else { 'false' }
           "release=$release" >> $env:GITHUB_OUTPUT
+          "full_release=$fullRelease" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
           if ($release -eq 'true') { "Release commit: urPDF $version" >> $env:GITHUB_STEP_SUMMARY }
 
@@ -105,15 +108,31 @@ jobs:
           path: out/tools/vcpkg
           persist-credentials: false
 
-      - name: Cache dependencies
+      - name: Cache vcpkg binary cache
         uses: actions/cache@v6
         with:
-          path: |
-            ${{ runner.temp }}/vcpkg-binary-cache
-            packages
-          key: windows-vs2026-deps-v1-${{ env.RUNNER_IMAGE_VERSION }}-${{ hashFiles('vcpkg.json', 'urPDF/packages.config') }}
+          path: ${{ runner.temp }}/vcpkg-binary-cache
+          key: windows-vs2026-vcpkg-v1-${{ hashFiles('vcpkg.json') }}-${{ env.RUNNER_IMAGE_VERSION }}
           restore-keys: |
-            windows-vs2026-deps-v1-${{ env.RUNNER_IMAGE_VERSION }}-
+            windows-vs2026-vcpkg-v1-${{ hashFiles('vcpkg.json') }}-
+            windows-vs2026-vcpkg-v1-
+          save-always: true
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: packages
+          key: windows-nuget-packages-v1-${{ hashFiles('urPDF/packages.config') }}
+          save-always: true
+
+      - name: Cache WiX NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: windows-wix-nuget-v1-${{ hashFiles('installer/urPDF.wixproj') }}
+          restore-keys: |
+            windows-wix-nuget-v1-
+          save-always: true
 
       - name: Bootstrap vcpkg
         run: |
@@ -132,23 +151,33 @@ jobs:
 
       # Unsigned .msixupload for the Store: Partner Center signs it after submission.
       - name: Build urPDF for Microsoft Store
+        env:
+          FULL_RELEASE: ${{ steps.release.outputs.full_release }}
         run: |
+          $extraProps = @()
+          if ($env:FULL_RELEASE -ne 'true') { $extraProps += '/p:WholeProgramOptimization=false' }
           & $env:MSBUILD_PATH urPDF/urPDF.vcxproj /m /nologo /verbosity:minimal `
               /p:Configuration=Release /p:Platform=x64 `
               "/p:VcpkgRoot=$env:VCPKG_ROOT" /p:VcpkgTriplet=x64-windows `
               /p:VcpkgManifestInstall=false /p:AppxPackageSigningEnabled=false `
               /p:GenerateAppxPackageOnBuild=true /p:UapAppxPackageBuildMode=StoreUpload `
               /p:AppxBundle=Never `
+              @extraProps `
               /bl:out/ci/logs/urPDF-store.binlog
           if ($LASTEXITCODE -ne 0) { throw 'urPDF Store build failed.' }
 
       - name: Build unpackaged urPDF for MSI
+        env:
+          FULL_RELEASE: ${{ steps.release.outputs.full_release }}
         run: |
+          $extraProps = @()
+          if ($env:FULL_RELEASE -ne 'true') { $extraProps += '/p:WholeProgramOptimization=false' }
           & $env:MSBUILD_PATH urPDF/urPDF.vcxproj /m /nologo /verbosity:minimal `
               /p:Configuration=Release /p:Platform=x64 `
               "/p:VcpkgRoot=$env:VCPKG_ROOT" /p:VcpkgTriplet=x64-windows `
               /p:VcpkgManifestInstall=false /p:AppxPackage=false `
               /p:WindowsPackageType=None /p:GenerateAppxPackageOnBuild=false `
+              @extraProps `
               /bl:out/ci/logs/urPDF-msi.binlog
           if ($LASTEXITCODE -ne 0) { throw 'urPDF unpackaged build failed.' }
 
@@ -160,16 +189,11 @@ jobs:
 
       - name: Build unit and runtime tests
         run: |
-          & $env:MSBUILD_PATH tests/urPDF.UnitTests.vcxproj /m /nologo /verbosity:minimal `
-              /p:Configuration=Release /p:Platform=x64 `
-              /bl:out/ci/logs/unit-tests.binlog
-          if ($LASTEXITCODE -ne 0) { throw 'Unit test build failed.' }
-
-          & $env:MSBUILD_PATH tests/urPDF.RuntimeTests.vcxproj /m /nologo /verbosity:minimal `
+          & $env:MSBUILD_PATH tests/urPDF.Tests.proj /m /nologo /verbosity:minimal `
               /p:Configuration=Release /p:Platform=x64 `
               "/p:VcpkgRoot=$env:VCPKG_ROOT" /p:VcpkgTriplet=x64-windows `
-              /p:VcpkgManifestInstall=false /bl:out/ci/logs/runtime-tests.binlog
-          if ($LASTEXITCODE -ne 0) { throw 'Runtime test build failed.' }
+              /p:VcpkgManifestInstall=false /bl:out/ci/logs/tests.binlog
+          if ($LASTEXITCODE -ne 0) { throw 'Test build failed.' }
 
       - name: Run unit and runtime tests
         run: |
@@ -187,11 +211,14 @@ jobs:
       - name: Build MSI installer
         env:
           WIX_EULA_ID: ${{ vars.WIX_EULA_ID }}
+          FULL_RELEASE: ${{ steps.release.outputs.full_release }}
         run: |
           if (-not $env:WIX_EULA_ID) {
               throw 'WiX 7 requires accepting the OSMF EULA. Set the repository variable WIX_EULA_ID to wix7 after reading https://wixtoolset.org/osmf/.'
           }
-          dotnet build installer/urPDF.wixproj -c Release -nologo -v:minimal "-p:AcceptEula=$env:WIX_EULA_ID"
+          $extraProps = @()
+          if ($env:FULL_RELEASE -ne 'true') { $extraProps += '-p:CompressionLevel=none' }
+          dotnet build installer/urPDF.wixproj -c Release -nologo -v:minimal "-p:AcceptEula=$env:WIX_EULA_ID" @extraProps
           if ($LASTEXITCODE -ne 0) { throw 'MSI build failed.' }
 
           $version = (Get-Content -LiteralPath vcpkg.json -Raw | ConvertFrom-Json).'version-string'
@@ -203,22 +230,24 @@ jobs:
           Copy-Item -LiteralPath $store.FullName -Destination out/release/
 
       - name: Upload MSI installer
+        if: steps.release.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7
         with:
           name: msi-installer
           path: out/release/*.msi
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 7
 
       # Submit this file in Partner Center. Its manifest Identity must match the reserved
       # Store name and publisher (Package.appxmanifest) before the first submission.
       - name: Upload Microsoft Store package
+        if: steps.release.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7
         with:
           name: msix-store-upload
           path: out/release/*.msixupload
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 14
 
       - name: Summarize test results
         if: always()
@@ -239,7 +268,7 @@ jobs:
             out/ci/logs
             out/ci/test-results
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 5
 
   release:
     name: Publish GitHub Release

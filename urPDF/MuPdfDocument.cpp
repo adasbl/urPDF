@@ -148,16 +148,17 @@ namespace
 
     // Ligatures are not preserved: MuPDF then splits "fi" into separate letters with
     // split bounds, so copied text stays searchable.
-    fz_stext_page* LoadStructuredText(fz_context* ctx, fz_document* document, int pageIndex)
+    fz_stext_page* LoadStructuredText(fz_context* ctx, fz_document* document, int pageIndex, fz_rect* bounds = nullptr)
     {
         fz_page* page = nullptr;
         fz_stext_page* text = nullptr;
         fz_stext_options options{};
-        options.flags = FZ_STEXT_PRESERVE_WHITESPACE;
+        options.flags = FZ_STEXT_PRESERVE_WHITESPACE | FZ_STEXT_PRESERVE_IMAGES;
         fz_var(page);
         fz_try(ctx)
         {
             page = fz_load_page(ctx, document, pageIndex);
+            if (bounds) { *bounds = fz_bound_page(ctx, page); }
             text = fz_new_stext_page_from_page(ctx, page, &options);
         }
         fz_always(ctx)
@@ -169,6 +170,99 @@ namespace
             ThrowMuPdfError(ctx);
         }
         return text;
+    }
+
+    fz_buffer* EncodePageImagePng(fz_context* ctx, fz_document* document, int pageIndex, std::uint32_t imageIndex)
+    {
+        fz_page* page = nullptr;
+        fz_stext_page* text = nullptr;
+        fz_pixmap* pixmap = nullptr;
+        fz_pixmap* converted = nullptr;
+        fz_device* device = nullptr;
+        fz_buffer* buffer = nullptr;
+        fz_stext_options options{};
+        options.flags = FZ_STEXT_PRESERVE_WHITESPACE | FZ_STEXT_PRESERVE_IMAGES;
+        fz_var(page);
+        fz_var(text);
+        fz_var(pixmap);
+        fz_var(converted);
+        fz_var(device);
+        fz_var(buffer);
+        fz_try(ctx)
+        {
+            page = fz_load_page(ctx, document, pageIndex);
+            text = fz_new_stext_page_from_page(ctx, page, &options);
+
+            fz_image* image = nullptr;
+            std::uint32_t current = 0;
+            for (auto block = text->first_block; block; block = block->next)
+            {
+                if (block->type != FZ_STEXT_BLOCK_IMAGE || !block->u.i.image) { continue; }
+                if (current == imageIndex)
+                {
+                    image = block->u.i.image;
+                    break;
+                }
+                ++current;
+            }
+            if (!image) { fz_throw(ctx, FZ_ERROR_ARGUMENT, "Page image index out of range."); }
+            if (image->w <= 0 || image->h <= 0) { fz_throw(ctx, FZ_ERROR_GENERIC, "Image has invalid dimensions."); }
+
+            if (image->mask || image->imagemask)
+            {
+                const fz_irect rect{ 0, 0, image->w, image->h };
+                pixmap = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx), rect, nullptr, 1);
+                fz_clear_pixmap(ctx, pixmap);
+                device = fz_new_draw_device(ctx, fz_identity, pixmap);
+                const fz_matrix ctm = fz_scale(static_cast<float>(image->w), static_cast<float>(image->h));
+                if (image->imagemask)
+                {
+                    const float black[3] = { 0.0f, 0.0f, 0.0f };
+                    fz_fill_image_mask(ctx, device, image, ctm, fz_device_rgb(ctx), black, 1.0f, fz_default_color_params);
+                }
+                else
+                {
+                    const fz_rect scissor = fz_make_rect(0.0f, 0.0f,
+                        static_cast<float>(image->w), static_cast<float>(image->h));
+                    fz_clip_image_mask(ctx, device, image->mask, ctm, scissor);
+                    fz_fill_image(ctx, device, image, ctm, 1.0f, fz_default_color_params);
+                    fz_pop_clip(ctx, device);
+                }
+                fz_close_device(ctx, device);
+                fz_drop_device(ctx, device);
+                device = nullptr;
+            }
+            else
+            {
+                pixmap = fz_get_pixmap_from_image(ctx, image, nullptr, nullptr, nullptr, nullptr);
+                auto* cs = fz_pixmap_colorspace(ctx, pixmap);
+                if (!cs || fz_pixmap_spots(ctx, pixmap) > 0
+                    || (!fz_colorspace_is_rgb(ctx, cs) && !fz_colorspace_is_gray(ctx, cs)))
+                {
+                    converted = fz_convert_pixmap(ctx, pixmap, fz_device_rgb(ctx), nullptr, nullptr,
+                        fz_default_color_params, 1);
+                    fz_drop_pixmap(ctx, pixmap);
+                    pixmap = converted;
+                    converted = nullptr;
+                }
+            }
+
+            buffer = fz_new_buffer_from_pixmap_as_png(ctx, pixmap, fz_default_color_params);
+        }
+        fz_always(ctx)
+        {
+            fz_drop_device(ctx, device);
+            fz_drop_pixmap(ctx, converted);
+            fz_drop_pixmap(ctx, pixmap);
+            fz_drop_stext_page(ctx, text);
+            fz_drop_page(ctx, page);
+        }
+        fz_catch(ctx)
+        {
+            fz_drop_buffer(ctx, buffer);
+            ThrowMuPdfError(ctx);
+        }
+        return buffer;
     }
 
     int ResolvePageLink(fz_context* ctx, fz_document* document, char const* uri)
@@ -189,6 +283,67 @@ namespace
             return -1;
         }
         return page;
+    }
+
+    bool IsUnicodeWhitespace(int codepoint) noexcept
+    {
+        return (codepoint >= 0x0009 && codepoint <= 0x000D)
+            || codepoint == 0x0020
+            || codepoint == 0x0085
+            || codepoint == 0x00A0
+            || codepoint == 0x1680
+            || (codepoint >= 0x2000 && codepoint <= 0x200A)
+            || codepoint == 0x2028
+            || codepoint == 0x2029
+            || codepoint == 0x202F
+            || codepoint == 0x205F
+            || codepoint == 0x3000;
+    }
+
+    bool IsBlankUtf8Needle(char const* utf8Needle) noexcept
+    {
+        if (!utf8Needle || !*utf8Needle) { return true; }
+        char const* cursor = utf8Needle;
+        while (*cursor)
+        {
+            int rune = 0;
+            const int step = fz_chartorune(&rune, cursor);
+            if (step <= 0) { return false; }
+            if (!IsUnicodeWhitespace(rune)) { return false; }
+            cursor += step;
+        }
+        return true;
+    }
+
+    // Keep MuPDF's longjmp frame free of C++ owners; page is always dropped.
+    int SearchPageQuads(
+        fz_context* ctx,
+        fz_document* document,
+        int pageIndex,
+        char const* utf8Needle,
+        int* hitMarks,
+        fz_quad* hitQuads,
+        int hitMax,
+        fz_rect* pageBounds)
+    {
+        fz_page* page = nullptr;
+        int hitCount = 0;
+        fz_var(page);
+        fz_try(ctx)
+        {
+            page = fz_load_page(ctx, document, pageIndex);
+            if (pageBounds) { *pageBounds = fz_bound_page(ctx, page); }
+            hitCount = fz_search_page(ctx, page, utf8Needle, hitMarks, hitQuads, hitMax);
+        }
+        fz_always(ctx)
+        {
+            fz_drop_page(ctx, page);
+        }
+        fz_catch(ctx)
+        {
+            ThrowMuPdfError(ctx);
+        }
+        return hitCount;
     }
 }
 
@@ -276,20 +431,34 @@ namespace urpdf
 
     PageText LoadPageText(fz_context* ctx, fz_document* document, int pageIndex)
     {
+        fz_rect bounds{};
         const auto drop = [ctx](fz_stext_page* text) { fz_drop_stext_page(ctx, text); };
-        std::unique_ptr<fz_stext_page, decltype(drop)> text(LoadStructuredText(ctx, document, pageIndex), drop);
+        std::unique_ptr<fz_stext_page, decltype(drop)> text(LoadStructuredText(ctx, document, pageIndex, &bounds), drop);
+        const PdfPageBounds pageBounds{ bounds.x0, bounds.y0, bounds.x1, bounds.y1 };
         PageText result;
         std::uint32_t blockIndex = 0;
+        std::uint32_t imageIndex = 0;
         for (auto block = text->first_block; block; block = block->next)
         {
+            if (block->type == FZ_STEXT_BLOCK_IMAGE && block->u.i.image)
+            {
+                if (const auto rect = TryClipImageRect(
+                    { block->bbox.x0, block->bbox.y0, block->bbox.x1, block->bbox.y1 }, pageBounds))
+                {
+                    result.images.push_back({ imageIndex, *rect });
+                }
+                ++imageIndex;
+                continue;
+            }
             if (block->type != FZ_STEXT_BLOCK_TEXT) { continue; }
             for (auto line = block->u.t.first_line; line; line = line->next)
             {
                 const auto firstChar = static_cast<std::uint32_t>(result.chars.size());
                 for (auto ch = line->first_char; ch; ch = ch->next)
                 {
-                    const auto bounds = fz_rect_from_quad(ch->quad);
-                    result.chars.push_back({ static_cast<char32_t>(ch->c), { bounds.x0, bounds.y0, bounds.x1, bounds.y1 } });
+                    const auto charBounds = fz_rect_from_quad(ch->quad);
+                    result.chars.push_back({ static_cast<char32_t>(ch->c),
+                        { charBounds.x0, charBounds.y0, charBounds.x1, charBounds.y1 } });
                 }
                 const auto endChar = static_cast<std::uint32_t>(result.chars.size());
                 if (firstChar == endChar) { continue; }
@@ -299,5 +468,75 @@ namespace urpdf
             ++blockIndex;
         }
         return result;
+    }
+
+    std::vector<SearchMatch> SearchPage(fz_context* ctx, fz_document* document, int pageIndex, char const* utf8Needle)
+    {
+        if (IsBlankUtf8Needle(utf8Needle)) { return {}; }
+
+        constexpr int kInitialHitCapacity = 256;
+        constexpr int kMaxHitCapacity = 65536;
+
+        int capacity = kInitialHitCapacity;
+        std::vector<int> hitMarks;
+        std::vector<fz_quad> hitQuads;
+        fz_rect bounds{};
+        int hitCount = 0;
+
+        while (true)
+        {
+            hitMarks.resize(static_cast<std::size_t>(capacity));
+            hitQuads.resize(static_cast<std::size_t>(capacity));
+            hitCount = SearchPageQuads(ctx, document, pageIndex, utf8Needle,
+                hitMarks.data(), hitQuads.data(), capacity, &bounds);
+            if (hitCount < capacity || capacity >= kMaxHitCapacity)
+            {
+                break;
+            }
+            capacity = (std::min)(capacity * 2, kMaxHitCapacity);
+        }
+
+        const int safeCount = std::clamp(hitCount, 0, capacity);
+        const PdfPageBounds pageBounds{ bounds.x0, bounds.y0, bounds.x1, bounds.y1 };
+        std::vector<SearchMatch> matches;
+        std::optional<int> currentMark;
+        std::vector<PdfPageBounds> currentRects;
+
+        auto flushMatch = [&]()
+            {
+                if (!currentRects.empty())
+                {
+                    matches.push_back(SearchMatch{ pageIndex, std::move(currentRects) });
+                    currentRects.clear();
+                }
+            };
+
+        for (int i = 0; i < safeCount; ++i)
+        {
+            const int mark = hitMarks[static_cast<std::size_t>(i)];
+            if (currentMark && *currentMark != mark)
+            {
+                flushMatch();
+            }
+            currentMark = mark;
+
+            const fz_rect rect = fz_rect_from_quad(hitQuads[static_cast<std::size_t>(i)]);
+            if (const auto clipped = TryClipSearchRect({ rect.x0, rect.y0, rect.x1, rect.y1 }, pageBounds))
+            {
+                currentRects.push_back(*clipped);
+            }
+        }
+        flushMatch();
+        return matches;
+    }
+
+    std::vector<std::uint8_t> ExtractPageImagePng(fz_context* ctx, fz_document* document, int pageIndex, std::uint32_t imageIndex)
+    {
+        const auto drop = [ctx](fz_buffer* buffer) { fz_drop_buffer(ctx, buffer); };
+        std::unique_ptr<fz_buffer, decltype(drop)> buffer(EncodePageImagePng(ctx, document, pageIndex, imageIndex), drop);
+        unsigned char* data = nullptr;
+        const std::size_t size = fz_buffer_storage(ctx, buffer.get(), &data);
+        if (!data || size == 0) { throw std::runtime_error("Encoded PNG buffer is empty."); }
+        return std::vector<std::uint8_t>(data, data + size);
     }
 }

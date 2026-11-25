@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PageCoordinateGeometry.h"
+#include "PageImages.h"
 
 #include <compare>
 #include <cstdint>
@@ -34,6 +35,7 @@ namespace urpdf
     {
         std::vector<TextChar> chars;
         std::vector<TextLine> lines;
+        std::vector<PageImage> images;
     };
 
     // A caret between characters, or the end of a page whose text may be unloaded.

@@ -127,6 +127,7 @@
       <PrecompiledHeaderOutputFile>$(IntDir)pch.pch</PrecompiledHeaderOutputFile>
       <WarningLevel>Level4</WarningLevel>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <PreprocessorDefinitions>DISABLE_XAML_GENERATED_MAIN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
     </ClCompile>
@@ -181,6 +182,8 @@
     <ClInclude Include="PageOverlayState.h" />
     <ClInclude Include="ExternalUriPolicy.h" />
     <ClInclude Include="PageLinks.h" />
+    <ClInclude Include="PageImages.h" />
+    <ClInclude Include="PageSearch.h" />
     <ClInclude Include="PageText.h" />
     <ClInclude Include="LinkHitArea.h">
       <DependentUpon>LinkHitArea.idl</DependentUpon>
@@ -235,6 +238,12 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="PageLinks.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="PageImages.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="PageSearch.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="PageText.cpp">
