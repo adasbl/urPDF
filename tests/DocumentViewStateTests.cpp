@@ -8,9 +8,12 @@ using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
 namespace urPDFTests
 {
+    using urpdf::CalculatePageFitScrollOffsets;
+    using urpdf::CalculatePageFitView;
     using urpdf::CaptureViewAnchor;
     using urpdf::CurrentPageNumber;
     using urpdf::DocumentViewState;
+    using urpdf::PageFitMode;
     using urpdf::PageRect;
     using urpdf::RestoreViewAnchor;
     using urpdf::ViewportGeometry;
@@ -446,6 +449,145 @@ namespace urPDFTests
             Assert::IsFalse(guard.Complete(closing));
             Assert::IsTrue(guard.IsPending());
             Assert::IsTrue(guard.Complete(opening));
+        }
+    };
+
+    TEST_CLASS(PageFitViewTests)
+    {
+    public:
+        TEST_METHOD(SingleColumnFitsVerticallyAndAlignsCurrentPage)
+        {
+            const auto pages = SingleColumn(3);
+            const auto fit = CalculatePageFitView(pages, 2, false, PageFitMode::Vertical, 1000.0, 1200.0, 0.5, 3.0);
+            Assert::IsTrue(fit.has_value());
+            AssertNear(1.5, fit->zoom, L"1200 / 800");
+
+            auto viewport = Viewport(0.0, 0.0, fit->zoom, 1000.0, 1200.0);
+            viewport.contentX = 50.0;
+            viewport.contentY = 20.0;
+            viewport.scrollableWidth = 1000.0;
+            viewport.scrollableHeight = 5000.0;
+
+            const auto offsets = CalculatePageFitScrollOffsets(pages, viewport, 2, false);
+            Assert::IsTrue(offsets.has_value());
+            AssertNear(25.0, offsets->x, L"centers page horizontally");
+            AssertNear((810.0 + 20.0) * 1.5, offsets->y, L"aligns fitted page top to viewport top");
+        }
+
+        TEST_METHOD(SingleColumnFitsHorizontallyAndAlignsPageTopWhenTallerThanViewport)
+        {
+            const auto pages = SingleColumn(3);
+            const auto fit = CalculatePageFitView(pages, 2, false, PageFitMode::Horizontal, 900.0, 700.0, 0.5, 3.0);
+            Assert::IsTrue(fit.has_value());
+            AssertNear(1.5, fit->zoom, L"900 / 600");
+
+            auto viewport = Viewport(0.0, 0.0, fit->zoom, 900.0, 700.0);
+            viewport.contentY = 20.0;
+            viewport.scrollableWidth = 0.0;
+            viewport.scrollableHeight = 5000.0;
+
+            const auto offsets = CalculatePageFitScrollOffsets(pages, viewport, 2, false);
+            Assert::IsTrue(offsets.has_value());
+            AssertNear(0.0, offsets->x, L"page fills viewport width");
+            AssertNear((810.0 + 20.0) * 1.5, offsets->y, L"taller fitted page aligns its top edge");
+        }
+
+        TEST_METHOD(BookViewFitVerticallyUsesTallerPageInRowForEitherPage)
+        {
+            const std::vector<PageRect> pages{
+                { 0.0, 0.0, 600.0, 500.0 },
+                { 610.0, 0.0, 600.0, 1000.0 },
+                { 0.0, 1010.0, 600.0, 400.0 },
+            };
+
+            const auto leftFit = CalculatePageFitView(pages, 1, true, PageFitMode::Vertical, 1200.0, 800.0, 0.5, 3.0);
+            const auto rightFit = CalculatePageFitView(pages, 2, true, PageFitMode::Vertical, 1200.0, 800.0, 0.5, 3.0);
+            Assert::IsTrue(leftFit.has_value() && rightFit.has_value());
+            AssertNear(0.8, leftFit->zoom, L"uses taller page (1000) when left page is active");
+            AssertNear(0.8, rightFit->zoom, L"uses taller page (1000) when right page is active");
+        }
+
+        TEST_METHOD(BookViewFitHorizontallyIncludesBothPagesAndColumnSpacing)
+        {
+            const std::vector<PageRect> pages{
+                { 100.0, 0.0, 500.0, 800.0 },
+                { 610.0, 0.0, 700.0, 600.0 },
+                { 400.0, 810.0, 600.0, 800.0 },
+            };
+
+            const auto pairFit = CalculatePageFitView(pages, 2, true, PageFitMode::Horizontal, 1210.0, 900.0, 0.5, 3.0);
+            Assert::IsTrue(pairFit.has_value());
+            AssertNear(1.0, pairFit->zoom, L"500 + 10 spacing + 700 = 1210");
+
+            auto viewport = Viewport(0.0, 0.0, pairFit->zoom, 1210.0, 900.0);
+            viewport.contentY = 20.0;
+            viewport.scrollableWidth = 500.0;
+            viewport.scrollableHeight = 2000.0;
+            const auto offsets = CalculatePageFitScrollOffsets(pages, viewport, 2, true);
+            Assert::IsTrue(offsets.has_value());
+            AssertNear(100.0, offsets->x, L"left edge of page pair aligns to viewport left");
+            AssertNear(0.0, offsets->y, L"row shorter than viewport centers vertically and clamps to 0");
+
+            const auto oddLastFit = CalculatePageFitView(pages, 3, true, PageFitMode::Horizontal, 1200.0, 900.0, 0.5, 3.0);
+            Assert::IsTrue(oddLastFit.has_value());
+            AssertNear(2.0, oddLastFit->zoom, L"unpaired last page fits its own width");
+        }
+
+        TEST_METHOD(RotatedPageDimensionsDetermineFitZoom)
+        {
+            const std::vector<PageRect> upright{ { 0.0, 0.0, 600.0, 800.0 } };
+            const std::vector<PageRect> rotated90{ { 0.0, 0.0, 800.0, 600.0 } };
+
+            const auto uprightV = CalculatePageFitView(upright, 1, false, PageFitMode::Vertical, 1000.0, 1200.0, 0.5, 3.0);
+            const auto rotatedV = CalculatePageFitView(rotated90, 1, false, PageFitMode::Vertical, 1000.0, 1200.0, 0.5, 3.0);
+            const auto uprightH = CalculatePageFitView(upright, 1, false, PageFitMode::Horizontal, 1000.0, 1200.0, 0.5, 3.0);
+            const auto rotatedH = CalculatePageFitView(rotated90, 1, false, PageFitMode::Horizontal, 1000.0, 1200.0, 0.5, 3.0);
+
+            Assert::IsTrue(uprightV && rotatedV && uprightH && rotatedH);
+            AssertNear(1.5, uprightV->zoom, L"upright vertical fit");
+            AssertNear(2.0, rotatedV->zoom, L"rotated vertical fit uses swapped height");
+            AssertNear(1000.0 / 600.0, uprightH->zoom, L"upright horizontal fit");
+            AssertNear(1.25, rotatedH->zoom, L"rotated horizontal fit uses swapped width");
+        }
+
+        TEST_METHOD(ClampsFitZoomToScrollViewerBoundsAndCentersShortRow)
+        {
+            const std::vector<PageRect> pages{
+                { 0.0, 0.0, 100.0, 100.0 },
+                { 0.0, 110.0, 100.0, 100.0 },
+                { 0.0, 220.0, 4000.0, 4000.0 },
+            };
+
+            const auto clampedMax = CalculatePageFitView(pages, 2, false, PageFitMode::Vertical, 1000.0, 900.0, 0.5, 3.0);
+            Assert::IsTrue(clampedMax.has_value());
+            AssertNear(3.0, clampedMax->zoom, L"clamped to max zoom");
+
+            auto maxViewport = Viewport(0.0, 0.0, clampedMax->zoom, 1000.0, 900.0);
+            maxViewport.contentY = 20.0;
+            maxViewport.scrollableHeight = 20000.0;
+            const auto maxOffsets = CalculatePageFitScrollOffsets(pages, maxViewport, 2, false);
+            Assert::IsTrue(maxOffsets.has_value());
+            AssertNear((110.0 + 50.0 + 20.0) * 3.0 - 450.0, maxOffsets->y, L"centers clamped short page vertically");
+
+            const auto clampedMin = CalculatePageFitView(pages, 3, false, PageFitMode::Horizontal, 1000.0, 900.0, 0.5, 3.0);
+            Assert::IsTrue(clampedMin.has_value());
+            AssertNear(0.5, clampedMin->zoom, L"clamped to min zoom");
+        }
+
+        TEST_METHOD(RejectsInvalidFitInputs)
+        {
+            const auto pages = SingleColumn(1);
+            Assert::IsFalse(CalculatePageFitView({}, 1, false, PageFitMode::Vertical, 800.0, 600.0, 0.5, 3.0).has_value());
+            Assert::IsFalse(CalculatePageFitView(pages, 1, false, PageFitMode::Vertical, 0.0, 600.0, 0.5, 3.0).has_value());
+            Assert::IsFalse(CalculatePageFitView(pages, 1, false, PageFitMode::Horizontal, 800.0, 0.0, 0.5, 3.0).has_value());
+            Assert::IsFalse(CalculatePageFitView(pages, 1, false, PageFitMode::Vertical, 800.0, 600.0, 3.0, 0.5).has_value());
+            Assert::IsFalse(CalculatePageFitView(pages, 1, false, PageFitMode::Vertical, 800.0, 600.0, 0.0, 3.0).has_value());
+
+            auto invalidViewport = Viewport(0.0, 0.0, 0.0, 800.0, 600.0);
+            Assert::IsFalse(CalculatePageFitScrollOffsets(pages, invalidViewport, 1, false).has_value());
+            auto negativeScroll = Viewport(0.0, 0.0, 1.0, 800.0, 600.0);
+            negativeScroll.scrollableHeight = -1.0;
+            Assert::IsFalse(CalculatePageFitScrollOffsets(pages, negativeScroll, 1, false).has_value());
         }
     };
 }
