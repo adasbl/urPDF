@@ -502,6 +502,8 @@ namespace winrt::urPDF::implementation
         urpdf::FullscreenWindowTracker m_fullscreenTracker;
         dispatching::DispatcherQueueTimer m_fullscreenExitHideTimer{ nullptr };
         xaml::Input::PointerEventHandler m_documentViewPointerMovedHandler{ nullptr };
+        xaml::Media::CompositionTarget::Rendered_revoker m_fullscreenTransitionRenderedRevoker;
+        bool m_dwmTransitionsDisabled{ false };
         bool m_isPointerOverFullscreenExitButton{ false };
         winrt::Microsoft::UI::Windowing::AppWindow m_observedAppWindow{ nullptr };
         winrt::event_token m_windowChangedToken{};
@@ -576,6 +578,8 @@ namespace winrt::urPDF::implementation
         void EnterFullscreen();
         void ExitFullscreen();
         void ToggleFullscreen();
+        void SetDwmTransitionsDisabled(bool disabled) noexcept;
+        void SuppressDwmTransitionsForFullscreenTransition();
         void HandleAppWindowPresenterChanged();
         void ApplyFullscreenChrome(bool fullscreen);
         void ShowFullscreenExitButton();

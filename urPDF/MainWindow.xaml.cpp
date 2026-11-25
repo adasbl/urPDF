@@ -701,6 +701,8 @@ namespace winrt::urPDF::implementation
         try { ClearPageOverlays(); } catch (...) { m_pageOverlays.clear(); }
         try { StopTrackingWindowState(); } catch (...) {}
         if (m_fullscreenExitHideTimer) { m_fullscreenExitHideTimer.Stop(); }
+        m_fullscreenTransitionRenderedRevoker.revoke();
+        SetDwmTransitionsDisabled(false);
         if (m_documentViewPointerMovedHandler)
         {
             try { DocumentViewHost().RemoveHandler(xaml::UIElement::PointerMovedEvent(), winrt::box_value(m_documentViewPointerMovedHandler)); } catch (...) {}
@@ -1085,6 +1087,7 @@ namespace winrt::urPDF::implementation
         }
 
         m_fullscreenTracker.BeginEnter(wasMaximized);
+        SuppressDwmTransitionsForFullscreenTransition();
         try
         {
             AppWindow().SetPresenter(winrt::Microsoft::UI::Windowing::AppWindowPresenterKind::FullScreen);
@@ -1109,6 +1112,7 @@ namespace winrt::urPDF::implementation
         if (m_isClosed || !IsFullscreen()) { return; }
 
         const bool restoreMaximized = m_fullscreenTracker.BeginExit();
+        SuppressDwmTransitionsForFullscreenTransition();
         try
         {
             if (IsAppWindowFullscreen())
@@ -1150,6 +1154,41 @@ namespace winrt::urPDF::implementation
         }
     }
 
+    void MainWindow::SetDwmTransitionsDisabled(bool disabled) noexcept
+    {
+        if (m_dwmTransitionsDisabled == disabled) { return; }
+        auto nativeWindow = try_as<::IWindowNative>();
+        HWND hwnd{};
+        if (!nativeWindow || FAILED(nativeWindow->get_WindowHandle(&hwnd)) || !hwnd) { return; }
+        const BOOL value = disabled ? TRUE : FALSE;
+        if (SUCCEEDED(DwmSetWindowAttribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, &value, sizeof(value))))
+        {
+            m_dwmTransitionsDisabled = disabled;
+        }
+    }
+
+    void MainWindow::SuppressDwmTransitionsForFullscreenTransition()
+    {
+        m_fullscreenTransitionRenderedRevoker.revoke();
+        SetDwmTransitionsDisabled(true);
+
+        m_fullscreenTransitionRenderedRevoker = xaml::Media::CompositionTarget::Rendered(winrt::auto_revoke,
+            [weakThis = get_weak()](auto const&, auto const&)
+            {
+                if (auto self = weakThis.get())
+                {
+                    self->m_fullscreenTransitionRenderedRevoker.revoke();
+                    self->DispatcherQueue().TryEnqueue(dispatching::DispatcherQueuePriority::Low, [weakThis]()
+                    {
+                        if (auto window = weakThis.get(); window && !window->m_isClosed)
+                        {
+                            window->SetDwmTransitionsDisabled(false);
+                        }
+                    });
+                }
+            });
+    }
+
     void MainWindow::HandleAppWindowPresenterChanged()
     {
         if (m_isClosed) { return; }
@@ -1159,6 +1198,7 @@ namespace winrt::urPDF::implementation
         if (restoreMaximized)
         {
             m_fullscreenTracker.transitioning = true;
+            SuppressDwmTransitionsForFullscreenTransition();
             try
             {
                 if (auto overlapped = AppWindow().Presenter().try_as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>())
