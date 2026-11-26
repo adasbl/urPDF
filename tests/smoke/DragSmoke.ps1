@@ -209,6 +209,7 @@ function RecordTabWidths([IntPtr] $Window, [string] $Name, [int] $ExpectedCount)
 }
 
 try {
+    Set-AskToSetAsDefaultPdfViewer $false
     Set-OpenInExisting $true
 
     Fresh

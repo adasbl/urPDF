@@ -20,6 +20,7 @@
     <ClCompile Include="PdfPageLayout.cpp" />
     <ClCompile Include="ActivationArguments.cpp" />
     <ClCompile Include="AppSettings.cpp" />
+    <ClCompile Include="DefaultPdfViewer.cpp" />
     <ClCompile Include="MuPdfDocument.cpp" />
     <ClCompile Include="ExternalUriPolicy.cpp" />
     <ClCompile Include="PageLinks.cpp" />
@@ -50,6 +51,7 @@
     <ClInclude Include="PdfPageLayout.h" />
     <ClInclude Include="ActivationArguments.h" />
     <ClInclude Include="AppSettings.h" />
+    <ClInclude Include="DefaultPdfViewer.h" />
     <ClInclude Include="WindowPlacement.h" />
     <ClInclude Include="MuPdfDocument.h" />
     <ClInclude Include="ExternalUriPolicy.h" />

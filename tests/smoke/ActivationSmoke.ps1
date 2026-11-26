@@ -9,11 +9,13 @@ try {
     $exportFile = Join-Path $fixtures 'export.json'
     $process = Start-Process -FilePath $Executable -ArgumentList '--export-settings', (Quote $exportFile) -PassThru -Wait
     $exported = (Get-Content -LiteralPath $exportFile -Raw | ConvertFrom-Json)
-    Record '--export-settings writes JSON' ($process.ExitCode -eq 0 -and $null -ne $exported.OpenFilesInExistingWindow) "exit $($process.ExitCode)"
+    Record '--export-settings writes JSON' ($process.ExitCode -eq 0 -and $null -ne $exported.OpenFilesInExistingWindow -and $null -ne $exported.AskToSetAsDefaultPdfViewer) "exit $($process.ExitCode)"
     $invalid = Join-Path $fixtures 'invalid.json'
     [IO.File]::WriteAllText($invalid, '{"schemaVersion":1,"OpenFilesInExistingWindow":"maybe"}')
     $process = Start-Process -FilePath $Executable -ArgumentList '--import-settings', (Quote $invalid) -PassThru -Wait
     Record '--import-settings rejects invalid value' ($process.ExitCode -ne 0) "exit $($process.ExitCode)"
+
+    Set-AskToSetAsDefaultPdfViewer $false
 
     # Debug builds simulate a MuPDF initialization failure when this variable is set.
     $env:URPDF_SIMULATE_MUPDF_INIT_FAILURE = '1'

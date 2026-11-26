@@ -428,6 +428,8 @@ namespace winrt::urPDF::implementation
         void AboutButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
         winrt::fire_and_forget PrintButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
         void CloseSettings_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&);
+        void DefaultPdfViewerPromptDismiss_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
+        winrt::fire_and_forget DefaultPdfViewerPromptOpenSettings_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         winrt::fire_and_forget ZoomInButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
         winrt::fire_and_forget ZoomOutButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
 
@@ -439,6 +441,10 @@ namespace winrt::urPDF::implementation
         void OpenPdfFileAsync(PendingDocumentOpen request);
         winrt::fire_and_forget OpenPdfPathAsync(PendingDocumentOpen request);
         winrt::fire_and_forget ShowOpenErrorAsync(winrt::hstring message);
+        void ScheduleDefaultPdfViewerPrompt();
+        void MaybeShowDefaultPdfViewerPrompt();
+        void DismissDefaultPdfViewerPrompt();
+        void RefreshDefaultPdfViewerUi();
         controls::ContentDialog m_openErrorDialog{ nullptr };
         std::list<winrt::hstring> m_openErrorMessages;
 

@@ -503,6 +503,13 @@ namespace winrt::urPDF::implementation
             get_self<MainWindow>(window.as<winrt::urPDF::MainWindow>())->LoadSettings();
         }
     }
+
+    bool App::TryClaimDefaultPdfViewerPrompt() noexcept
+    {
+        if (m_defaultPdfViewerPromptClaimed) { return false; }
+        m_defaultPdfViewerPromptClaimed = true;
+        return true;
+    }
 }
 
 int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)

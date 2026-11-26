@@ -101,6 +101,7 @@ namespace urpdf
 
         constexpr std::wstring_view OpenFilesInExistingWindowKey = L"OpenFilesInExistingWindow";
         constexpr std::wstring_view UseWindowsAccentColorForTextSelectionKey = L"UseWindowsAccentColorForTextSelection";
+        constexpr std::wstring_view AskToSetAsDefaultPdfViewerKey = L"AskToSetAsDefaultPdfViewer";
 
         std::wstring_view ToString(bool value) noexcept
         {
@@ -226,6 +227,10 @@ namespace urpdf
         {
             m_cache.useWindowsAccentColorForTextSelection = ParseBool(*text).value_or(m_cache.useWindowsAccentColorForTextSelection);
         }
+        if (auto text = m_store->Read(AskToSetAsDefaultPdfViewerKey))
+        {
+            m_cache.askToSetAsDefaultPdfViewer = ParseBool(*text).value_or(m_cache.askToSetAsDefaultPdfViewer);
+        }
     }
 
     SettingsData AppSettings::Get() const
@@ -261,6 +266,13 @@ namespace urpdf
         catch (...) {}
     }
 
+    void AppSettings::SetAskToSetAsDefaultPdfViewer(bool enabled)
+    {
+        m_cache.askToSetAsDefaultPdfViewer = enabled;
+        try { m_store->Write(AskToSetAsDefaultPdfViewerKey, ToString(enabled)); }
+        catch (...) {}
+    }
+
     std::wstring AppSettings::ExportJson() const
     {
         json::JsonObject root;
@@ -271,6 +283,7 @@ namespace urpdf
         root.SetNamedValue(WindowStartupModeKey, json::JsonValue::CreateStringValue(ToString(m_cache.windowStartupMode)));
         root.SetNamedValue(OpenFilesInExistingWindowKey, json::JsonValue::CreateBooleanValue(m_cache.openFilesInExistingWindow));
         root.SetNamedValue(UseWindowsAccentColorForTextSelectionKey, json::JsonValue::CreateBooleanValue(m_cache.useWindowsAccentColorForTextSelection));
+        root.SetNamedValue(AskToSetAsDefaultPdfViewerKey, json::JsonValue::CreateBooleanValue(m_cache.askToSetAsDefaultPdfViewer));
         return std::wstring{ root.Stringify() };
     }
 
@@ -293,7 +306,8 @@ namespace urpdf
             || !TryReadImportedValue(root, BackdropKey, ParseBackdrop, imported.backdrop)
             || !TryReadImportedValue(root, WindowStartupModeKey, ParseWindowStartupMode, imported.windowStartupMode)
             || !TryReadImportedBool(root, OpenFilesInExistingWindowKey, imported.openFilesInExistingWindow)
-            || !TryReadImportedBool(root, UseWindowsAccentColorForTextSelectionKey, imported.useWindowsAccentColorForTextSelection))
+            || !TryReadImportedBool(root, UseWindowsAccentColorForTextSelectionKey, imported.useWindowsAccentColorForTextSelection)
+            || !TryReadImportedBool(root, AskToSetAsDefaultPdfViewerKey, imported.askToSetAsDefaultPdfViewer))
         {
             return false;
         }
@@ -325,6 +339,7 @@ namespace urpdf
         m_store->Write(BackdropKey, ToString(settings.backdrop));
         m_store->Write(OpenFilesInExistingWindowKey, ToString(settings.openFilesInExistingWindow));
         m_store->Write(UseWindowsAccentColorForTextSelectionKey, ToString(settings.useWindowsAccentColorForTextSelection));
+        m_store->Write(AskToSetAsDefaultPdfViewerKey, ToString(settings.askToSetAsDefaultPdfViewer));
         m_store->Write(WindowStateKey, WindowStateJson(settings.windowState).Stringify());
         m_store->Write(WindowStartupModeKey, ToString(settings.windowStartupMode));
     }

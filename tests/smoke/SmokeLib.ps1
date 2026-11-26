@@ -128,6 +128,14 @@ function Set-OpenInExisting([bool] $Enabled) {
     if ($process.ExitCode -ne 0) { throw "Settings import failed: $($process.ExitCode)" }
 }
 
+function Set-AskToSetAsDefaultPdfViewer([bool] $Enabled) {
+    $file = Join-Path $fixtures 'default-viewer-prompt.json'
+    $value = if ($Enabled) { 'true' } else { 'false' }
+    [IO.File]::WriteAllText($file, "{`"schemaVersion`":1,`"AskToSetAsDefaultPdfViewer`":$value}")
+    $process = Start-Process -FilePath $Executable -ArgumentList '--import-settings', (Quote $file) -PassThru -Wait
+    if ($process.ExitCode -ne 0) { throw "Settings import failed: $($process.ExitCode)" }
+}
+
 function Assert-NoRunningInstance {
     if (Get-Process urPDF -ErrorAction SilentlyContinue) { throw 'Close all running urPDF instances first; a running instance owns the activation key.' }
 }

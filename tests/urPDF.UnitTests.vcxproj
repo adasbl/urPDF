@@ -56,6 +56,7 @@
     <ClCompile Include="PdfRenderScaleTests.cpp" />
     <ClCompile Include="PdfBitmapLimitsTests.cpp" />
     <ClCompile Include="AppSettingsTests.cpp" />
+    <ClCompile Include="DefaultPdfViewerTests.cpp" />
     <ClCompile Include="WindowPlacementTests.cpp" />
     <ClCompile Include="DocumentViewStateTests.cpp" />
     <ClCompile Include="PageLayoutGeometryTests.cpp" />
@@ -80,6 +81,7 @@
     <ClCompile Include="DocumentOperationTests.cpp" />
     <ClCompile Include="BackgroundWorkTests.cpp" />
     <ClCompile Include="..\urPDF\AppSettings.cpp" />
+    <ClCompile Include="..\urPDF\DefaultPdfViewer.cpp" />
     <ClCompile Include="..\urPDF\DocumentViewState.cpp" />
     <ClCompile Include="..\urPDF\PageLayoutGeometry.cpp" />
     <ClCompile Include="..\urPDF\PageCoordinateGeometry.cpp" />
@@ -93,6 +95,7 @@
     <ClInclude Include="..\urPDF\DocumentOperation.h" />
     <ClInclude Include="..\urPDF\BackgroundWork.h" />
     <ClInclude Include="..\urPDF\AppSettings.h" />
+    <ClInclude Include="..\urPDF\DefaultPdfViewer.h" />
     <ClInclude Include="..\urPDF\WindowPlacement.h" />
     <ClInclude Include="..\urPDF\SettingsStore.h" />
     <None Include="README.md" />

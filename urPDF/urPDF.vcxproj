@@ -169,6 +169,7 @@
     </ClInclude>
     <ClInclude Include="ActivationArguments.h" />
     <ClInclude Include="AppSettings.h" />
+    <ClInclude Include="DefaultPdfViewer.h" />
     <ClInclude Include="WindowPlacement.h" />
     <ClInclude Include="MuPdfDocument.h" />
     <ClInclude Include="MuPdfRuntime.h" />
@@ -229,6 +230,9 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="AppSettings.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="DefaultPdfViewer.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="MuPdfDocument.cpp">

@@ -13,6 +13,7 @@
 
 // Project
 #include "AppSettings.h"
+#include "DefaultPdfViewer.h"
 #include "WindowPlacement.h"
 #include "App.xaml.h"
 #include "PdfRenderScale.h"
@@ -867,6 +868,7 @@ namespace winrt::urPDF::implementation
                 return;
             }
             xaml::Application::Current().as<App>()->WindowActivated(*self);
+            self->RefreshDefaultPdfViewerUi();
         });
 
         AppWindow().SetIcon((ExecutableDirectory() / L"Assets" / L"logo.ico").wstring());
@@ -1246,6 +1248,10 @@ namespace winrt::urPDF::implementation
         ApplyTheme(winrt::hstring{ urpdf::ToString(settings.theme) });
         ApplyBackdrop(winrt::hstring{ urpdf::ToString(settings.backdrop) });
         ApplyTextSelectionColor(settings.useWindowsAccentColorForTextSelection);
+        if (!settings.askToSetAsDefaultPdfViewer)
+        {
+            DefaultPdfViewerPrompt().Visibility(xaml::Visibility::Collapsed);
+        }
         if (auto page = SettingsFrame().Content().try_as<winrt::urPDF::SettingsPage>())
         {
             winrt::get_self<SettingsPage>(page)->LoadSavedSettings();
@@ -1272,6 +1278,7 @@ namespace winrt::urPDF::implementation
             mica.Kind(backdrops::MicaKind::Base);
             this->SystemBackdrop(mica);
             SolidBackgroundLayer().Visibility(xaml::Visibility::Collapsed);
+            DefaultPdfViewerPromptSolidBackground().Visibility(xaml::Visibility::Collapsed);
         }
         else if (transparencyValue == L"MicaAlt")
         {
@@ -1279,16 +1286,19 @@ namespace winrt::urPDF::implementation
             backdrop.Kind(backdrops::MicaKind::BaseAlt);
             SystemBackdrop(backdrop);
             SolidBackgroundLayer().Visibility(xaml::Visibility::Collapsed);
+            DefaultPdfViewerPromptSolidBackground().Visibility(xaml::Visibility::Collapsed);
         }
         else if (transparencyValue == L"None")
         {
             this->SystemBackdrop(nullptr);
             SolidBackgroundLayer().Visibility(xaml::Visibility::Visible);
+            DefaultPdfViewerPromptSolidBackground().Visibility(xaml::Visibility::Visible);
         }
         else
         {
             this->SystemBackdrop(nullptr);
             SolidBackgroundLayer().Visibility(xaml::Visibility::Visible);
+            DefaultPdfViewerPromptSolidBackground().Visibility(xaml::Visibility::Visible);
         }
     }
 
@@ -1460,6 +1470,7 @@ namespace winrt::urPDF::implementation
 
         m_isTabViewLoaded = true;
         ProcessPendingOpens();
+        ScheduleDefaultPdfViewerPrompt();
     }
 
     void MainWindow::TabView_AddButtonClick(foundation::IInspectable const&, foundation::IInspectable const&)
@@ -2111,6 +2122,91 @@ namespace winrt::urPDF::implementation
             m_openErrorMessages.pop_front();
         }
         m_openErrorMessages.clear();
+    }
+
+    void MainWindow::RefreshDefaultPdfViewerUi()
+    {
+        if (m_isClosed) { return; }
+
+        if (SettingsOverlay().Visibility() == xaml::Visibility::Visible)
+        {
+            if (auto page = SettingsFrame().Content().try_as<winrt::urPDF::SettingsPage>())
+            {
+                winrt::get_self<SettingsPage>(page)->RefreshDefaultPdfViewerStatus();
+            }
+        }
+
+        if (DefaultPdfViewerPrompt().Visibility() == xaml::Visibility::Visible
+            && urpdf::QueryDefaultPdfViewerStatus() == urpdf::DefaultPdfViewerStatus::Default)
+        {
+            DefaultPdfViewerPrompt().Visibility(xaml::Visibility::Collapsed);
+        }
+    }
+
+    void MainWindow::ScheduleDefaultPdfViewerPrompt()
+    {
+        if (m_isClosed || m_presentationPending) { return; }
+
+        auto dispatcher = DispatcherQueue();
+        if (!dispatcher) { return; }
+
+        dispatcher.TryEnqueue(dispatching::DispatcherQueuePriority::Low, [weakThis = get_weak()]
+        {
+            if (auto self = weakThis.get())
+            {
+                self->MaybeShowDefaultPdfViewerPrompt();
+            }
+        });
+    }
+
+    void MainWindow::MaybeShowDefaultPdfViewerPrompt()
+    {
+        if (m_isClosed || m_presentationPending
+            || DefaultPdfViewerPrompt().Visibility() == xaml::Visibility::Visible
+            || SettingsOverlay().Visibility() == xaml::Visibility::Visible)
+        {
+            return;
+        }
+
+        const auto settings = urpdf::AppSettings::Instance().Get();
+        const auto app = xaml::Application::Current().as<App>();
+
+        urpdf::DefaultPdfViewerPromptContext promptContext;
+        promptContext.promptEnabled = settings.askToSetAsDefaultPdfViewer;
+        promptContext.isDeferredPresentation = m_presentationPending;
+        if (!promptContext.promptEnabled || promptContext.isDeferredPresentation) { return; }
+
+        promptContext.status = urpdf::QueryDefaultPdfViewerStatus();
+        if (!urpdf::ShouldShowDefaultPdfViewerPrompt(promptContext)) { return; }
+
+        promptContext.alreadyPromptedThisSession = !app->TryClaimDefaultPdfViewerPrompt();
+        if (!urpdf::ShouldShowDefaultPdfViewerPrompt(promptContext)) { return; }
+
+        DefaultPdfViewerDontAskAgainCheckBox().IsChecked(false);
+        DefaultPdfViewerPrompt().Visibility(xaml::Visibility::Visible);
+    }
+
+    void MainWindow::DismissDefaultPdfViewerPrompt()
+    {
+        if (auto isChecked = DefaultPdfViewerDontAskAgainCheckBox().IsChecked(); isChecked && isChecked.Value())
+        {
+            urpdf::AppSettings::Instance().SetAskToSetAsDefaultPdfViewer(false);
+            xaml::Application::Current().as<App>()->ApplySettingsToWindows();
+        }
+
+        DefaultPdfViewerPrompt().Visibility(xaml::Visibility::Collapsed);
+    }
+
+    void MainWindow::DefaultPdfViewerPromptDismiss_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        DismissDefaultPdfViewerPrompt();
+    }
+
+    winrt::fire_and_forget MainWindow::DefaultPdfViewerPromptOpenSettings_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        auto strongThis = get_strong();
+        DismissDefaultPdfViewerPrompt();
+        co_await urpdf::OpenDefaultAppsSettingsAsync();
     }
 
     winrt::fire_and_forget MainWindow::OpenPdfPathAsync(PendingDocumentOpen request)

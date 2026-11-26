@@ -77,6 +77,28 @@
                     
                 </StackPanel>
 
+                <StackPanel Spacing="12">
+                    <TextBlock Text="Default PDF viewer" Style="{StaticResource SubtitleTextBlockStyle}"/>
+
+                    <TextBlock
+                        x:Name="DefaultPdfViewerStatusText"
+                        Margin="8,0,0,0"
+                        TextWrapping="Wrap"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+
+                    <Button
+                        x:Name="OpenDefaultAppsButton"
+                        Click="OpenDefaultAppsButton_Click"
+                        Content="Open Windows default apps settings"
+                        Margin="8,0,0,0"/>
+
+                    <ToggleSwitch
+                        x:Name="AskToSetDefaultPdfViewerToggle"
+                        Header="Ask to set urPDF as the default PDF viewer on startup"
+                        Margin="8,0,0,0"
+                        Toggled="AskToSetDefaultPdfViewerToggle_Toggled"/>
+                </StackPanel>
+
                 
 
                 <StackPanel Spacing="12">

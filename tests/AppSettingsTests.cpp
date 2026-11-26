@@ -48,14 +48,20 @@ namespace urPDFTests
         return urpdf::AppSettings{ std::make_unique<InMemorySettingsStore>(std::move(values)) };
     }
 
-    void AssertSettings(urpdf::AppSettings const& settings, urpdf::AppTheme theme, urpdf::Backdrop backdrop,
-        bool openFilesInExistingWindow = false, bool useWindowsAccentColorForTextSelection = true)
+    void AssertSettings(
+        urpdf::AppSettings const& settings,
+        urpdf::AppTheme theme,
+        urpdf::Backdrop backdrop,
+        bool openFilesInExistingWindow = false,
+        bool useWindowsAccentColorForTextSelection = true,
+        bool askToSetAsDefaultPdfViewer = true)
     {
         const auto data = settings.Get();
         Assert::IsTrue(data.theme == theme);
         Assert::IsTrue(data.backdrop == backdrop);
         Assert::AreEqual(openFilesInExistingWindow, data.openFilesInExistingWindow);
         Assert::AreEqual(useWindowsAccentColorForTextSelection, data.useWindowsAccentColorForTextSelection);
+        Assert::AreEqual(askToSetAsDefaultPdfViewer, data.askToSetAsDefaultPdfViewer);
     }
 
     void AssertWindowSettings(urpdf::AppSettings const& settings, urpdf::WindowState const& state,
@@ -497,14 +503,15 @@ namespace urPDFTests
             source.SetWindowStartupMode(urpdf::WindowStartupMode::Normal);
             source.SetOpenFilesInExistingWindow(true);
             source.SetUseWindowsAccentColorForTextSelection(false);
+            source.SetAskToSetAsDefaultPdfViewer(false);
 
             auto values = std::make_shared<Values>();
             auto target = MakeSettings(values);
             Assert::IsTrue(target.ImportJson(source.ExportJson()));
-            AssertSettings(target, urpdf::AppTheme::Dark, urpdf::Backdrop::MicaAlt, true, false);
+            AssertSettings(target, urpdf::AppTheme::Dark, urpdf::Backdrop::MicaAlt, true, false, false);
             AssertWindowSettings(target, state, urpdf::WindowStartupMode::Normal);
             auto reloaded = MakeSettings(values);
-            AssertSettings(reloaded, urpdf::AppTheme::Dark, urpdf::Backdrop::MicaAlt, true, false);
+            AssertSettings(reloaded, urpdf::AppTheme::Dark, urpdf::Backdrop::MicaAlt, true, false, false);
             AssertWindowSettings(reloaded, state, urpdf::WindowStartupMode::Normal);
         }
 
@@ -583,6 +590,24 @@ namespace urPDFTests
             AssertSettings(reloaded, urpdf::AppTheme::Default, urpdf::Backdrop::None, true);
         }
 
+        TEST_METHOD(AskToSetAsDefaultPdfViewerPersistsAndImports)
+        {
+            auto values = std::make_shared<Values>();
+            auto settings = MakeSettings(values);
+            AssertSettings(settings, urpdf::AppTheme::Default, urpdf::Backdrop::None, false, true, true);
+
+            settings.SetAskToSetAsDefaultPdfViewer(false);
+
+            auto reloaded = MakeSettings(values);
+            AssertSettings(reloaded, urpdf::AppTheme::Default, urpdf::Backdrop::None, false, true, false);
+
+            Assert::IsTrue(reloaded.ImportJson(LR"({"schemaVersion":1,"AppTheme":"Dark"})"));
+            AssertSettings(reloaded, urpdf::AppTheme::Dark, urpdf::Backdrop::None, false, true, false);
+
+            Assert::IsTrue(reloaded.ImportJson(LR"({"schemaVersion":1,"AskToSetAsDefaultPdfViewer":true})"));
+            AssertSettings(reloaded, urpdf::AppTheme::Dark, urpdf::Backdrop::None, false, true, true);
+        }
+
         TEST_METHOD(UseWindowsAccentColorForTextSelectionDefaultsOnAndPersistsToStore)
         {
             auto values = std::make_shared<Values>();
@@ -637,6 +662,8 @@ namespace urPDFTests
                 LR"({"schemaVersion":1,"AppTheme":"Dark","Transparency":3})",
                 LR"({"schemaVersion":1,"AppTheme":"Dark","OpenFilesInExistingWindow":"true"})",
                 LR"({"schemaVersion":1,"AppTheme":"Dark","OpenFilesInExistingWindow":1})",
+                LR"({"schemaVersion":1,"AppTheme":"Dark","AskToSetAsDefaultPdfViewer":"false"})",
+                LR"({"schemaVersion":1,"AppTheme":"Dark","AskToSetAsDefaultPdfViewer":0})",
                 LR"({"schemaVersion":1,"AppTheme":"Dark","UseWindowsAccentColorForTextSelection":"false"})",
                 LR"({"schemaVersion":1,"AppTheme":"Dark","UseWindowsAccentColorForTextSelection":0})",
             };

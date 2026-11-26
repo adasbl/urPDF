@@ -54,6 +54,7 @@ namespace urpdf
         WindowStartupMode windowStartupMode{ WindowStartupMode::RememberLastState };
         bool openFilesInExistingWindow{ false };
         bool useWindowsAccentColorForTextSelection{ true };
+        bool askToSetAsDefaultPdfViewer{ true };
     };
 
     std::wstring_view ToString(AppTheme theme) noexcept;
@@ -80,6 +81,7 @@ namespace urpdf
         void SetWindowStartupMode(WindowStartupMode mode);
         void SetOpenFilesInExistingWindow(bool enabled);
         void SetUseWindowsAccentColorForTextSelection(bool enabled);
+        void SetAskToSetAsDefaultPdfViewer(bool enabled);
 
         std::wstring ExportJson() const;
         bool ImportJson(std::wstring_view text);

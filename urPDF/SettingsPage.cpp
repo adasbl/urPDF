@@ -10,6 +10,7 @@
 
 // Project
 #include "AppSettings.h"
+#include "DefaultPdfViewer.h"
 
 // Standard C++
 #include <cstdint>
@@ -70,6 +71,49 @@ namespace winrt::urPDF::implementation
         const bool enabled = toggleSwitch.IsOn();
         urpdf::AppSettings::Instance().SetUseWindowsAccentColorForTextSelection(enabled);
         m_textSelectionColorChangedEvent(*this, enabled);
+    }
+
+    void SettingsPage::AskToSetDefaultPdfViewerToggle_Toggled(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& /* args */)
+    {
+        if (m_isInitializing) { return; }
+
+        auto toggleSwitch = sender.as<controls::ToggleSwitch>();
+        urpdf::AppSettings::Instance().SetAskToSetAsDefaultPdfViewer(toggleSwitch.IsOn());
+    }
+
+    winrt::fire_and_forget SettingsPage::OpenDefaultAppsButton_Click(foundation::IInspectable const&, xaml::RoutedEventArgs const&)
+    {
+        auto strongThis = get_strong();
+        auto button = OpenDefaultAppsButton();
+        button.IsEnabled(false);
+        auto restoreButton = wil::scope_exit([button]
+        {
+            try { button.IsEnabled(true); }
+            catch (...) {}
+        });
+
+        const bool opened = co_await urpdf::OpenDefaultAppsSettingsAsync();
+        if (!opened)
+        {
+            DefaultPdfViewerStatusText().Text(L"Couldn't open Windows Settings. Open Settings > Apps > Default apps to set urPDF as your default PDF viewer.");
+        }
+    }
+
+    void SettingsPage::RefreshDefaultPdfViewerStatus()
+    {
+        switch (urpdf::QueryDefaultPdfViewerStatus())
+        {
+        case urpdf::DefaultPdfViewerStatus::Default:
+            DefaultPdfViewerStatusText().Text(L"urPDF is currently set as your default PDF viewer.");
+            break;
+        case urpdf::DefaultPdfViewerStatus::NotDefault:
+            DefaultPdfViewerStatusText().Text(L"urPDF is not currently set as your default PDF viewer.");
+            break;
+        case urpdf::DefaultPdfViewerStatus::Unknown:
+        default:
+            DefaultPdfViewerStatusText().Text(L"Manage which app opens .pdf files in Windows Settings.");
+            break;
+        }
     }
 
     void SettingsPage::ThemeSelection_SelectionChanged(foundation::IInspectable const& sender, controls::SelectionChangedEventArgs const& e)
@@ -174,5 +218,7 @@ namespace winrt::urPDF::implementation
         WindowStartupModeComboBox().SelectedIndex(static_cast<int32_t>(settings.windowStartupMode));
         OpenFilesInExistingWindowToggle().IsOn(settings.openFilesInExistingWindow);
         UseWindowsAccentColorForTextSelectionToggle().IsOn(settings.useWindowsAccentColorForTextSelection);
+        AskToSetDefaultPdfViewerToggle().IsOn(settings.askToSetAsDefaultPdfViewer);
+        RefreshDefaultPdfViewerStatus();
     }
 }
