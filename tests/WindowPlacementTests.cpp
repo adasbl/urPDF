@@ -117,5 +117,95 @@ namespace urPDFTests
                 { minimum, minimum }, { 140, 20 }),
                 { minimum, minimum, minimum + 900, minimum + 600 });
         }
+
+        TEST_METHOD(FullscreenTrackerSkipsWindowCaptureDuringEnterActiveAndExit)
+        {
+            urpdf::FullscreenWindowTracker tracker;
+            Assert::IsTrue(tracker.ShouldCaptureWindowState(false));
+            Assert::IsFalse(tracker.ShouldCaptureWindowState(true));
+
+            urpdf::WindowState saved;
+            saved.normalSize = urpdf::WindowSize{ 1000, 700 };
+            saved.normalPosition = urpdf::WindowPosition{ 120, 80, L"\\\\.\\DISPLAY1" };
+            saved.maximized = true;
+
+            tracker.BeginEnter(true);
+            Assert::IsFalse(tracker.ShouldCaptureWindowState(false), L"blocks capture during enter transition");
+            tracker.CompleteEnter(true);
+            Assert::IsTrue(tracker.active);
+            Assert::IsFalse(tracker.ShouldCaptureWindowState(true), L"blocks capture while fullscreen");
+            Assert::IsFalse(tracker.ShouldCaptureWindowState(false), L"blocks capture until fullscreen completes exit");
+
+            // Simulate fullscreen placement event that would otherwise overwrite normal size/position/maximized.
+            WINDOWPLACEMENT fullscreenPlacement{};
+            fullscreenPlacement.length = sizeof(fullscreenPlacement);
+            fullscreenPlacement.showCmd = SW_SHOWNORMAL;
+            fullscreenPlacement.rcNormalPosition = { 0, 0, 1920, 1080 };
+            MONITORINFOEXW monitor{};
+            monitor.cbSize = sizeof(monitor);
+            monitor.rcMonitor = { 0, 0, 1920, 1080 };
+            monitor.rcWork = { 0, 0, 1920, 1040 };
+            wcscpy_s(monitor.szDevice, L"\\\\.\\DISPLAY1");
+
+            if (tracker.ShouldCaptureWindowState(true))
+            {
+                urpdf::UpdateWindowStateFromPlacement(saved, fullscreenPlacement);
+                urpdf::UpdateWindowPositionFromPlacement(saved, fullscreenPlacement, monitor);
+            }
+            Assert::AreEqual(1000, saved.normalSize->width);
+            Assert::AreEqual(700, saved.normalSize->height);
+            Assert::AreEqual(120, saved.normalPosition->x);
+            Assert::AreEqual(80, saved.normalPosition->y);
+            Assert::IsTrue(saved.maximized);
+
+            Assert::IsTrue(tracker.BeginExit(), L"restores maximized state on exit");
+            Assert::IsFalse(tracker.ShouldCaptureWindowState(false), L"blocks capture during exit transition");
+            tracker.CompleteExit(false);
+            Assert::IsFalse(tracker.active);
+            Assert::IsFalse(tracker.restoreMaximizedOnExit);
+            Assert::IsTrue(tracker.ShouldCaptureWindowState(false));
+        }
+
+        TEST_METHOD(FullscreenTrackerRestoresNormalStateWhenEnteredUnmaximized)
+        {
+            urpdf::FullscreenWindowTracker tracker;
+            tracker.BeginEnter(false);
+            tracker.CompleteEnter(true);
+            Assert::IsFalse(tracker.BeginExit(), L"does not maximize when entered from normal window");
+            tracker.CompleteExit(false);
+            Assert::IsFalse(tracker.active);
+        }
+
+        TEST_METHOD(FullscreenTrackerSyncsExternalPresenterExitAndEntry)
+        {
+            urpdf::FullscreenWindowTracker tracker;
+            tracker.BeginEnter(true);
+            tracker.CompleteEnter(true);
+
+            bool chromeChanged = false;
+            Assert::IsFalse(tracker.SyncExternalPresenter(true, chromeChanged));
+            Assert::IsFalse(chromeChanged);
+
+            Assert::IsTrue(tracker.SyncExternalPresenter(false, chromeChanged), L"requests maximize restore on external exit");
+            Assert::IsTrue(chromeChanged);
+            Assert::IsFalse(tracker.active);
+            Assert::IsTrue(tracker.ShouldCaptureWindowState(false));
+
+            Assert::IsFalse(tracker.SyncExternalPresenter(true, chromeChanged), L"syncs external fullscreen entry");
+            Assert::IsTrue(chromeChanged);
+            Assert::IsTrue(tracker.active);
+            Assert::IsFalse(tracker.ShouldCaptureWindowState(true));
+        }
+
+        TEST_METHOD(FullscreenTrackerResetsIfEnterDidNotSwitchPresenter)
+        {
+            urpdf::FullscreenWindowTracker tracker;
+            tracker.BeginEnter(true);
+            tracker.CompleteEnter(false);
+            Assert::IsFalse(tracker.active);
+            Assert::IsFalse(tracker.transitioning);
+            Assert::IsFalse(tracker.restoreMaximizedOnExit);
+            Assert::IsTrue(tracker.ShouldCaptureWindowState(false));
+        }
     };
 }

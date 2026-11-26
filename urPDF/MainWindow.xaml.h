@@ -15,6 +15,7 @@
 #include "PdfPageLayout.h"
 #include "PdfRenderScale.h"
 #include "WindowCreationOptions.h"
+#include "WindowPlacement.h"
 
 // External libraries
 extern "C" {
@@ -344,6 +345,12 @@ namespace winrt::urPDF::implementation
         std::optional<winrt::weak_ref<controls::TabViewItem>> targetTab;
     };
 
+    struct PendingPageFit
+    {
+        int pageNumber{ 1 };
+        bool bookView{ false };
+    };
+
 
     struct MainWindow : MainWindowT<MainWindow>
     {
@@ -397,6 +404,7 @@ namespace winrt::urPDF::implementation
         winrt::fire_and_forget PdfScrollViewer_ViewChanged(foundation::IInspectable const& sender, controls::ScrollViewerViewChangedEventArgs const& args);
         void CopyPdfText_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
         void ClearPdfSelection_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
+        void ToggleFullscreen_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
         void FindInDocument_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
         void FindNext_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
         void FindPrevious_Invoked(xaml::Input::KeyboardAccelerator const& sender, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
@@ -432,6 +440,13 @@ namespace winrt::urPDF::implementation
         winrt::fire_and_forget DefaultPdfViewerPromptOpenSettings_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
         winrt::fire_and_forget ZoomInButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
         winrt::fire_and_forget ZoomOutButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
+        void FitPageSplitButton_Click(controls::SplitButton const& sender, controls::SplitButtonClickEventArgs const& args);
+        void FitVerticallyMenuItem_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
+        void FitHorizontallyMenuItem_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& args);
+        void FullscreenButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
+        void FullscreenExitButton_Click(foundation::IInspectable const& sender, xaml::RoutedEventArgs const& e);
+        void FullscreenExitButton_PointerEntered(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
+        void FullscreenExitButton_PointerExited(foundation::IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args);
 
         winrt::event_token PropertyChanged(xaml::Data::PropertyChangedEventHandler const& handler);
         void PropertyChanged(winrt::event_token const& token) noexcept;
@@ -479,6 +494,8 @@ namespace winrt::urPDF::implementation
         ViewRestorePhase m_viewRestorePhase{ ViewRestorePhase::None };
         std::optional<urpdf::DocumentViewState> m_pendingRestoreState;
         bool m_pendingRestoreHasAnchor{ false };
+        std::optional<PendingPageFit> m_pendingPageFit;
+        urpdf::PageFitMode m_lastPageFitMode{ urpdf::PageFitMode::Vertical };
         bool m_viewOperationReady{ false };
         bool m_layoutViewSaveQueued{ false };
         xaml::Media::CompositionTarget::Rendering_revoker m_viewStateRenderingRevoker;
@@ -489,6 +506,13 @@ namespace winrt::urPDF::implementation
         std::deque<std::pair<std::weak_ptr<PdfTabInfo>, int32_t>> m_pageTextLoadQueue;
         bool m_isClosed{ false };
         urpdf::WindowState m_windowState;
+        urpdf::FullscreenWindowTracker m_fullscreenTracker;
+        std::optional<WINDOWPLACEMENT> m_preFullscreenPlacement;
+        dispatching::DispatcherQueueTimer m_fullscreenExitHideTimer{ nullptr };
+        xaml::Input::PointerEventHandler m_documentViewPointerMovedHandler{ nullptr };
+        xaml::Media::CompositionTarget::Rendered_revoker m_fullscreenTransitionRenderedRevoker;
+        bool m_dwmTransitionsDisabled{ false };
+        bool m_isPointerOverFullscreenExitButton{ false };
         winrt::Microsoft::UI::Windowing::AppWindow m_observedAppWindow{ nullptr };
         winrt::event_token m_windowChangedToken{};
         winrt::event_token m_windowClosingToken{};
@@ -548,12 +572,29 @@ namespace winrt::urPDF::implementation
         void QueuePendingViewStateSave();
         void AdvanceViewStateChange(std::shared_ptr<PdfTabInfo> const& pdfTab, urpdf::ViewStateGuard::Operation operation);
         void ScrollToPage(int32_t page);
+        void UpdateFitPageSplitButtonPresentation();
+        void SyncFitPageSplitButtonVisuals();
+        void ApplyPageFit(urpdf::PageFitMode mode);
         bool TryAcquireRenderingLock();
         void RestoreWindowState();
         void TrackWindowState();
         void StopTrackingWindowState() noexcept;
         void CaptureWindowState();
         void SaveWindowState();
+        bool IsAppWindowFullscreen();
+        bool IsFullscreen();
+        bool CanEnterFullscreen();
+        void EnterFullscreen();
+        void ExitFullscreen();
+        void ToggleFullscreen();
+        void SetDwmTransitionsDisabled(bool disabled) noexcept;
+        void SuppressDwmTransitionsForFullscreenTransition();
+        void HandleAppWindowPresenterChanged();
+        void ApplyFullscreenChrome(bool fullscreen);
+        void ShowFullscreenExitButton();
+        void ScheduleFullscreenExitButtonHide();
+        void HideFullscreenExitButton();
+        void HandleDocumentViewPointerMoved(foundation::Point position);
         void ReleaseRenderingLock();
         void ProcessPendingOpens();
         void SchedulePendingOpens();

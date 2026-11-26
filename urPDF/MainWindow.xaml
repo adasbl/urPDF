@@ -27,9 +27,10 @@
                 <KeyboardAccelerator Key="F3" Invoked="FindNext_Invoked"/>
                 <KeyboardAccelerator Key="F3" Modifiers="Shift" Invoked="FindPrevious_Invoked"/>
                 <KeyboardAccelerator Key="Escape" Invoked="ClearPdfSelection_Invoked"/>
+                <KeyboardAccelerator Key="F11" Invoked="ToggleFullscreen_Invoked"/>
             </Grid.KeyboardAccelerators>
             <Grid.RowDefinitions>
-                <RowDefinition Height="40"/>
+                <RowDefinition x:Name="TitleBarRow" Height="40"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
@@ -154,7 +155,7 @@
                 </Grid>
             </Border>
 
-            <Border Grid.Row="1"
+            <Border x:Name="MainContentBorder" Grid.Row="1"
                     Background="{ThemeResource LayerFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1,0,1,0"
@@ -168,7 +169,7 @@
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <Grid Grid.Row="0" Margin="10,8,10,8">
+                    <Grid x:Name="MainToolbar" Grid.Row="0" Margin="10,8,10,8">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Spacing="4">
 
                             <Button Click="OpenPdfFileAsync"
@@ -297,17 +298,55 @@
                                 </Button.Content>
                             </Button>
 
-                            <Button x:Name="FitPageButton" 
-                                    ToolTipService.ToolTip="Fit page to window">
-                                <Button.Content>
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <FontIcon Glyph="&#xE740;"/>
-                                    </StackPanel>
-                                </Button.Content>
-                            </Button>
+                            <SplitButton x:Name="FitPageSplitButton"
+                                         IsEnabled="False"
+                                         VerticalAlignment="Stretch"
+                                         Padding="{StaticResource ButtonPadding}"
+                                         Click="FitPageSplitButton_Click"
+                                         AutomationProperties.Name="Fit vertically"
+                                         ToolTipService.ToolTip="Fit vertically">
+                                <SplitButton.Content>
+                                    <Grid Width="20" Height="20">
+                                        <PathIcon x:Name="FitVerticallyIcon"
+                                                  Width="20"
+                                                  Height="20"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  Data="F1 M 1.5,1 H 18.5 V 2.6 H 1.5 Z M 1.5,17.4 H 18.5 V 19 H 1.5 Z M 10,3.6 L 14.2,7.8 L 13.07,8.93 L 10.8,6.66 V 13.34 L 13.07,11.07 L 14.2,12.2 L 10,16.4 L 5.8,12.2 L 6.93,11.07 L 9.2,13.34 V 6.66 L 6.93,8.93 L 5.8,7.8 Z"/>
+                                        <PathIcon x:Name="FitHorizontallyIcon"
+                                                  Width="20"
+                                                  Height="20"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  Visibility="Collapsed"
+                                                  Data="F1 M 1,1.5 V 18.5 H 2.6 V 1.5 Z M 17.4,1.5 V 18.5 H 19 V 1.5 Z M 3.6,10 L 7.8,14.2 L 8.93,13.07 L 6.66,10.8 H 13.34 L 11.07,13.07 L 12.2,14.2 L 16.4,10 L 12.2,5.8 L 11.07,6.93 L 13.34,9.2 H 6.66 L 8.93,6.93 L 7.8,5.8 Z"/>
+                                    </Grid>
+                                </SplitButton.Content>
+                                <SplitButton.Flyout>
+                                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                        <MenuFlyoutItem x:Name="FitVerticallyMenuItem"
+                                                        Text="Fit vertically"
+                                                        Click="FitVerticallyMenuItem_Click">
+                                            <MenuFlyoutItem.Icon>
+                                                <PathIcon Data="F1 M 1.2,0.8 H 14.8 V 2.1 H 1.2 Z M 1.2,13.9 H 14.8 V 15.2 H 1.2 Z M 8,2.9 L 11.4,6.3 L 10.48,7.22 L 8.65,5.39 V 10.61 L 10.48,8.78 L 11.4,9.7 L 8,13.1 L 4.6,9.7 L 5.52,8.78 L 7.35,10.61 V 5.39 L 5.52,7.22 L 4.6,6.3 Z"/>
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                        <MenuFlyoutItem x:Name="FitHorizontallyMenuItem"
+                                                        Text="Fit horizontally"
+                                                        Click="FitHorizontallyMenuItem_Click">
+                                            <MenuFlyoutItem.Icon>
+                                                <PathIcon Data="F1 M 0.8,1.2 V 14.8 H 2.1 V 1.2 Z M 13.9,1.2 V 14.8 H 15.2 V 1.2 Z M 2.9,8 L 6.3,11.4 L 7.22,10.48 L 5.39,8.65 H 10.61 L 8.78,10.48 L 9.7,11.4 L 13.1,8 L 9.7,4.6 L 8.78,5.52 L 10.61,7.35 H 5.39 L 7.22,5.52 L 6.3,4.6 Z"/>
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                    </MenuFlyout>
+                                </SplitButton.Flyout>
+                            </SplitButton>
 
-                            <Button x:Name="FillWindowButton" 
-                                    ToolTipService.ToolTip="Fill window">
+                            <Button x:Name="FullscreenButton"
+                                    Click="FullscreenButton_Click"
+                                    IsEnabled="False"
+                                    AutomationProperties.Name="Fullscreen"
+                                    ToolTipService.ToolTip="Fullscreen (F11)">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE9A6;"/>
@@ -327,7 +366,7 @@
                         </StackPanel>
                     </Grid>
 
-                    <Grid Grid.Row="1">
+                    <Grid x:Name="DocumentViewHost" Grid.Row="1">
                         <ScrollViewer
                             x:Name="PdfScrollViewer"
                             KeyboardAcceleratorPlacementMode="Hidden"
@@ -604,6 +643,55 @@
                                 </Grid>
                             </Border>
                         </StackPanel>
+
+                        <Button x:Name="FullscreenExitButton"
+                                Visibility="Collapsed"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Top"
+                                Margin="0,16,0,0"
+                                Width="40"
+                                Height="40"
+                                Padding="0"
+                                CornerRadius="20"
+                                BorderThickness="1"
+                                Canvas.ZIndex="20"
+                                AutomationProperties.Name="Exit fullscreen"
+                                ToolTipService.ToolTip="Exit fullscreen (Esc)"
+                                Click="FullscreenExitButton_Click"
+                                PointerEntered="FullscreenExitButton_PointerEntered"
+                                PointerExited="FullscreenExitButton_PointerExited">
+                            <Button.Resources>
+                                <ResourceDictionary>
+                                    <ResourceDictionary.ThemeDictionaries>
+                                        <ResourceDictionary x:Key="Default">
+                                            <StaticResource x:Key="ButtonBackground" ResourceKey="SolidBackgroundFillColorTertiaryBrush"/>
+                                            <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="SolidBackgroundFillColorQuinaryBrush"/>
+                                            <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="SolidBackgroundFillColorSecondaryBrush"/>
+                                            <StaticResource x:Key="ButtonBorderBrush" ResourceKey="CardStrokeColorDefaultBrush"/>
+                                            <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="CardStrokeColorDefaultBrush"/>
+                                            <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="CardStrokeColorDefaultBrush"/>
+                                        </ResourceDictionary>
+                                        <ResourceDictionary x:Key="Light">
+                                            <StaticResource x:Key="ButtonBackground" ResourceKey="SolidBackgroundFillColorBaseBrush"/>
+                                            <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="SolidBackgroundFillColorSecondaryBrush"/>
+                                            <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="SolidBackgroundFillColorTertiaryBrush"/>
+                                            <StaticResource x:Key="ButtonBorderBrush" ResourceKey="CardStrokeColorDefaultBrush"/>
+                                            <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="CardStrokeColorDefaultBrush"/>
+                                            <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="CardStrokeColorDefaultBrush"/>
+                                        </ResourceDictionary>
+                                        <ResourceDictionary x:Key="HighContrast">
+                                            <StaticResource x:Key="ButtonBackground" ResourceKey="SystemColorWindowColorBrush"/>
+                                            <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="SystemColorHighlightColorBrush"/>
+                                            <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="SystemColorHighlightColorBrush"/>
+                                            <StaticResource x:Key="ButtonBorderBrush" ResourceKey="SystemColorWindowTextColorBrush"/>
+                                            <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="SystemColorWindowTextColorBrush"/>
+                                            <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="SystemColorWindowTextColorBrush"/>
+                                        </ResourceDictionary>
+                                    </ResourceDictionary.ThemeDictionaries>
+                                </ResourceDictionary>
+                            </Button.Resources>
+                            <FontIcon Glyph="&#xE711;" FontSize="14"/>
+                        </Button>
 
                         <Border x:Name="EmptyTabDropZone"
                             AllowDrop="True"

@@ -96,9 +96,28 @@ namespace urpdf
         double y{ 0.0 };
     };
 
+    enum class PageFitMode
+    {
+        Vertical,
+        Horizontal
+    };
+
+    struct PageFitView
+    {
+        double zoom{ 1.0 };
+        PageRect targetRow;
+    };
+
     std::optional<DocumentViewState> CaptureViewAnchor(std::vector<PageRect> const& pages, ViewportGeometry const& viewport);
     // Uses the measured (already rotated/book-view) layout and the applied viewport zoom.
     // Missing/invalid anchors return nullopt; callers restore the document start instead.
     std::optional<ScrollOffsets> RestoreViewAnchor(DocumentViewState const& state, std::vector<PageRect> const& pages, ViewportGeometry const& viewport);
     std::optional<int> CurrentPageNumber(std::vector<PageRect> const& pages, ViewportGeometry const& viewport);
+    // Computes one-shot zoom-to-fit for the current page (or book-view row) using already rotated layout rects.
+    std::optional<PageFitView> CalculatePageFitView(std::vector<PageRect> const& pages,
+        int pageNumber, bool bookView, PageFitMode mode,
+        double viewportWidth, double viewportHeight,
+        double minZoom, double maxZoom);
+    std::optional<ScrollOffsets> CalculatePageFitScrollOffsets(std::vector<PageRect> const& pages,
+        ViewportGeometry const& viewport, int pageNumber, bool bookView);
 }
