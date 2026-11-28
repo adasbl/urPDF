@@ -4911,7 +4911,11 @@ namespace winrt::urPDF::implementation
     void MainWindow::SetSelectedPageImage(std::shared_ptr<PdfTabInfo> const& document,
         std::optional<urpdf::PageImageSelection> selection)
     {
-        if (selection) { ClearPageTextSelection(document); }
+        if (selection)
+        {
+            document->m_pendingImageClick.reset();
+            ClearPageTextSelection(document);
+        }
         if (document->m_selectedImage == selection) { return; }
         const auto previous = std::exchange(document->m_selectedImage, selection);
         if (previous) { RefreshPageImageSelection(document, previous->page); }
@@ -4939,6 +4943,17 @@ namespace winrt::urPDF::implementation
         if (m_contextMenuImage && m_contextMenuImage->document.lock() == document) { m_contextMenuImage.reset(); }
         document->m_pendingImageClick.reset();
         SetSelectedPageImage(document, std::nullopt);
+    }
+
+    void MainWindow::SelectPageWordOrImage(std::shared_ptr<PdfTabInfo> const& document, urpdf::PendingTextPosition target)
+    {
+        document->m_wordSelectionPoints = urpdf::WordSelectionPoints{ target, target };
+        document->m_pendingImageClick = target;
+        if (!NeedsPageText(document->m_pageText[target.page]))
+        {
+            ResolvePendingImageClick(document, target.page);
+        }
+        UpdateWordTextSelection(document);
     }
 
     void MainWindow::ResolvePendingImageClick(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex)
@@ -5482,7 +5497,7 @@ namespace winrt::urPDF::implementation
         auto const& slot = document->m_pageText[pageIndex];
         const auto pressed = args.GetCurrentPoint(PdfScrollViewer()).Position();
         const PageTextClick press{ document, pressed, point.Timestamp(), pageIndex };
-        bool byWord = false;
+        bool doubleClick = false;
         if (device == PointerDeviceType::Mouse && previous && previous->document.lock() == document
             && previous->page == pageIndex && press.timestamp >= previous->timestamp
             && press.timestamp - previous->timestamp <= static_cast<std::uint64_t>(GetDoubleClickTime()) * 1000)
@@ -5491,17 +5506,16 @@ namespace winrt::urPDF::implementation
             const auto dpi = static_cast<UINT>(std::lround(USER_DEFAULT_SCREEN_DPI * scale));
             const auto halfWidth = GetSystemMetricsForDpi(SM_CXDOUBLECLK, dpi) / (2.0 * scale);
             const auto halfHeight = GetSystemMetricsForDpi(SM_CYDOUBLECLK, dpi) / (2.0 * scale);
-            byWord = std::abs(pressed.X - previous->position.X) <= halfWidth && std::abs(pressed.Y - previous->position.Y) <= halfHeight;
+            doubleClick = std::abs(pressed.X - previous->position.X) <= halfWidth && std::abs(pressed.Y - previous->position.Y) <= halfHeight;
         }
-        document->m_pendingImageClick.reset();
-        if (byWord) { ClearPageImageSelection(document); }
+        ClearPageImageSelection(document);
         ClearPageTextSelection(document);
         const bool directContact = device == PointerDeviceType::Touch || device == PointerDeviceType::Pen;
         // Keep capture as the layout recycles the page where the gesture began.
         const auto capture = PagesRepeater();
         if (!capture.CapturePointer(pointer)) { return; }
         m_pageTextDrag = PageTextDrag{ capture, directContact ? xaml::UIElement(layer) : nullptr,
-            pointer, press, pressed, urpdf::PendingTextPosition{ pageIndex, *pdfPoint }, byWord };
+            pointer, press, pressed, doubleClick };
         args.Handled(true);
 
         if (directContact)
@@ -5514,11 +5528,9 @@ namespace winrt::urPDF::implementation
         PdfScrollViewer().Focus(xaml::FocusState::Pointer);
         if (!OwnsPageTextPointer(capture, args)) { return; }
 
-        if (byWord)
+        if (doubleClick)
         {
-            const urpdf::PendingTextPosition wordStart{ pageIndex, *pdfPoint };
-            document->m_wordSelectionPoints = urpdf::WordSelectionPoints{ wordStart, wordStart };
-            UpdateWordTextSelection(document);
+            SelectPageWordOrImage(document, { pageIndex, *pdfPoint });
             return;
         }
 
@@ -5590,8 +5602,7 @@ namespace winrt::urPDF::implementation
 
         ClearPageImageSelection(document);
         ClearPageTextSelection(document);
-        document->m_wordSelectionPoints = urpdf::WordSelectionPoints{ *target, *target };
-        UpdateWordTextSelection(document);
+        SelectPageWordOrImage(document, *target);
         args.Handled(true);
     }
 
@@ -5725,39 +5736,6 @@ namespace winrt::urPDF::implementation
             if (released && drag.pointer.PointerDeviceType() == winrt::Microsoft::UI::Input::PointerDeviceType::Mouse)
             {
                 m_lastPageTextClick = drag.press;
-            }
-            if (released && drag.pdfPress
-                && drag.pdfPress->page >= 0
-                && static_cast<std::size_t>(drag.pdfPress->page) < document->m_pageText.size())
-            {
-                auto const& slot = document->m_pageText[drag.pdfPress->page];
-                if (slot.State() == urpdf::PageTextState::ready)
-                {
-                    if (!urpdf::IsOverText(slot.Text(), drag.pdfPress->point))
-                    {
-                        if (const auto imageIndex = urpdf::HitTestImage(slot.Text().images, drag.pdfPress->point))
-                        {
-                            SetSelectedPageImage(document, urpdf::PageImageSelection{ drag.pdfPress->page, *imageIndex });
-                        }
-                        else
-                        {
-                            ClearPageImageSelection(document);
-                        }
-                    }
-                    else
-                    {
-                        ClearPageImageSelection(document);
-                    }
-                }
-                else if (NeedsPageText(slot))
-                {
-                    document->m_pendingImageClick = drag.pdfPress;
-                    EnsurePageText(document, drag.pdfPress->page, true);
-                }
-                else
-                {
-                    ClearPageImageSelection(document);
-                }
             }
         }
     }
