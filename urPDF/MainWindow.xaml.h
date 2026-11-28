@@ -315,7 +315,6 @@ namespace winrt::urPDF::implementation
         xaml::Input::Pointer pointer;
         PageTextClick press;
         foundation::Point position;
-        std::optional<urpdf::PendingTextPosition> pdfPress;
         bool byWord{ false };
         bool moved{ false };
     };
@@ -651,6 +650,7 @@ namespace winrt::urPDF::implementation
         void SetSelectedPageImage(std::shared_ptr<PdfTabInfo> const& document, std::optional<urpdf::PageImageSelection> selection);
         void RefreshPageImageSelection(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
         void ClearPageImageSelection(std::shared_ptr<PdfTabInfo> const& document);
+        void SelectPageWordOrImage(std::shared_ptr<PdfTabInfo> const& document, urpdf::PendingTextPosition target);
         void ResolvePendingImageClick(std::shared_ptr<PdfTabInfo> const& document, int32_t pageIndex);
         bool QueueImageCopy(std::shared_ptr<PdfTabInfo> const& document, urpdf::PageImageSelection selection);
         winrt::fire_and_forget CompleteImageCopy(std::vector<std::uint8_t> pngBytes, DWORD clipboardSequence);
